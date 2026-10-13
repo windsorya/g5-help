@@ -147,6 +147,7 @@ details p{margin:0 0 10px}
         <label for="upNote">哪一題、她說哪裡不懂</label>
         <textarea id="upNote" maxlength="500" style="font-size:16px;min-height:80px;border:2px solid var(--line);border-radius:12px;padding:10px;background:var(--bg);color:var(--ink)" placeholder="例：右上角第 6 題②，她不知道怎麼通分"></textarea>
         <div class="row"><button class="btn" type="button" id="upSend">送出</button><span class="small" id="upMsg" aria-live="polite"></span></div>
+        <div style="display:grid;gap:8px;border-top:1px solid var(--line-soft);padding-top:12px"><b>你傳的題目</b><div class="small" id="upHealth"></div><div id="upList" class="hlist"></div></div>
       </div>
     </details>
     <details id="syncBox"><summary>換電腦或 iPad 也能接著練（跨裝置同步）</summary><div id="g5sync"></div></details>
@@ -977,6 +978,24 @@ window.G5HelpPage = {state:function(id){ return JSON.parse(JSON.stringify(DB.ent
       img.onerror = function(){ no(new Error("img")); }; img.src = url;
     });
   }
+  // 進度：已送出（等電腦取回，最多 10 分鐘）→ 已收到、解說製作中 → 做好了（連結）；電腦上次取題時間＝有無故障
+  function hhmm(t){ var d = new Date(t + 8 * 3600000); return (d.getUTCMonth() + 1) + "/" + d.getUTCDate() + " " + ("0" + d.getUTCHours()).slice(-2) + ":" + ("0" + d.getUTCMinutes()).slice(-2); }
+  function loadMine(){
+    var code = null; try { code = localStorage.getItem("g5sync.code"); } catch (e) {}
+    if (!code) { $("#upHealth").textContent = "這台裝置還沒開啟跨裝置同步，所以看不到進度。"; return; }
+    fetch(EP, {method:"POST", headers:{"Content-Type":"text/plain"}, credentials:"omit", body:JSON.stringify({op:"mine", code:code})}).then(function(r){ return r.json(); }).then(function(r){
+      if (!r || !r.ok) { $("#upHealth").textContent = "進度暫時讀不到，稍後再看。"; return; }
+      var ago = r.lastFetch ? Math.round((Date.now() - r.lastFetch) / 60000) : null;
+      $("#upHealth").innerHTML = ago === null ? "電腦還沒取過題目。" : ago <= 20 ? "電腦運作正常（上次取題 " + hhmm(r.lastFetch) + "，每 10 分鐘取一次）。"
+        : '<span style="color:var(--bad)">電腦已經 ' + ago + ' 分鐘沒取題（上次 ' + hhmm(r.lastFetch) + '）：可能關機、睡眠或故障，題目會等電腦開機後再處理。</span>';
+      $("#upList").innerHTML = (r.items || []).length ? r.items.map(function(it){
+        var st = it.status === "done" ? '<a href="' + it.url + '">做好了，點這裡看解說</a>' : it.status === "fetched" ? "已收到，解說製作中（Claude 開著時約 10–30 分鐘）" : "已送出，等電腦取回（最多 10 分鐘）";
+        return '<div class="hcard"><b>' + it.subject + '・' + String(it.note || "").replace(/[<>&]/g, "") + '</b><span class="meta">' + hhmm(it.time) + ' 送出</span><span class="st' + (it.status === "done" ? " done" : "") + '">' + st + '</span></div>';
+      }).join("") : '<span class="empty">還沒有傳過題目。</span>';
+    }).catch(function(){ $("#upHealth").textContent = "進度暫時讀不到（可能沒有網路），稍後再看。"; });
+  }
+  $("#upBox").addEventListener("toggle", function(){ if ($("#upBox").open) loadMine(); });
+  setInterval(function(){ if ($("#upBox").open) loadMine(); }, 60000);
   $("#upSend").onclick = function(){
     var code = null; try { code = localStorage.getItem("g5sync.code"); } catch (e) {}
     if (!code) return msg("請先在下面「跨裝置同步」開啟或加入同步，這台裝置才能送題目。", true);
@@ -986,7 +1005,7 @@ window.G5HelpPage = {state:function(id){ return JSON.parse(JSON.stringify(DB.ent
       msg("送出中…");
       return fetch(EP, {method:"POST", headers:{"Content-Type":"text/plain"}, credentials:"omit", body:JSON.stringify({op:"upload", code:code, subject:$("#upSubj").value, note:$("#upNote").value.slice(0,500), image:img})}).then(function(r){ return r.json(); });
     }).then(function(r){
-      if (r && r.ok) { msg("送出了！做好的解說會出現在上面「" + $("#upSubj").value + "」那一科。"); $("#upFile").value = ""; $("#upNote").value = ""; }
+      if (r && r.ok) { msg("送出了！下方「你傳的題目」可以看進度；做好的解說會出現在上面「" + $("#upSubj").value + "」那一科。"); $("#upFile").value = ""; $("#upNote").value = ""; loadMine(); }
       else msg(r && r.err === "no-family" ? "這組同步碼在雲端還沒有紀錄，請先在這台裝置開啟同步一次。" : "沒有送成功，請稍後再試一次。", true);
     }).catch(function(e){ msg(e && e.message === "big" ? "照片太大，請換一張或截圖成小一點再送。" : "沒有送成功（可能沒有網路），請稍後再試一次。", true); })
     .then(function(){ btn.disabled = false; });

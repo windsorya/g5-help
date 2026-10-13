@@ -23,12 +23,21 @@ var G5Inbox = (function () {
       store.addUpload({id: id, time: now(), subject: req.subject, note: req.note, codeHash: hash, image: req.image});
       return {ok: true, id: id};
     }
-    if (req.op === 'inbox' || req.op === 'ack') {
+    if (req.op === 'mine') {
+      // 網頁看自己傳的題目進度：new＝等電腦取回、fetched＝製作中、done＝做好了（附連結）；也回電腦上次取題時間（判斷有無故障）
+      if (!str(req.code) || !/^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{12}$/.test(req.code)) { return {ok: false, err: 'bad-code'}; }
+      return {ok: true, items: store.listByCode(store.hash(req.code)), lastFetch: store.getLastFetch()};
+    }
+    if (req.op === 'inbox' || req.op === 'ack' || req.op === 'done') {
       if (!str(req.token) || req.token.length < 24) { return {ok: false, err: 'bad-token'}; }
       var saved = store.getToken();
       if (!saved) { store.setToken(req.token); saved = req.token; }
       if (saved !== req.token) { return {ok: false, err: 'bad-token'}; }
-      if (req.op === 'inbox') { return {ok: true, items: store.listNew()}; }
+      if (req.op === 'inbox') { store.setLastFetch(now()); return {ok: true, items: store.listNew()}; }
+      if (req.op === 'done') {
+        if (!str(req.id) || !str(req.url) || !/^https:\/\/windsorya\.github\.io\/g5-help\/#h\/[\w-]+$/.test(req.url)) { return {ok: false, err: 'bad-done'}; }
+        return {ok: store.markDone(req.id, req.url)};
+      }
       if (!str(req.id)) { return {ok: false, err: 'bad-id'}; }
       return {ok: store.markFetched(req.id)};
     }
@@ -78,6 +87,23 @@ function g5InboxStore() {
       for (var i = 0; i < ids.length; i += 1) { if (ids[i][0] === id) { s.getRange(i + 1, 6).setValue('fetched'); SpreadsheetApp.flush(); return true; } }
       return false;
     },
+    listByCode: function (hash) {
+      var s = inbox(), n = s.getLastRow();
+      if (n < 1) { return []; }
+      return s.getRange(1, 1, n, 6).getValues().filter(function (r) { return r[4] === hash; }).map(function (r) {
+        var st = String(r[5]), done = st.indexOf('done:') === 0;
+        return {id: r[0], time: r[1], subject: r[2], note: String(r[3]).slice(1, 41), status: done ? 'done' : st, url: done ? st.slice(5) : ''};
+      }).reverse().slice(0, 20);
+    },
+    markDone: function (id, url) {
+      var s = inbox(), n = s.getLastRow();
+      if (n < 1) { return false; }
+      var ids = s.getRange(1, 1, n, 1).getValues();
+      for (var i = 0; i < ids.length; i += 1) { if (ids[i][0] === id) { s.getRange(i + 1, 6).setValue('done:' + url); SpreadsheetApp.flush(); return true; } }
+      return false;
+    },
+    getLastFetch: function () { return Number(props.getProperty('INBOX_LAST_FETCH') || 0); },
+    setLastFetch: function (t) { props.setProperty('INBOX_LAST_FETCH', String(t)); },
     getToken: function () { return props.getProperty('INBOX_TOKEN'); },
     setToken: function (t) { props.setProperty('INBOX_TOKEN', t); }
   };

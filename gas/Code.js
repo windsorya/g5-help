@@ -75,7 +75,7 @@ function doPost(e) {
     // 第一次被呼叫時自己建試算表（不必再請家長到編輯器手動執行 setup；setup 冪等、沿用既有 SHEET_ID）
     if (!PropertiesService.getScriptProperties().getProperty('SHEET_ID')) { setup(); }
     // 家長傳題目（gas/inbox.js）：upload／inbox／ack；其他請求照舊交給同步核心
-    var inboxOps = {upload: 1, inbox: 1, ack: 1};
+    var inboxOps = {upload: 1, inbox: 1, ack: 1, mine: 1, done: 1};
     result = inboxOps[req && req.op] ? g5Store().withLock(function () { return G5Inbox.handleInbox(g5InboxStore(), req, Date.now); })
       : G5SyncCore.handle(g5Store(), req, Date.now);
   } catch (error) {

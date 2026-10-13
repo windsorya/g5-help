@@ -11,7 +11,10 @@ function store(families) {
     addUpload: (u) => rows.push({ cells: I.toCells(u), status: 'new' }),
     listNew: () => rows.filter((r) => r.status === 'new').map((r) => I.fromCells(r.cells)),
     markFetched: (id) => { const r = rows.find((x) => x.cells[0] === id); if (!r) return false; r.status = 'fetched'; return true; },
-    getToken: () => token, setToken: (t) => { token = t; }
+    getToken: () => token, setToken: (t) => { token = t; },
+    last: 0, getLastFetch() { return this.last; }, setLastFetch(t) { this.last = t; },
+    listByCode: (h) => rows.filter((r) => r.cells[4] === h).map((r) => ({ id: r.cells[0], status: r.status, url: r.url || '' })),
+    markDone: (id, url) => { const r = rows.find((x) => x.cells[0] === id); if (!r) return false; r.status = 'done'; r.url = url; return true; }
   };
 }
 const CODE = 'ABCDEFGHJKMN', IMG = 'data:image/jpeg;base64,' + 'A'.repeat(100000), TOK = 'x'.repeat(32);
@@ -49,4 +52,20 @@ test('取題目：第一次設定 token，之後只認同一個；ack 後不再�
   assert.equal(I.handleInbox(s, { op: 'ack', token: TOK, id: up.id }, now).ok, true);
   assert.equal(I.handleInbox(s, { op: 'inbox', token: TOK }, now).items.length, 0);
   assert.equal(I.handleInbox(s, { op: 'get', code: CODE, key: 'g5help.v1' }, now), null, '其他請求交回同步核心');
+});
+
+test('進度：mine 看自己傳的題目狀態與電腦上次取題時間；done 只收難題站網址', () => {
+  const s = store(['h-' + CODE]);
+  const up = I.handleInbox(s, { op: 'upload', code: CODE, subject: '自然', note: 'n', image: IMG }, now);
+  let m = I.handleInbox(s, { op: 'mine', code: CODE }, now);
+  assert.equal(m.items[0].status, 'new'); assert.equal(m.lastFetch, 0);
+  I.handleInbox(s, { op: 'inbox', token: TOK }, now); I.handleInbox(s, { op: 'ack', token: TOK, id: up.id }, now);
+  m = I.handleInbox(s, { op: 'mine', code: CODE }, now);
+  assert.equal(m.items[0].status, 'fetched'); assert.equal(m.lastFetch, now());
+  assert.equal(I.handleInbox(s, { op: 'done', token: TOK, id: up.id, url: 'https://evil.example/' }, now).err, 'bad-done');
+  assert.equal(I.handleInbox(s, { op: 'done', token: TOK, id: up.id, url: 'https://windsorya.github.io/g5-help/#h/sci-q5-bangen' }, now).ok, true);
+  m = I.handleInbox(s, { op: 'mine', code: CODE }, now);
+  assert.equal(m.items[0].status, 'done'); assert.match(m.items[0].url, /sci-q5-bangen/);
+  assert.equal(I.handleInbox(s, { op: 'mine', code: 'abc' }, now).err, 'bad-code');
+  assert.equal(I.handleInbox(s, { op: 'mine', code: 'ZZZZZZZZZZZZ' }, now).items.length, 0, '別家看不到');
 });
