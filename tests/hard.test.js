@@ -23,6 +23,7 @@ test("每一篇：id 唯一、科目與格式合法、日期與出處齊全、�
   assert.ok(H.LIST.length >= 1);
   H.LIST.forEach((e) => {
     assert.match(e.id, /^[\w-]+$/);
+    assert.ok(!["constructor", "__proto__", "prototype", "hasOwnProperty", "toString", "valueOf"].includes(e.id), e.id + " 不能用物件內建屬性名當 id（Codex 2026-10-13 必修 5）");
     assert.ok(!ids.has(e.id), "重複 id " + e.id);
     ids.add(e.id);
     assert.ok(H.SUBJECTS.includes(e.subject), e.id + " 科目要是 " + H.SUBJECTS.join("、"));

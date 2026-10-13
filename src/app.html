@@ -190,7 +190,7 @@ function bar(n, d, o){
 // ---------- 存檔：g5help.v1＝{v:1, entries:{篇id: 那一篇的教學與練習紀錄}}；不碰自然複習的 g5sci.v3 ----------
 var KEY = "g5help.v1";
 function fresh(){ return {lessonDone:false, idx:0, seed:Math.floor(Math.random() * 1e6), streak:0, clean:0, solved:0, mastered:false, log:[], cur:null}; }
-function nat(x){ return typeof x === "number" && isFinite(x) && x >= 0; }
+function nat(x){ return typeof x === "number" && Number.isSafeInteger(x) && x >= 0 && x <= 100000; }   // 題號、次數：超過 10 萬題當壞資料（Codex 必修 6）
 function clean1(s){
   var d = fresh();
   if (!s || typeof s !== "object") return d;
@@ -201,23 +201,45 @@ function clean1(s){
   if (s.cur && nat(s.cur.idx) && nat(s.cur.hints) && nat(s.cur.wrongs)) d.cur = {idx:Math.floor(s.cur.idx), hints:Math.floor(s.cur.hints), wrongs:Math.floor(s.cur.wrongs)};
   return d;
 }
-function loadDB(){
-  var db = {v:1, entries:{}};
+function own(o, k){ return Object.prototype.hasOwnProperty.call(o, k); }
+function parseDB(raw){
+  // 回傳 entries（Object.create(null)，id 叫 constructor、__proto__ 也不會撞到內建屬性）；讀不懂回 null
   try {
-    var raw = JSON.parse(localStorage.getItem(KEY) || "null");
-    if (raw && raw.v === 1 && raw.entries && typeof raw.entries === "object") {
-      Object.keys(raw.entries).forEach(function(id){ db.entries[id] = clean1(raw.entries[id]); });
-    } else {
-      // 2026-10-12 那一頁放在自然複習網站時存在 g5math.v1：搬進第 1 篇（舊資料原文不動）
-      var old = JSON.parse(localStorage.getItem("g5math.v1") || "null");
-      if (old && old.v === 1) db.entries["p38-6-2"] = clean1(old);
-    }
-  } catch (e) {}
-  return db;
+    var x = JSON.parse(raw);
+    if (!x || x.v !== 1 || !x.entries || typeof x.entries !== "object" || Array.isArray(x.entries)) return null;
+    var out = Object.create(null);
+    Object.keys(x.entries).forEach(function(id){ out[id] = clean1(x.entries[id]); });
+    return out;
+  } catch (e) { return null; }
 }
+function readEntries(){
+  var raw = null;
+  try { raw = localStorage.getItem(KEY); } catch (e) { return Object.create(null); }
+  var es = raw === null ? null : parseDB(raw);
+  if (es) return es;
+  if (raw !== null) { try { localStorage.setItem(KEY + ".broken." + Date.now(), raw); localStorage.removeItem(KEY); } catch (e) {} }   // 壞掉的原文留著，不拿空紀錄蓋掉
+  es = Object.create(null);
+  try {
+    // 2026-10-12 那一頁放在自然複習網站時存在 g5math.v1：搬進第 1 篇（舊資料原文不動）
+    var old = JSON.parse(localStorage.getItem("g5math.v1") || "null");
+    if (old && old.v === 1) es["p38-6-2"] = clean1(old);
+  } catch (e) {}
+  return es;
+}
+function loadDB(){ return {v:1, entries:readEntries()}; }
 var DB = loadDB(), st = null;
-function stateOf(id){ if (!DB.entries[id]) DB.entries[id] = fresh(); return DB.entries[id]; }
-function save(){ try { localStorage.setItem(KEY, JSON.stringify(DB)); return true; } catch (e) { return false; } }
+function stateOf(id){ if (!own(DB.entries, id)) DB.entries[id] = fresh(); return DB.entries[id]; }
+function save(){
+  try {
+    var latest = readEntries();
+    if (E && st) latest[E.id] = st;
+    DB.entries = latest; if (E) DB.entries[E.id] = st;
+    localStorage.setItem(KEY, JSON.stringify(DB));
+    return true;
+  } catch (e) { return false; }
+}
+// 別的分頁存檔時，把其他篇的紀錄更新進來（目前這篇以本分頁為準）
+window.addEventListener("storage", function(ev){ if (ev.key !== KEY) return; var es = readEntries(); if (E && st) es[E.id] = st; DB.entries = es; if (!E) drawHome(); });
 
 // ---------- 互動元件 ----------
 // iPad 中文鍵盤可能打出全形數字「１５」：先轉半形（Codex 第 1 輪必修 5）。回傳 {empty}、{bad}（不是整數）或 {v}
@@ -377,7 +399,7 @@ function step5(ea, eb){
     '<div class="cap">' + F.txt(eb) + '：塗 ' + eb.n + ' 格</div>' + bar(eb.n, eb.d, {c:"b", label:F.txt(eb)}) + '</div>');
   var s1 = F.cmp(ea, eb);
   chipsAsk(b, fr(ea) + ' ○ ' + fr(eb) + '，○ 裡要填什麼？', SIGNS, function(v){
-    return v === s1 ? {ok:true, msg:"對！分母一樣，比分子：" + ea.n + " 比 " + eb.n + " 大，所以 " + F.txt(ea) + " 比較大。"} : {ok:false, msg:"看塗色的格子：" + ea.n + " 格和 " + eb.n + " 格，哪個多？"};
+    return v === s1 ? {ok:true, msg:"對！分母一樣，比分子：" + (s1 === ">" ? ea.n + " 比 " + eb.n + " 大，所以 " + F.txt(ea) + " 比較大。" : s1 === "<" ? ea.n + " 比 " + eb.n + " 小，所以 " + F.txt(eb) + " 比較大。" : "分子一樣，所以兩個一樣大。")} : {ok:false, msg:"看塗色的格子：" + ea.n + " 格和 " + eb.n + " 格，哪個多？"};
   }, function(){
     chipsAsk(b, '所以 ' + fr(A) + ' ○ ' + fr(B) + '？', SIGNS, function(v){
       return v === SOL.sign ? {ok:true, msg:F.txt(A) + " 和 " + F.txt(ea) + " 一樣大、" + F.txt(B) + " 和 " + F.txt(eb) + " 一樣大，所以答案一樣是「" + SOL.sign + "」。"} :
@@ -521,7 +543,7 @@ function drawTopBtns(){
   if (st.mastered) M.innerHTML = '<div class="win"><b class="t">這種題你已經會了</b><span>連續 ' + need() + ' 題自己做對。想多練可以繼續做。</span></div>';
 }
 function drawRec(){
-  $("#rec").textContent = st.solved ? "這台裝置上的練習紀錄：做完 " + st.solved + " 題，其中 " + st.clean + " 題沒看提示、一次就對；目前連續 " + st.streak + " 題。" + (st.mastered ? "已達「連續 3 題自己做對」。" : "") : "這台裝置上還沒有練習紀錄。";
+  $("#rec").textContent = st.solved ? "這台裝置上的練習紀錄：做完 " + st.solved + " 題，其中 " + st.clean + " 題沒看提示、一次就對；目前連續 " + st.streak + " 題。" + (st.mastered ? "已達「連續 " + need() + " 題自己做對」。" : "") : "這台裝置上還沒有練習紀錄。";
 }
 function drawVids(){
   var VIDS = E.videos || [];
@@ -616,6 +638,7 @@ function route(){
   var m = /^#h\/([\w-]+)$/.exec(location.hash), e = m && H.get(m[1]);
   if (e) return openEntry(e);
   E = null; st = null; document.title = "五年級難題解說";
+  $("#vids").innerHTML = ""; $("#vidBox").hidden = true;   // 回首頁就關掉影片（Codex 建議 7）
   $("#entry").hidden = true; $("#home").hidden = false; drawHome();
 }
 $("#backHome").onclick = function(ev){ ev.preventDefault(); location.hash = ""; route(); };

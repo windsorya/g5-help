@@ -452,6 +452,64 @@ def flow_video_live(browser, label, device=None):
     ctx.close()
 
 
+def flow_codex_help_r1(browser):
+    """Codex 2026-10-13 審難題站第 1 輪：必修 1–6、建議 7，照它的重現步驟。"""
+    # 必修 1：兩個分頁各練一篇，兩篇紀錄都要在
+    ctx = browser.new_context()
+    ctx.add_init_script(FIXTURE)
+    a = ctx.new_page(); a.goto(URL); a.wait_for_selector("#entry:not([hidden])")
+    b = ctx.new_page(); b.goto(HOME + "#h/t-guoyu"); b.wait_for_selector("#entry:not([hidden])")
+    a.get_by_role("button", name="我已經會了，直接練習").click()
+    solve_practice(a, *FIXED[0])
+    b.get_by_role("button", name="我已經會了，直接練習").click()
+    b.locator('#practice .chip[data-k="1"]').click()
+    db = json.loads(b.evaluate("localStorage.getItem('g5help.v1')"))["entries"]
+    check("必修1 兩個分頁各做一題：數學與國語兩篇紀錄都在", db.get("p38-6-2", {}).get("solved") == 1 and db.get("t-guoyu", {}).get("solved") == 1, {k: v.get("solved") for k, v in db.items()})
+    ctx.close()
+    # 必修 2：新 key 壞掉、舊 g5math.v1 完整 ⇒ 仍搬入舊紀錄，壞掉的原文另存
+    old = {"v": 1, "lessonDone": True, "idx": 2, "seed": 7, "streak": 2, "clean": 2, "solved": 2, "mastered": False, "log": [], "cur": None}
+    init = "if(!sessionStorage.getItem('x')){sessionStorage.setItem('x','1');localStorage.setItem('g5help.v1','{bad');localStorage.setItem('g5math.v1'," + json.dumps(json.dumps(old)) + ");}"
+    ctx, page, errors = open_page(browser, init=init)
+    st = page.evaluate("G5HelpPage.state('p38-6-2')")
+    keys = page.evaluate("Object.keys(localStorage)")
+    check("必修2 新紀錄壞掉時仍搬入舊紀錄（做完 2 題），壞掉的原文另存", st and st["solved"] == 2 and any(k.startswith("g5help.v1.broken.") for k in keys), (st, keys))
+    ctx.close()
+    # 必修 3：左小右大的分數題，答對時講對方向
+    lt = {"id": "t-frac-lt", "date": "2026-10-13", "subject": "數學", "kind": "frac-compare", "source": "測試", "title": "測試：左小右大",
+          "a": {"n": 27, "d": 45}, "b": {"n": 28, "d": 42}}
+    ctx, page, errors = open_page(browser, init="window.__G5_HARD_FIXTURE__ = " + json.dumps([lt]) + ";", url=HOME + "#h/t-frac-lt")
+    page.get_by_role("button", name="開始學").click()
+    chip(page, "先約分：分子分母一起除以同一個數")
+    chip(page, "一起除以 9"); fill_nums(page, [3, 5]); chip(page, "不能再約了")
+    chip(page, "一起除以 2"); fill_nums(page, [14, 21]); chip(page, "一起除以 7"); fill_nums(page, [2, 3]); chip(page, "不能再約了")
+    fill_nums(page, [15]); fill_nums(page, [3]); fill_nums(page, [9]); fill_nums(page, [5]); fill_nums(page, [10])
+    chip(page, "<")
+    asks = page.locator("#lesson .ask")
+    msg = asks.nth(asks.count() - 2).locator(".fb").inner_text()   # 答對後下一題（所以 27/45 ○ 28/42）會馬上接在後面
+    check("必修3 9/15 ○ 10/15 選 < 時說「9 比 10 小，所以 10/15 比較大」", "9 比 10 小，所以 10/15 比較大" in msg, msg)
+    check("必修3 沒有 JS 錯誤", not errors, errors)
+    ctx.close()
+    # 必修 4：只有 1 題練習時，家長紀錄寫「連續 1 題」
+    one = dict(GUOYU, id="t-one", practice=GUOYU["practice"][:1])
+    ctx, page, errors = open_page(browser, init="window.__G5_HARD_FIXTURE__ = " + json.dumps([one], ensure_ascii=False) + ";", url=HOME + "#h/t-one")
+    page.get_by_role("button", name="我已經會了，直接練習").click()
+    page.locator('#practice .chip[data-k="1"]').click()
+    check("必修4 一題練習全對：家長紀錄寫連續 1 題、不寫 3 題", "連續 1 題自己做對" in page.locator("#rec").text_content() and "連續 3 題" not in page.locator("#rec").text_content(), page.locator("#rec").text_content())
+    ctx.close()
+    # 必修 6：超大題號當壞資料，不能同一題重複算到學會
+    big = "localStorage.setItem('g5help.v1',JSON.stringify({v:1,entries:{'t-guoyu':{idx:9007199254740992,solved:0,streak:0}}}));"
+    ctx, page, errors = open_page(browser, init=FIXTURE + "if(!sessionStorage.getItem('y')){sessionStorage.setItem('y','1');" + big + "}", url=HOME + "#h/t-guoyu")
+    check("必修6 超大題號讀進來變回 0", page.evaluate("G5HelpPage.state('t-guoyu')")["idx"] == 0)
+    ctx.close()
+    # 建議 7：播影片後回首頁，影片要關掉
+    ctx, page, errors = open_page(browser)
+    page.locator("#vidBox summary").click()
+    page.locator("#vids button[data-v]").first.click()
+    page.locator("#backHome").click()
+    check("建議7 回首頁後影片 iframe 已移除", page.locator("iframe").count() == 0)
+    ctx.close()
+
+
 def main():
     with sync_playwright() as p:
         cr = p.chromium.launch()
@@ -462,6 +520,7 @@ def main():
         flow_codex_r1(cr)
         flow_storage_blocked(cr)
         flow_corrupt_store(cr)
+        flow_codex_help_r1(cr)
         flow_home(cr)
         flow_migrate(cr)
         flow_steps(cr, "手機390", {"viewport": {"width": 390, "height": 844}, "is_mobile": True, "has_touch": True}, shots=True)
