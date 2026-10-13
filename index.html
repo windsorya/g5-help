@@ -374,7 +374,12 @@ details p{margin:0 0 10px}
       return {entries: out, hidden: cleanHidden(x.hidden)};
     } catch (e) { return null; }
   }
-  function plain(o) { var p = {}; Object.keys(o || {}).forEach(function (k) { p[k] = o[k]; }); return p; }
+  // 用 defineProperty 一筆一筆定義：id 叫 __proto__ 也是普通欄位，JSON.stringify 照樣寫出（Codex 審 81963cee：原本 p[k]= 會吞掉 __proto__）
+  function plain(o) {
+    var p = {};
+    Object.keys(o || {}).forEach(function (k) { Object.defineProperty(p, k, {value: o[k], enumerable: true, writable: true, configurable: true}); });
+    return p;
+  }
   function serialize(entries, hidden) { return JSON.stringify({v: 1, entries: plain(entries), hidden: plain(hidden)}); }
   function hide(hidden, id, t) {
     if (!ID.test(id) || !stamp(t)) throw new Error("bad-hide");
@@ -1245,16 +1250,19 @@ window.G5HelpPage = {state:function(id){ return JSON.parse(JSON.stringify(DB.ent
     }; });
     Array.prototype.forEach.call($("#upList").querySelectorAll("button[data-wd-no]"), function(b){ b.onclick = function(){ wdArm(null); }; });
   }
+  // 查詢流水號：只採用最新一次查詢的回應，較舊的晚到就丟掉（Codex 審 81963cee：撤回後舊回應晚到，已撤回的題目又冒出來）
+  var MINE_SEQ = 0;
   function loadMine(){
-    var code = myCode();
+    var code = myCode(), mySeq = ++MINE_SEQ;
     if (!code) { $("#upHealth").textContent = "這台裝置還沒開啟跨裝置同步，所以看不到進度。"; return; }
     fetch(EP, {method:"POST", headers:{"Content-Type":"text/plain"}, credentials:"omit", body:JSON.stringify({op:"mine", code:code})}).then(function(r){ return r.json(); }).then(function(r){
+      if (mySeq !== MINE_SEQ) return;
       if (!r || !r.ok) { $("#upHealth").textContent = "進度暫時讀不到，稍後再看。"; return; }
       var ago = r.lastFetch ? Math.round((Date.now() - r.lastFetch) / 60000) : null;
       $("#upHealth").innerHTML = ago === null ? "電腦還沒取過題目。" : ago <= 20 ? "電腦運作正常（上次取題 " + hhmm(r.lastFetch) + "，每 10 分鐘取一次）。"
         : '<span style="color:var(--bad)">電腦已經 ' + ago + ' 分鐘沒取題（上次 ' + hhmm(r.lastFetch) + '）：可能關機、睡眠或故障，題目會等電腦開機後再處理。</span>';
       LAST = r; render(r);
-    }).catch(function(){ $("#upHealth").textContent = "進度暫時讀不到（可能沒有網路），稍後再看。"; });
+    }).catch(function(){ if (mySeq === MINE_SEQ) $("#upHealth").textContent = "進度暫時讀不到（可能沒有網路），稍後再看。"; });
   }
   $("#upBox").addEventListener("toggle", function(){ if ($("#upBox").open) loadMine(); });
   setInterval(function(){ if ($("#upBox").open && !WD) loadMine(); }, 60000);   // 正在確認撤回時不重畫（不吃掉「確定撤回？」）

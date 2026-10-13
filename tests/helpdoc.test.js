@@ -39,6 +39,18 @@ test("H03 hidden 壞掉不拖垮整份存檔：陣列／字串／壞 id／壞時
   assert.ok(!("<b>" in d.hidden) && !("neg" in d.hidden) && !("str" in d.hidden) && !("frac" in d.hidden));
 });
 
+test("H03b 存檔往返：id 叫 __proto__ 的篇與隱藏，serialize 後再 parse 一筆不少（Codex 審 81963cee）", () => {
+  const raw = '{"v":1,"entries":{"__proto__":{"solved":3},"p38-6-2":{"solved":1}},"hidden":{"__proto__":123,"ok-1":9}}';
+  const d = D.parse(raw);
+  const back = JSON.parse(D.serialize(d.entries, d.hidden));
+  assert.deepEqual(Object.keys(back.entries).sort(), ["__proto__", "p38-6-2"]);
+  assert.deepEqual(Object.keys(back.hidden).sort(), ["__proto__", "ok-1"]);
+  assert.equal(back.hidden["ok-1"], 9);
+  const again = D.parse(D.serialize(d.entries, d.hidden));
+  assert.equal(again.hidden["__proto__"], 123);
+  assert.ok(D.isHidden(D.hide(d.hidden, "x-1", 5), "__proto__"), "隱藏別篇時 __proto__ 那筆不會掉");
+});
+
 test("H04 不是存檔的東西照舊回 null（壞資料備份流程不變）", () => {
   for (const raw of ["{bad", "null", JSON.stringify({v: 2, entries: {}}), JSON.stringify({v: 1, entries: []}), JSON.stringify({v: 1})]) assert.equal(D.parse(raw), null, raw);
 });

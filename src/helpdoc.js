@@ -40,7 +40,12 @@
       return {entries: out, hidden: cleanHidden(x.hidden)};
     } catch (e) { return null; }
   }
-  function plain(o) { var p = {}; Object.keys(o || {}).forEach(function (k) { p[k] = o[k]; }); return p; }
+  // 用 defineProperty 一筆一筆定義：id 叫 __proto__ 也是普通欄位，JSON.stringify 照樣寫出（Codex 審 81963cee：原本 p[k]= 會吞掉 __proto__）
+  function plain(o) {
+    var p = {};
+    Object.keys(o || {}).forEach(function (k) { Object.defineProperty(p, k, {value: o[k], enumerable: true, writable: true, configurable: true}); });
+    return p;
+  }
   function serialize(entries, hidden) { return JSON.stringify({v: 1, entries: plain(entries), hidden: plain(hidden)}); }
   function hide(hidden, id, t) {
     if (!ID.test(id) || !stamp(t)) throw new Error("bad-hide");

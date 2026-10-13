@@ -924,10 +924,13 @@ def flow_withdraw(browser):
     """「你傳的題目」每筆還沒做好的都能撤回（兩段式確認）；送 op=withdraw（code＋傳題 id），成功後清單不再列。後端以記憶體模擬。"""
     items = [{"id": "u1-1", "time": 1791868600000, "subject": "自然", "note": "【測試】銀葉樹的板根是什麼？", "status": "new", "url": "", "doneAt": 0},
              {"id": "u2-2", "time": 1791868500000, "subject": "數學", "note": "第 6 題", "status": "done", "url": "https://windsorya.github.io/g5-help/#h/p38-6-2", "doneAt": 1791868550000}]
-    sent, mode = [], {"withdraw": "ok"}
+    sent, mode, held = [], {"withdraw": "ok", "hold": False}, []
 
     def gas(route):
         req = json.loads(route.request.post_data or "{}"); sent.append(req)
+        if req.get("op") == "mine" and mode["hold"]:   # 扣住這次查詢，測試稍後才用當下的舊清單回它（W9）
+            held.append((route, [dict(x) for x in items if x["status"] != "withdrawn"]))
+            return
         if req.get("op") == "mine":
             body = {"ok": True, "lastFetch": 0, "items": [x for x in items if x["status"] != "withdrawn"]}
         elif req.get("op") == "withdraw":
@@ -966,6 +969,20 @@ def flow_withdraw(browser):
     w = [r for r in sent if r.get("op") == "withdraw"][-1]
     check("撤回W6 送出 op=withdraw、同步碼、傳題 id", w == {"op": "withdraw", "code": "ABCDEFGHJKMN", "id": "u1-1"}, w)
     check("撤回W7 撤回後清單只剩做好的那筆、告訴家長撤回了", "撤回了" in pg.locator("#upWMsg").inner_text() and "銀葉樹" not in pg.locator("#upList").inner_text(), pg.locator("#upWMsg").inner_text())
+    # W9（Codex 審 81963cee）：撤回前送出的舊查詢晚到，不可讓已撤回的題目重新出現
+    items.append({"id": "u3-3", "time": 1791868700000, "subject": "社會", "note": "第 2 題", "status": "new", "url": "", "doneAt": 0})
+    mode["hold"] = True
+    pg.locator("#upBox summary").click(); pg.locator("#upBox summary").click()   # 收起再打開＝重新查詢（這一次被扣住）
+    pg.wait_for_timeout(300)
+    mode["hold"] = False
+    pg.locator("#upBox summary").click(); pg.locator("#upBox summary").click()   # 再查一次（照常回）
+    pg.wait_for_function("document.querySelector('#upList').innerText.indexOf('第 2 題') >= 0")
+    w3 = pg.locator('#upList button[data-wd="u3-3"]'); w3.click(); w3.click()
+    pg.wait_for_function("document.querySelector('#upList').innerText.indexOf('第 2 題') < 0")
+    for r0, snap in held:   # 舊查詢這時才回來，帶著撤回前的清單
+        r0.fulfill(status=200, content_type="application/json", headers={"Access-Control-Allow-Origin": "*"}, body=json.dumps({"ok": True, "lastFetch": 0, "items": snap}))
+    pg.wait_for_timeout(500)
+    check("撤回W9 撤回前送出的舊查詢晚到：已撤回的題目不會重新出現", len(held) == 1 and "第 2 題" not in pg.locator("#upList").inner_text(), (len(held), pg.locator("#upList").inner_text()[:200]))
     news = [pg.locator("#upWMsg").inner_text(), "確定撤回？", "這題已經做好了，不能撤回。", "沒有撤回成功（可能沒有網路），請稍後再試。"]
     check("撤回W8 新字每句不超過 40 字", not sentences_over("\n".join(news)), sentences_over("\n".join(news)))
     check("撤回 沒有 JS 錯誤", not errors, errors)
