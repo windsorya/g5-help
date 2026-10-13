@@ -128,7 +128,8 @@ test("用詞閘自檢：判準本身（node 端同一份 kidgate.js）＋案例�
   require("./kidcontract.js").remind("回饋分支提醒（appBranchProblems；設計 D 降級為提醒，不擋件）", KT.appBranchProblems());
   const src = fs.readFileSync(path.join(__dirname, "../src/app.html"), "utf8");
   const sect = src.slice(src.indexOf("// ---------- 互動元件"), src.indexOf("// ---------- 首頁按鈕"));
-  assert.ok(KT.appBranchProblems(sect + '\n    if (v === 99) return {ok:false, msg:"新加的回饋"};\n').length, "新加一個回饋字串、沒有對應案例 ⇒ 要紅");
+  // 比加這一行前後的差異（現行內容本身的提醒不影響，Codex 審 d4c6e4f）
+  assert.ok(KT.appBranchProblems(sect + '\n    if (v === 99) return {ok:false, msg:"新加的回饋"};\n').length > KT.appBranchProblems(sect).length, "新加一個回饋字串、沒有對應案例 ⇒ 要紅");
   const more = JSON.parse(JSON.stringify(H.LIST)), bg = more.find((e) => e.id === "sci-q5-bangen");
   bg.practice.push({q: "新的一題？", opts: ["甲", "乙"], a: 0, why: ["", "不是乙。"]});
   const miss = KT.harvestProblems(["word"], {list: more});
