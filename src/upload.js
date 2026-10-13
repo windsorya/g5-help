@@ -182,9 +182,21 @@
         load();
       });
     };
+    // 家庭碼變了（同一頁停止同步、換家庭、別的分頁改了）：立刻清空清單、作廢在途查詢與撤回確認，再用新碼重查。
+    // 同一頁 G5Sync.stop() 不會發 storage 事件，所以每 2 秒比一次（Codex 審 954df2a：舊版要等 60 秒輪詢，撤回在途時甚至不清）
+    var CUR = myCode();
+    function codeCheck() {
+      var c = myCode();
+      if (c === CUR) return;
+      CUR = c; EPOCH += 1; LAST = null; WD = null;
+      if (WD_T) { clearTimeout(WD_T); WD_T = null; }
+      render(); load();
+    }
+    window.addEventListener("storage", function (e) { if (!e.key || e.key === "g5sync.code") codeCheck(); });
+    var codeTimer = setInterval(codeCheck, 2000);   // cap-why: 停止同步後清單要在幾秒內反應；只讀 localStorage 一個 key，成本可忽略
     load();
     var timer = setInterval(function () { if (!WD && document.visibilityState !== "hidden") load(true); }, 60000);
-    return { reload: load, stop: function () { clearInterval(timer); } };
+    return { reload: function (auto) { codeCheck(); load(auto); }, stop: function () { clearInterval(timer); clearInterval(codeTimer); } };
   }
 
   var api = { mount: mount, minePrefix: minePrefix, makeNote: makeNote, parseNote: parseNote, mineFor: mineFor, unitName: unitName, safeDoneUrl: safeDoneUrl, sendSummary: sendSummary, esc: esc, SUBJECTS: SUBJECTS };

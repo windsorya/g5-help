@@ -70,6 +70,8 @@ def run(bt, tmp):
         if req["op"] == "mine":
             state["mine_calls"] += 1
             state["mine_reqs"].append(req)
+            if state.get("mine_fail"):
+                return route.fulfill(status=200, content_type="application/json", body='{"ok":false,"err":"server"}')
             if state["hold_mine"]:
                 state["held"].append((route, req))
                 return
@@ -150,6 +152,19 @@ def run(bt, tmp):
     check(f"{tag} 部分失敗點名第 2 張", "第 2 張沒有送出" in out and "送出 2 張" in out, out)
     check(f"{tag} 部分失敗不清空照片", pg.evaluate("document.querySelector('.g5u-file').files.length") == 3)
     check(f"{tag} 部分失敗後送出鈕可再按", pg.is_enabled(".g5u-send"))
+    # Codex 審 954df2a：同一頁停止同步（只刪同步碼、不呼叫 reload），清單也要在幾秒內清空
+    pg.wait_for_selector(".g5u-card")
+    pg.evaluate("localStorage.removeItem('g5sync.code')")
+    pg.wait_for_timeout(3500)
+    check(f"{tag} 同頁停止同步、不重新載入：3.5 秒內清單清空", pg.locator(".g5u-card").count() == 0, pg.locator(".g5u-card").count())
+    # Codex 審 954df2a：換成另一個家庭碼、新家庭查詢失敗 ⇒ 不得留著前一家的題目
+    state["mine_fail"] = True
+    pg.evaluate("localStorage.setItem('g5sync.code', 'ZZZZZZZZZZZZ')")
+    pg.wait_for_timeout(3500)
+    check(f"{tag} 換家庭碼且查詢失敗：不顯示前一家的題目", pg.locator(".g5u-card").count() == 0, pg.locator(".g5u-card").count())
+    state["mine_fail"] = False
+    pg.evaluate(f"localStorage.setItem('g5sync.code', '{CODE}')")
+    pg.wait_for_selector(".g5u-card", timeout=8000)
     # Codex 審 8601526：停止同步後，停止前發出的清單查詢晚到不得把舊家庭的題目畫回來
     pg.wait_for_timeout(300)
     state["hold_mine"] = True
