@@ -438,7 +438,8 @@
           return nextFromLocal(key, token);
         }
         // 下一號是別的內容＝另一台寫的（真正分歧）；其他（倒退、跳號、同號不同內容）＝無法確認。都各自保留、不覆蓋（A12、A14）
-        showConflict(key, cloud, !(cloud.rev === p.baseRev + 1)); return;
+        // baseline 是舊版遷移來的（legacy）：舊版送出不留 pending，下一號可能是同一台舊版的延遲請求 ⇒ 也是無法確認（A16，Codex 審 b0b24f1）
+        showConflict(key, cloud, (b && b.legacy === true) || !(cloud.rev === p.baseRev + 1)); return;
       }
       if (b && cloud.rev < b.rev) { showConflict(key, cloud, true); return; }   // 雲端倒退：不憑內容認領、不重傳（A14）
       if (cloud.rev === 0) {

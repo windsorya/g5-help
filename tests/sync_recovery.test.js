@@ -434,6 +434,48 @@ test('A16f 新版自己的 checkpoint（baseline 已由新版確認、沒有 pen
   assert.ok(c && !c.unsure, '新版有完整證據：另一台寫的 ⇒ 確定分歧：' + JSON.stringify(c));
 });
 
+// A16g（Codex 審 b0b24f1、設計 D 4agent 最終方案）：有 pending 時 PUT 被拒，提示布林＝(baseline 是舊版遷移) 或 (雲端不是剛好下一號)。
+// 四組合：legacy 有／無 × 雲端 rev 剛好 baseRev+1 與否。只有「legacy 且剛好下一號」與改前不同（改前顯示「兩台不一樣」，實際可能是同台舊版的延遲請求）。
+// 每組都斷言：雲端那份不動、這台照常用這台的、沒有選邊按鈕、pending 保留（不覆蓋任何一邊）。
+for (const legacy of [true, false]) for (const next of [true, false]) {
+  const unsure = legacy || !next;
+  test('A16g ' + (legacy ? '舊版遷移 baseline' : '新版 baseline') + '＋待確認 D10 被拒、雲端' + (next ? '剛好下一號' : '跳號') + ' ⇒ ' + (unsure ? '無法確認' : '確定分歧') + '，兩份都保留', async t => {
+    let ctx;
+    if (legacy) {   // 舊版只留 g5sync.meta：D8＝rev 1 已確認；本機已答成 D10
+      const clock = new Clock(), backend = server(clock), N = net(backend);
+      backend.handle({op: 'put', code: CODE, key: KEY, rev: 0, data: D(8)});
+      const meta = JSON.stringify({version: 1, codeHash: H(CODE), keys: {[KEY]: {rev: 1, hash: H(D(8)), updated: clock.now()}}});
+      N.hold = 'before';
+      const d = owner(backend, N, {initial: {[KEY]: D(10), 'g5sync.code': CODE, [META]: meta}});
+      ctx = {clock, backend, N, d, code: CODE}; t.after(() => d.api.destroy());
+      ctx.ready = d.api.ready;   // 開頁的 GET＋第一個 PUT 卡住時 ready 還不會完成：放行後再等
+      await flush(); await clock.advance(4000);
+    } else {        // 新版自己確認 D8＝rev 1；本機答成 D10
+      ctx = await synced8(t);
+      ctx.N.hold = 'before'; ctx.d.storage.setItem(KEY, D(10)); await ctx.clock.advance(4000);
+    }
+    const {d, N, backend, clock, code} = ctx;
+    assert.equal(typeof N.release, 'function', '前置：D10 的 PUT 卡在路上');
+    assert.equal(ck(d).pending && ck(d).pending.data, D(10), '前置：D10 是待確認上傳');
+    assert.equal(ck(d).pending.baseRev, 1, '前置：pending 的基準是 rev 1');
+    assert.equal(ck(d).baseline.legacy === true, legacy, '前置：baseline 是否來自舊版');
+    // 卡住期間，另一個寫入先到後端：剛好下一號＝rev 2（D9）；跳號＝rev 2、rev 3（D9、D11）
+    backend.handle({op: 'put', code, key: KEY, rev: 1, data: D(9)});
+    if (!next) backend.handle({op: 'put', code, key: KEY, rev: 2, data: D(11)});
+    const cloudData = next ? D(9) : D(11), cloudRev = next ? 2 : 3;
+    N.release(); await flush(); if (ctx.ready) await ctx.ready; await clock.advance(8000);
+    const c = d.api.getState().conflicts[KEY];
+    assert.ok(c, '雙邊不同：要保留兩份');
+    assert.equal(!!c.unsure, unsure, '提示布林（legacy=' + legacy + '、剛好下一號=' + next + '）');
+    assert.match(statusText(d), unsure ? /無法確認/ : /兩台裝置的紀錄不一樣/);
+    assert.equal(pickButtons(d).length, 0, '沒有選邊按鈕');
+    assert.equal(d.storage.getItem(KEY), D(10), '這台照常用這台的（本機 D10 保留）');
+    const rec = backend.store.record(code, KEY);
+    assert.deepEqual([rec.rev, rec.data === cloudData], [cloudRev, true], '雲端那份不動');
+    assert.equal(ck(d).pending && ck(d).pending.data, D(10), 'pending 保留，不被丟掉也不被當成已確認');
+  });
+}
+
 test('A16b 上傳途中切換家庭 ⇒ 舊家庭的遲到回應不能寫入新家庭的 checkpoint', async t => {
   const ctx = await synced8(t);
   ctx.backend.handle({op: 'put', code: CODE2, key: KEY, rev: 0, data: D(50)});
