@@ -72,6 +72,8 @@ function doPost(e) {
   var result;
   try {
     var req = JSON.parse(e.postData.contents);
+    // 第一次被呼叫時自己建試算表（不必再請家長到編輯器手動執行 setup；setup 冪等、沿用既有 SHEET_ID）
+    if (!PropertiesService.getScriptProperties().getProperty('SHEET_ID')) { setup(); }
     result = G5SyncCore.handle(g5Store(), req, Date.now);
   } catch (error) {
     result = {ok: false, err: 'server'};

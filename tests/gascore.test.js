@@ -165,12 +165,15 @@ test('G10 GAS adapter round-trips chunks, clears old tails and flushes before re
   assert.equal(gas.post({...base, key: 'g5help.v1', op: 'put', rev: 0, data: ''}).ok, true); // grows row capacity
 });
 
-test('G11 GAS malformed POST, missing setup and failed flush return sanitized server error; GET is ping', () => {
+test('G11 GAS malformed POST and failed flush return sanitized server error; missing setup auto-creates once; GET is ping', () => {
   const gas = gasRuntime();
   assert.deepEqual(JSON.parse(gas.sandbox.doGet({}).text), {ok: true, pong: true});
   assert.deepEqual(JSON.parse(gas.sandbox.doPost({postData: {contents: '<html>secret</html>'}}).text), {ok: false, err: 'server'});
-  assert.equal(gas.post({op: 'get', code: CODE, key: KEY}).err, 'server');
-  gas.sandbox.setup(); gas.failFlush = true;
+  // 2026-10-13：第一次呼叫自己建試算表（家長不必再到編輯器執行 setup）；之後不重建
+  assert.deepEqual(gas.post({op: 'get', code: CODE, key: KEY}), {ok: true, rev: 0, data: null, updated: null});
+  gas.post({op: 'get', code: CODE, key: KEY});
+  assert.equal(gas.creates, 1);
+  gas.failFlush = true;
   assert.deepEqual(gas.post({op: 'put', code: CODE, key: KEY, rev: 0, data: 'ok'}), {ok: false, err: 'server'});
   assert.equal(gas.events.at(-1), 'release');
 });
