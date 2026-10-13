@@ -510,6 +510,53 @@ def flow_codex_help_r1(browser):
     ctx.close()
 
 
+def flow_codex_help_r2(browser):
+    """Codex 2026-10-13 審難題站第 2 輪必修 1–4。"""
+    # 必修 1：大於 10 萬的合法 seed 要保留，重新整理後還是同一題
+    seed = "localStorage.setItem('g5help.v1',JSON.stringify({v:1,entries:{'p38-6-2':{idx:6,seed:700000,cur:{idx:6,hints:1,wrongs:1}}}}));"
+    ctx, page, errors = open_page(browser, init="if(!sessionStorage.getItem('s')){sessionStorage.setItem('s','1');" + seed + "}")
+    st = page.evaluate("G5HelpPage.state('p38-6-2')")
+    check("r2必修1 seed 700000 保留、提示答錯紀錄仍對應第 7 題", st["seed"] == 700000 and st["cur"] == {"idx": 6, "hints": 1, "wrongs": 1}, st)
+    ctx.close()
+    # 必修 2：壞資料備份不了時，原文留在原地、存檔回報失敗
+    init = ("if(!sessionStorage.getItem('b')){sessionStorage.setItem('b','1');localStorage.setItem('g5help.v1','{bad');}"
+            "var _s=Storage.prototype.setItem;Storage.prototype.setItem=function(k,v){if(String(k).indexOf('g5help.v1.broken.')===0)throw new Error('quota');return _s.call(this,k,v);};")
+    ctx, page, errors = open_page(browser, init=init)
+    page.get_by_role("button", name="我已經會了，直接練習").click()
+    solve_practice(page, *FIXED[0])
+    raw = page.evaluate("localStorage.getItem('g5help.v1')")
+    check("r2必修2 備份失敗：壞掉的原文還在、畫面說存不了紀錄", raw == "{bad" and "存不了紀錄" in page.locator("#pend").inner_text(), raw)
+    ctx.close()
+    # 必修 3：一直存不進去時，切篇再切回，記憶體裡的進度不能歸零
+    ctx, page, errors = open_page(browser, init=FIXTURE + "Storage.prototype.setItem=function(){throw new Error('quota')};")
+    page.get_by_role("button", name="我已經會了，直接練習").click()
+    solve_practice(page, *FIXED[0])
+    page.goto(HOME + "#h/t-guoyu"); page.wait_for_selector("#entry:not([hidden])")
+    page.get_by_role("button", name="我已經會了，直接練習").click()
+    page.locator('#practice .chip[data-k="1"]').click()
+    page.goto(HOME + "#h/p38-6-2"); page.wait_for_selector("#entry:not([hidden])")
+    check("r2必修3 存不進去時切篇再切回，數學仍是做完 1 題", page.evaluate("G5HelpPage.state('p38-6-2')")["solved"] == 1, page.evaluate("G5HelpPage.state('p38-6-2')"))
+    ctx.close()
+    # 必修 4：同一篇開兩個分頁，A 答錯後 B 要接到；B 學會後 A 的舊狀態不能蓋掉
+    ctx = browser.new_context(); ctx.add_init_script(FIXTURE)
+    a = ctx.new_page(); a.goto(HOME + "#h/t-guoyu"); a.wait_for_selector("#entry:not([hidden])")
+    b = ctx.new_page(); b.goto(HOME + "#h/t-guoyu"); b.wait_for_selector("#entry:not([hidden])")
+    a.get_by_role("button", name="我已經會了，直接練習").click()
+    a.locator('#practice .chip[data-k="0"]').click()          # 第 1 題答錯
+    b.wait_for_timeout(500)
+    stb = b.evaluate("G5HelpPage.state('t-guoyu')")
+    check("r2必修4 A 答錯後 B 分頁接到答錯紀錄", (stb.get("cur") or {}).get("wrongs") == 1, stb)
+    b.get_by_role("button", name="我已經會了，直接練習").click()
+    for k in (1, 0, 0, 1):
+        b.locator(f'#practice .chip[data-k="{k}"]').click()
+        if b.locator("#nextQ").count(): b.locator("#nextQ").click()
+    a.get_by_role("button", name="再看一次教學").first.click() if a.get_by_role("button", name="再看一次教學").count() else None
+    a.wait_for_timeout(300)
+    db = json.loads(b.evaluate("localStorage.getItem('g5help.v1')"))["entries"]["t-guoyu"]
+    check("r2必修4 B 練完後第 1 題記成不是一次對、A 沒有把紀錄蓋回 0", db["solved"] >= 4 and db["log"][0]["clean"] is False, {k: db[k] for k in ("solved", "streak", "mastered")})
+    ctx.close()
+
+
 def main():
     with sync_playwright() as p:
         cr = p.chromium.launch()
@@ -521,6 +568,7 @@ def main():
         flow_storage_blocked(cr)
         flow_corrupt_store(cr)
         flow_codex_help_r1(cr)
+        flow_codex_help_r2(cr)
         flow_home(cr)
         flow_migrate(cr)
         flow_steps(cr, "手機390", {"viewport": {"width": 390, "height": 844}, "is_mobile": True, "has_touch": True}, shots=True)

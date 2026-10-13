@@ -374,16 +374,19 @@ function bar(n, d, o){
 
 // ---------- 存檔：g5help.v1＝{v:1, entries:{篇id: 那一篇的教學與練習紀錄}}；不碰自然複習的 g5sci.v3 ----------
 var KEY = "g5help.v1";
-function fresh(){ return {lessonDone:false, idx:0, seed:Math.floor(Math.random() * 1e6), streak:0, clean:0, solved:0, mastered:false, log:[], cur:null}; }
-function nat(x){ return typeof x === "number" && Number.isSafeInteger(x) && x >= 0 && x <= 100000; }   // 題號、次數：超過 10 萬題當壞資料（Codex 必修 6）
+function fresh(){ return {lessonDone:false, idx:0, seed:Math.floor(Math.random() * 1e6), streak:0, clean:0, solved:0, mastered:false, log:[], cur:null, r:0}; }
+function nat(x){ return typeof x === "number" && Number.isSafeInteger(x) && x >= 0 && x <= 100000; }   // 題號、次數：超過 10 萬當壞資料（Codex 必修 6）
+function seedOk(x){ return typeof x === "number" && Number.isSafeInteger(x) && x >= 0 && x <= 2147483647; }   // 亂數種子另設範圍（Codex 第 2 輪必修 1）
 function clean1(s){
   var d = fresh();
   if (!s || typeof s !== "object") return d;
-  ["idx","seed","streak","clean","solved"].forEach(function(k){ if (nat(s[k])) d[k] = Math.floor(s[k]); });
+  ["idx","streak","clean","solved"].forEach(function(k){ if (nat(s[k])) d[k] = s[k]; });
+  if (seedOk(s.seed)) d.seed = s.seed;
+  d.r = (typeof s.r === "number" && Number.isSafeInteger(s.r) && s.r >= 0) ? s.r : 0;   // 這一篇的版本號：每存一次 +1
   d.lessonDone = s.lessonDone === true; d.mastered = s.mastered === true;
   if (Array.isArray(s.log)) d.log = s.log.slice(-100);
   // 正在做的那一題：看過提示、答錯過幾次（Codex 2026-10-12 第 1 輪必修 1、2：重開練習不能洗掉、不能重複計分）
-  if (s.cur && nat(s.cur.idx) && nat(s.cur.hints) && nat(s.cur.wrongs)) d.cur = {idx:Math.floor(s.cur.idx), hints:Math.floor(s.cur.hints), wrongs:Math.floor(s.cur.wrongs)};
+  if (s.cur && nat(s.cur.idx) && nat(s.cur.hints) && nat(s.cur.wrongs)) d.cur = {idx:s.cur.idx, hints:s.cur.hints, wrongs:s.cur.wrongs};
   return d;
 }
 function own(o, k){ return Object.prototype.hasOwnProperty.call(o, k); }
@@ -397,12 +400,21 @@ function parseDB(raw){
     return out;
   } catch (e) { return null; }
 }
+// 存檔規則（Codex 第 2 輪必修 1–4 後重新設計，不再逐條補）：
+// ①每篇帶版本號 r；本分頁記 BASE[id]＝最後讀到或寫入的 r。
+// ②存檔先讀磁碟另一份；磁碟這篇的 r 比 BASE 新＝別的分頁先更新了 ⇒ 改用磁碟版、重開這篇、不覆寫。
+// ③寫成功才更新 BASE；寫失敗時記憶體裡的進度一律不動（DIRTY 記著，下次一起寫）。
+// ④壞掉的紀錄備份不了 ⇒ BLOCKED：不刪原文、不再寫入，進度只留在畫面上。
+var BLOCKED = false, BASE = Object.create(null), DIRTY = Object.create(null);
 function readEntries(){
   var raw = null;
   try { raw = localStorage.getItem(KEY); } catch (e) { return Object.create(null); }
   var es = raw === null ? null : parseDB(raw);
   if (es) return es;
-  if (raw !== null) { try { localStorage.setItem(KEY + ".broken." + Date.now(), raw); localStorage.removeItem(KEY); } catch (e) {} }   // 壞掉的原文留著，不拿空紀錄蓋掉
+  if (raw !== null) {
+    try { localStorage.setItem(KEY + ".broken." + Date.now(), raw); localStorage.removeItem(KEY); }
+    catch (e) { BLOCKED = true; }   // 備份失敗：原文留在原地，之後不寫
+  }
   es = Object.create(null);
   try {
     // 2026-10-12 那一頁放在自然複習網站時存在 g5math.v1：搬進第 1 篇（舊資料原文不動）
@@ -411,20 +423,41 @@ function readEntries(){
   } catch (e) {}
   return es;
 }
-function loadDB(){ return {v:1, entries:readEntries()}; }
-var DB = loadDB(), st = null;
-function stateOf(id){ if (!own(DB.entries, id)) DB.entries[id] = fresh(); return DB.entries[id]; }
-function save(){
-  try {
-    var latest = readEntries();
-    if (E && st) latest[E.id] = st;
-    DB.entries = latest; if (E) DB.entries[E.id] = st;
-    localStorage.setItem(KEY, JSON.stringify(DB));
-    return true;
-  } catch (e) { return false; }
+function loadDB(){ var es = readEntries(); Object.keys(es).forEach(function(id){ BASE[id] = es[id].r; }); return {v:1, entries:es}; }
+var DB = loadDB(), st = null, NOTICE = "";
+function stateOf(id){ if (!own(DB.entries, id)) { DB.entries[id] = fresh(); BASE[id] = 0; } return DB.entries[id]; }
+function adoptNewer(disk){
+  // 別的分頁更新了目前這一篇：改用磁碟版並重開這一篇
+  DB.entries[E.id] = disk[E.id]; BASE[E.id] = disk[E.id].r; delete DIRTY[E.id];
+  NOTICE = "另一個分頁剛更新了這一篇，已換成最新的進度。";
+  setTimeout(function(){ if (E) openEntry(E); }, 0);
 }
-// 別的分頁存檔時，把其他篇的紀錄更新進來（目前這篇以本分頁為準）
-window.addEventListener("storage", function(ev){ if (ev.key !== KEY) return; var es = readEntries(); if (E && st) es[E.id] = st; DB.entries = es; if (!E) drawHome(); });
+function save(){
+  if (BLOCKED) return false;
+  var disk = readEntries();
+  if (BLOCKED) return false;
+  if (E && st && own(disk, E.id) && disk[E.id].r > (BASE[E.id] || 0)) { adoptNewer(disk); return false; }
+  if (E && st) DIRTY[E.id] = true;
+  var out = Object.create(null), next = Object.create(null);
+  Object.keys(disk).forEach(function(id){ out[id] = disk[id]; });
+  Object.keys(DIRTY).forEach(function(id){
+    if (own(disk, id) && disk[id].r > (BASE[id] || 0)) { delete DIRTY[id]; return; }   // 別篇被別的分頁更新過：以磁碟為準
+    var copy = JSON.parse(JSON.stringify(DB.entries[id])); copy.r = (BASE[id] || 0) + 1; out[id] = copy; next[id] = copy.r;
+  });
+  try { localStorage.setItem(KEY, JSON.stringify({v:1, entries:out})); } catch (e) { return false; }
+  Object.keys(next).forEach(function(id){ BASE[id] = next[id]; DB.entries[id].r = next[id]; delete DIRTY[id]; });
+  Object.keys(disk).forEach(function(id){ if (!own(next, id) && !own(DIRTY, id)) { DB.entries[id] = disk[id]; BASE[id] = disk[id].r; } });
+  if (E) st = DB.entries[E.id];
+  return true;
+}
+// 別的分頁存檔時：其他篇換成磁碟版（還沒寫出去的除外）；目前這一篇若磁碟較新，改用並重開
+window.addEventListener("storage", function(ev){
+  if (ev.key !== KEY) return;
+  var disk = readEntries();
+  Object.keys(disk).forEach(function(id){ if (own(DIRTY, id) || (E && id === E.id)) return; DB.entries[id] = disk[id]; BASE[id] = disk[id].r; });
+  if (E && own(disk, E.id) && disk[E.id].r > (BASE[E.id] || 0) && !own(DIRTY, E.id)) adoptNewer(disk);
+  if (!E) drawHome();
+});
 
 // ---------- 互動元件 ----------
 // iPad 中文鍵盤可能打出全形數字「１５」：先轉半形（Codex 第 1 輪必修 5）。回傳 {empty}、{bad}（不是整數）或 {v}
@@ -818,6 +851,7 @@ function openEntry(e){
   $("#parentText").innerHTML = e.parent || "";
   document.title = e.title + "｜五年級難題解說";
   drawTopBtns(); drawRec(); drawVids(); window.scrollTo(0, 0);
+  if (NOTICE) { $("#lead").textContent = NOTICE; NOTICE = ""; }
 }
 function route(){
   var m = /^#h\/([\w-]+)$/.exec(location.hash), e = m && H.get(m[1]);
