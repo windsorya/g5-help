@@ -1,22 +1,24 @@
-// 孩子看得到的字：寫法契約（設計 D 4agent 最終方案，Codex 審 b0b24f1 B15／B18）。
+// 孩子看得到的字：寫法提醒清單（設計 D 4agent 最終方案；2026-10-13 依 4agent 停止條件降級，Codex 審 4271bb4）。
 //
-// 採字器量測範圍（tests/kidgate.js＋tests/e2e_kidtext.py 真瀏覽器採字；tests/kidtext.js 案例完整性）：
-//   ・回饋完整性（kidtext.appBranchProblems）只認「同一行、雙引號」的回饋字面字串：`msg: "…"`、`.textContent = "…";`。
-//   ・句長量測（kidgate.js）以文字所在區塊的 computed white-space 判斷換行，不看區塊內子元素各自的覆寫。
-// 這兩個量測核心刻意不追 JS 語法（單引號、反引號、跨行、別的寫入 API）與巢狀 white-space——
-// 改成由本契約「拒絕這些寫法」：互動元件區段（app.html「// ---------- 互動元件」～「// ---------- 首頁按鈕」，同 kidtext 錨點）
-// 只准用量測器看得懂的寫法；違反＝政策紅燈（不是採字器缺陷），改寫法，不是改量測核心。
+// ⚠️ 降級（docs/designD-downgrade-20261013.md）：本檔的 K 規則與 kidtext.appBranchProblems（「互動元件每個回饋分支都被採字到」）
+//   已從「擋件」改為「提醒」——測試照跑、違反時印出警告清單，但不讓 node 全套紅。理由：Codex 審 4271bb4 以三種寫法繞過
+//   （B18 跨行賦值、B18 fb() 雙引號但沒有對應分支、B15 class="ok fb" 調換 class 順序），4agent 停止條件規定會診後 FAIL 不再補丁。
 //
-// 封閉清單（每條對應一種量測器刻意不支援的寫法）：
-//   K1 反引號字串含中文（B18：模板字串不在完整性閘的語法裡）
-//   K2 回饋行（有 .textContent 指定、msg:、fb(）裡有含中文的單引號字串（B18：完整性閘只認雙引號）
-//   K3 .textContent = 的右邊跨行（同一行沒有 ;）、msg: 的值不在同一行（B18：完整性閘逐行看）
-//   K4 用量測器不認的寫字 API：innerText／outerText／nodeValue／createTextNode／insertAdjacentText（B18）
-//   K5 回饋框 .fb 只准：.hidden／.className／.classList／.textContent，或當 fb( 的第一個參數；
-//      innerHTML、appendChild、append、另取別名…一律紅（B15：框內不得有子元素，子元素可各自覆寫 white-space）
-//   K6 HTML 字串裡的 <div class="fb…">…</div> 同一行內要收尾，且框內不得有任何標籤（B15）
-//   K7 區段內不得出現 white-space／whiteSpace；整頁 CSS 只有 .fb 可以用 pre-line／pre-wrap／break-spaces（B15）
-// 執行：node --test tests/kidcontract.test.js（接在 node --test tests/*.test.js 裡）
+// 採字器的自動保證範圍只到：句長閘（tests/kidgate.js＋tests/e2e_kidtext.py 真瀏覽器採字，小五 40 字上限，擋件）
+//   量得到的「實際走到的畫面文字」。以下兩類「不在自動保證範圍」，改由人工抽查清單（node tests/kidcontract.js --checklist）：
+//   ・B18 非標準寫法的回饋：單引號／反引號／跨行／變數中轉／fb() 新增分支等——沒被 e2e 走到的回饋字，句長閘量不到。
+//   ・B15 巢狀 white-space：回饋框內子元素各自覆寫 white-space 時，句長量測可能把一句錯分成兩句。
+//   不得宣稱「孩子看得到的字已完整覆蓋」。
+//
+// 提醒規則（封閉清單，只是提示「量測器看不懂這種寫法」，抓不到的寫法很多，見上）：
+//   K1 反引號字串含中文
+//   K2 回饋行（有 .textContent 指定、msg:、fb(）裡有含中文的單引號字串
+//   K3 .textContent = 的右邊跨行（同一行沒有 ;）、msg: 的值不在同一行
+//   K4 用 innerText／outerText／nodeValue／createTextNode／insertAdjacentText 寫字
+//   K5 回饋框 .fb 只准：.hidden／.className／.classList／.textContent，或當 fb( 的第一個參數
+//   K6 HTML 字串裡的 <div class="fb…">…</div> 同一行內要收尾，且框內不得有任何標籤
+//   K7 區段內不得出現 white-space／whiteSpace；整頁 CSS 只有 .fb 可以用 pre-line／pre-wrap／break-spaces
+// 執行：node --test tests/kidcontract.test.js（提醒，不擋件）；node tests/kidcontract.js --checklist（印人工抽查清單）
 "use strict";
 const fs = require("fs");
 const path = require("path");
@@ -129,4 +131,57 @@ function currentProblems() {
   return contractProblems(src, offset, app);
 }
 
-module.exports = {START, END, section, tokenize, contractProblems, currentProblems};
+// 提醒（不擋件）：印出警告清單，回傳筆數。降級後 B18 完整性閘與 K 規則都走這裡，不 assert。
+function remind(label, list) {
+  if (list.length) console.warn("⚠ 提醒（不擋件，見 docs/designD-downgrade-20261013.md）" + label + "：" + list.length + " 筆\n  " + list.join("\n  "));
+  return list.length;
+}
+
+// 人工抽查清單：互動元件區段裡每個回饋分支的位置（行號隨 app.html 變動，每次改內容時重印）。
+// 只是列「看得到的寫字點」，不是完整性證明：寫法再怪一點（變數中轉、動態組字）一樣可能漏列——那正是要人眼看的原因。
+const CHECK_KINDS = [
+  ["msg:", /\bmsg\s*:/],
+  [".textContent =", /\.textContent\s*=(?!=)/],
+  ["fb(", /\bfb\s*\(/],
+  ["innerHTML（含中文）", /\.innerHTML\s*=(?!=)/],
+  ["回饋框 .fb", /\.fb\b|class=\\?"[^"\\]*\bfb\b/],
+  ["white-space", /white-?space/i],
+];
+function checklist(app = appText()) {
+  const {src, offset} = section(app), lines = src.split("\n"), rows = [];
+  let comp = "", fn = "";
+  lines.forEach((raw, idx) => {
+    const h = raw.match(/^\/\/ -{10} (.+?) -{10}/); if (h) comp = h[1];
+    const f = raw.match(/^\s*function\s+([\w$]+)\s*\(/) || raw.match(/^function\s+([\w$]+)\s*\(/); if (f) fn = f[1];
+    const kinds = CHECK_KINDS.filter(([name, re]) => re.test(raw) && (name !== "innerHTML（含中文）" || CJK.test(raw))).map(([name]) => name);
+    if (kinds.length) rows.push({line: offset + idx, component: comp, fn, kinds, text: raw.trim().slice(0, 100)});
+  });
+  const notices = [];
+  app.split("\n").forEach((raw, idx) => { if (/READONLY_MSG\s*=\s*"/.test(raw)) notices.push({line: idx + 1, text: raw.trim().slice(0, 100)}); });
+  const css = [];
+  [...app.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/gi)].forEach((m) => {
+    for (const r of m[1].matchAll(/([^{}]+)\{([^{}]*)\}/g)) if (/white-space/i.test(r[2])) css.push(r[1].trim() + " { " + (r[2].match(/white-space\s*:[^;]*/i) || [""])[0] + " }");
+  });
+  return {rows, notices, css};
+}
+function formatChecklist(c = checklist()) {
+  const out = ["# 人工抽查清單（node tests/kidcontract.js --checklist 產生；src/app.html 互動元件區段）", ""];
+  out.push("每次改 src/app.html 的互動元件文字：逐列看那一行在畫面上會說的話是否每句 ≤ 40 字、沒有沒解釋的難詞；" +
+    "沒被 e2e_kidtext 走到的分支（例如新加的 if 分支）句長閘量不到，只能靠這裡人眼看。", "");
+  out.push("| app.html 行 | 元件 | 函式 | 寫字方式 | 原始碼（前 100 字） |", "|---|---|---|---|---|");
+  c.rows.forEach((r) => out.push("| " + r.line + " | " + r.component + " | " + (r.fn || "（頂層）") + " | " + r.kinds.join("、") + " | `" + r.text.replace(/\|/g, "\\|").replace(/`/g, "'") + "` |"));
+  out.push("", "唯讀提示（整頁）：", ...c.notices.map((n) => "- 第 " + n.line + " 行：`" + n.text.replace(/`/g, "'") + "`"));
+  out.push("", "整頁 CSS 的 white-space（B15：回饋框內若有子元素各自覆寫，句長量測可能錯分）：", ...c.css.map((x) => "- `" + x + "`"));
+  return out.join("\n");
+}
+
+module.exports = {START, END, section, tokenize, contractProblems, currentProblems, remind, checklist, formatChecklist};
+
+if (require.main === module) {
+  if (process.argv.includes("--checklist")) console.log(formatChecklist());
+  else {
+    const KT = require("./kidtext.js");
+    const n = remind("寫法提醒 K1–K7", currentProblems()) + remind("回饋分支提醒（appBranchProblems）", KT.appBranchProblems());
+    console.log(n ? "提醒 " + n + " 筆（不擋件）" : "目前沒有提醒（不代表完整覆蓋，見 docs/designD-downgrade-20261013.md）");
+  }
+}

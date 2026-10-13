@@ -1,4 +1,6 @@
 // Codex 審 2cae2c9（2026-10-13 第 8 輪）B15／B18／B19／採字回條新鮮度：每一條先寫成會紅的測試（舊碼紅、新碼綠）。
+// 2026-10-13 設計 D 降級（docs/designD-downgrade-20261013.md）：句長閘（B19，40 字）仍擋件；B18「現行回饋都有對應分支」改為提醒（只印警告），
+//   B15／B18 不在自動保證範圍，改人工抽查（node tests/kidcontract.js --checklist）。偵測器自身行為的測試照舊斷言。
 // 執行：node --test tests/kidgate.test.js
 "use strict";
 const test = require("node:test");
@@ -75,7 +77,7 @@ test("B18 「這步看不懂」的每個回饋（沒開同步／送出中／收�
   const need = ["app:confused-nocode", "app:confused-sending", "app:confused-ok", "app:confused-fail", "app:confused-net"];
   const req = KT.requiredBranches();
   need.forEach((b) => assert.ok(req.includes(b), "缺分支 " + b));
-  assert.deepEqual(KT.appBranchProblems(), [], "現有回饋都有對應分支");
+  require("./kidcontract.js").remind("回饋分支提醒（appBranchProblems；設計 D 降級為提醒，不擋件）", KT.appBranchProblems());
 });
 
 test("B18 用 .textContent 寫的新回饋字串、沒有對應分支 ⇒ 完整性檢查要紅（不能只找 msg:）", () => {

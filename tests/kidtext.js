@@ -4,7 +4,9 @@
 // 漏標題與 SVG 字，所以不再宣告「孩子看到的字全部合格」。現在只負責三件事：
 //   ①欄位：steps 篇要有 words；②詞表：HARD_WORDS 與各篇 words 的白話不可空白；
 //   ③案例完整性：從題目資料、frac.js 的判題代碼、app.html 的回饋字串推出「一定要實際走到」的案例與分支，對照採字結果；
-//     新增題目、選項、判題代碼或回饋字串卻沒有對應案例 ⇒ 紅。另驗採字結果是不是這一版 index.html 量的（過期 ⇒ 紅）。
+//     新增題目、選項、判題代碼卻沒有對應案例 ⇒ 紅；另驗採字結果是不是這一版 index.html 量的（過期 ⇒ 紅）。
+//     例外（2026-10-13 設計 D 降級，docs/designD-downgrade-20261013.md）：app.html 回饋字串的分支完整性（appBranchProblems）只是提醒、不擋件——
+//     它逐行認雙引號字面字串，跨行、變數中轉、fb() 新分支都會漏（Codex 審 4271bb4），不能宣稱「每個回饋分支都被採字到」；改人工抽查清單。
 "use strict";
 const fs = require("fs");
 const path = require("path");
@@ -67,7 +69,7 @@ function textBranches(line) {
   }
   return n;
 }
-// 回傳問題清單：沒對到分支名的 msg:／.textContent 回饋行、對不到原始碼的過期錨點
+// 回傳問題清單：沒對到分支名的 msg:／.textContent 回饋行、對不到原始碼的過期錨點（提醒用，不擋件；不是完整性證明）
 function appBranchProblems(src = appSection()) {
   const out = [];
   src.split("\n").forEach((line, i) => {

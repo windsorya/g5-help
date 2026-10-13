@@ -125,7 +125,7 @@ test("用詞閘自檢：判準本身（node 端同一份 kidgate.js）＋案例�
   assert.ok(KG.evaluate([{text: "蒸散（水變成水蒸氣）", cat: "kid", unit: "lesson"}, {text: "練習第 1 題", cat: "kid", unit: "practice"}, {text: "蒸散是什麼？", cat: "kid", unit: "practice"}], ["蒸散"])
     .some((x) => x.kind === "word" && x.unit === "practice"), "練習題不能借用教學的解釋");
   assert.ok(KG.evaluate([{text: "新加的字", cat: "unknown", unit: "unknown"}], []).some((x) => x.kind === "unclassified"));
-  assert.deepEqual(KT.appBranchProblems(), [], "app.html 數學篇每個回饋字串都要對到一個要走到的分支");
+  require("./kidcontract.js").remind("回饋分支提醒（appBranchProblems；設計 D 降級為提醒，不擋件）", KT.appBranchProblems());
   const src = fs.readFileSync(path.join(__dirname, "../src/app.html"), "utf8");
   const sect = src.slice(src.indexOf("// ---------- 互動元件"), src.indexOf("// ---------- 首頁按鈕"));
   assert.ok(KT.appBranchProblems(sect + '\n    if (v === 99) return {ok:false, msg:"新加的回饋"};\n').length, "新加一個回饋字串、沒有對應案例 ⇒ 要紅");

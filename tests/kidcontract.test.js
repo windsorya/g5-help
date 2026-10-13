@@ -1,6 +1,8 @@
-// 孩子看得到的字：寫法契約測試（設計 D 4agent 最終方案；Codex 審 b0b24f1 B15／B18）。
-// 採字器量測範圍與刻意不支援的寫法見 tests/kidcontract.js 檔頭：量測核心（kidgate.js／kidtext.js）不追語法，
-// 量不到的寫法由契約在建置前拒絕（政策紅燈）。反例＝在現行互動元件區段裡植入一種量測器看不懂的寫法，契約必須紅；現行內容必須綠。
+// 孩子看得到的字：寫法提醒測試（設計 D 4agent 最終方案；2026-10-13 依 4agent 停止條件降級，Codex 審 4271bb4）。
+// ⚠️ 降級：K 規則已從「擋件」改為「提醒」——現行內容有違反只印警告清單，不讓 node 全套紅（docs/designD-downgrade-20261013.md）。
+// 採字器的自動保證範圍只到句長閘量得到的實際畫面文字；B15（巢狀 white-space）、B18（非標準寫法的回饋）不在自動保證範圍，
+// 改列人工抽查清單（node tests/kidcontract.js --checklist）。下面的反例測試只驗「提醒工具本身會對這些寫法出聲」，不代表能擋住所有寫法：
+// Codex 審 4271bb4 已證實跨行中轉、fb() 新分支、class="ok fb" 都能繞過。
 // 執行：node --test tests/kidcontract.test.js
 "use strict";
 const test = require("node:test");
@@ -20,8 +22,10 @@ function plant(find, replace) {
 }
 const rules = (src) => KC.contractProblems(src, app.offset).map((p) => p.split(" ")[0]);
 
-test("現行互動元件區段：契約全綠（0 個違規）", () => {
-  assert.deepEqual(KC.currentProblems(), []);
+test("現行互動元件區段：寫法提醒（降級為提醒，違反只印警告、不擋件）", () => {
+  const list = KC.currentProblems();
+  assert.ok(Array.isArray(list));
+  KC.remind("寫法提醒 K1–K7", list);
 });
 
 test("區段錨點缺或重複 ⇒ 丟錯（不默默掃空字串）", () => {
