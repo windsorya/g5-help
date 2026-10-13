@@ -140,7 +140,7 @@ details p{margin:0 0 10px}
 
   <div id="saveWarn" class="banner" role="alert" hidden style="background:var(--sun-soft);border-radius:12px;padding:12px 16px;margin-bottom:12px">這台裝置還有練習進度沒存好（可能空間不足或瀏覽器限制），請先不要關閉這一頁；每 3 秒會自動再試。 <button class="btn ghost sm" type="button" id="saveRetry">現在再存一次</button></div>
   <section id="home" style="display:grid;gap:18px">
-    <div class="panel"><p style="margin:0">每一篇都是她說「看不懂」的那一題：跟著步驟自己動手做，做完再練幾題同類型的，練到會為止。不用重看整張考卷。</p></div>
+    <div class="panel"><p style="margin:0">每一篇都是她說「看不懂」的那一題。跟著步驟自己動手做，做完再練幾題同類型的，練到會為止。不用重看整張考卷。</p></div>
     <div id="subjects" style="display:grid;gap:18px"></div>
     <details id="upBox"><summary>家長傳題目（她說看不懂的那一題）</summary>
       <div style="display:grid;gap:12px" id="upForm">
@@ -476,7 +476,7 @@ function step4(){
     if (v <= 0) return {ok:false, msg:"要找比 0 大的公倍數：從 " + sa.d + " 的倍數和 " + sb.d + " 的倍數裡，找第一個一樣的數。"};
     if (v % sa.d === 0 && v % sb.d === 0) return {ok:false, msg:v + " 也是 " + sa.d + " 和 " + sb.d + " 的公倍數，但還有更小的，再找找看。"};
     var ma = [], mb = []; for (var i = 1; i <= L / sa.d + 1; i++) ma.push(sa.d * i); for (var j = 1; j <= L / sb.d + 1; j++) mb.push(sb.d * j);
-    return {ok:false, msg:sa.d + " 的倍數：" + ma.join("、") + "…；" + sb.d + " 的倍數：" + mb.join("、") + "…。第一個兩邊都有的數，就是最小公倍數。"};
+    return {ok:false, msg:sa.d + " 的倍數：" + ma.join("、") + "…。" + sb.d + " 的倍數：" + mb.join("、") + "…。第一個兩邊都有的數，就是最小公倍數。"};
   }}], function(){
     convert(b, sa, L, function(ea){
       convert(b, sb, L, function(eb){
@@ -577,8 +577,9 @@ function renderPractice(){
       return {ok:false, countable:x.code !== "empty", msg:x.msg};
     }, [
       function(){ var ma = [], mb = []; for (var i = 1; i <= s.lcm / sa.d; i++) ma.push(sa.d * i); for (var j = 1; j <= s.lcm / sb.d; j++) mb.push(sb.d * j);
-        return "先找 " + sa.d + " 和 " + sb.d + " 的最小公倍數（兩個數共同的倍數裡，最小的那一個）。" + sa.d + " 的倍數：" + ma.join("、") + "…；" + sb.d + " 的倍數：" + mb.join("、") + "…，第一個兩邊都有的就是。"; },
-      function(){ return "最小公倍數（共同的倍數裡最小的）是 " + s.lcm + "。" + F.txt(sa) + " 的分子分母都乘 " + (s.lcm / sa.d) + " → " + F.txt(s.ea) + "；" + F.txt(sb) + " 的分子分母都乘 " + (s.lcm / sb.d) + " → " + F.txt(s.eb) + "。"; }
+        // 倍數列表一個分母一句（舊版用「；」「，」串成一句，3 和 10 時 61 字，設計 D・B11）
+        return "先找 " + sa.d + " 和 " + sb.d + " 的最小公倍數（兩個數共同的倍數裡，最小的那一個）。" + sa.d + " 的倍數：" + ma.join("、") + "…。" + sb.d + " 的倍數：" + mb.join("、") + "…。第一個兩邊都有的就是。"; },
+      function(){ return "最小公倍數（共同的倍數裡最小的）是 " + s.lcm + "。" + F.txt(sa) + " 的分子分母都乘 " + (s.lcm / sa.d) + " → " + F.txt(s.ea) + "。" + F.txt(sb) + " 的分子分母都乘 " + (s.lcm / sb.d) + " → " + F.txt(s.eb) + "。"; }
     ]);
     reveal(r2);
   }

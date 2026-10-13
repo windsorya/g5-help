@@ -112,22 +112,16 @@ test("標準②圖：通用格式每一步都有圖", () => {
   assert.deepEqual(figMissing(H.LIST), []);
 });
 
-// 孩子看到的字一律從 tests/kidtext.js 取（每一種 kind；Codex 審 bdad9d6：舊版只篩 steps，數學篇寫 100 字一句也過）。
-// kidtext 會先去 HTML，所以這裡先把每個字串的 <br> 換成換行再交給它，換行才會留下來當句界。
+// 本站取資料（設計 D・B2）：孩子看到的字＝真瀏覽器（Chromium、WebKit）實際操作每個入口與分支後採到的可見文字
+// （tests/kidgate.js＋tests/e2e_kidtext.py → tests/kidtext_harvest.json；不是這一版 index.html 量的就紅）。
+// 舊版用原始碼重建畫面字，量不到 frac.js 回傳字與拼接後的全句（Codex 審 2e41b5d：61 字的通分提示仍過）。
 const KT = require("./kidtext.js");
-function brToNewline(x) {
-  if (typeof x === "string") return x.replace(/<br\s*\/?>/gi, "\n");
-  if (Array.isArray(x)) return x.map(brToNewline);
-  if (x && typeof x === "object") { const o = {}; Object.keys(x).forEach((k) => { o[k] = brToNewline(x[k]); }); return o; }
-  return x;
-}
-function longSentences(e) {
-  const { paths, pieces } = KT.kidText(brToNewline(e));
-  return [...new Set(paths.flat().concat(pieces))].map((t) => tooLong(t).map((s) => e.id + "：" + s)).flat();
-}
+const harvestSelf = (id) => BROWSERS_OK(id);
+function BROWSERS_OK(id) { const h = KT.readHarvest(); return !!h && KT.BROWSERS.every((b) => h.browsers[b] && h.browsers[b].selftests[id] && h.browsers[b].selftests[id].ok); }
 
 test("標準③白話：孩子看到的每一句不超過年級句長上限（每一種 kind）", () => {
-  assert.deepEqual(H.LIST.map(longSentences).flat(), []);
+  assert.equal(MAX_SENTENCE, (KT.readHarvest() || {}).max, "採字時的句長上限要等於今天年級的上限");
+  assert.deepEqual(KT.harvestProblems(["length", "unclassified"]), []);
 });
 
 test("標準④三站切換列：siteNav 連到另外兩站、本站標 aria-current", () => {
@@ -161,14 +155,12 @@ test("自檢②：<svg aria-label=\"板根示意\"></svg> 空圖，要抓到", (
   assert.ok(!figOk('<svg role="img" aria-label="板根示意"><!-- <rect/> --></svg>'), "註解裡的繪圖元素不算");
 });
 test("自檢③a：25 字<br>25 字是兩句，不可黏成 50 字", () => {
-  const e = clone(H.get(STEPS_ID)); e.steps[0].say = "字".repeat(25) + "<br>" + "字".repeat(25);
-  assert.deepEqual(longSentences(e), []);
+  assert.deepEqual(tooLong("字".repeat(25) + "<br>" + "字".repeat(25)), [], "共通判準");
+  assert.ok(harvestSelf("B15"), "瀏覽器採字：真正 <br> 分行通過、相鄰 span 合成 50 字與窄視窗折行都要攔（e2e_kidtext B15）");
 });
 test("自檢③b：一句超過上限要抓到（數學篇 lead 也量）", () => {
-  const e = clone(H.get(STEPS_ID)); e.steps[0].say = "字".repeat(MAX_SENTENCE + 1) + "。";
-  assert.ok(longSentences(e).length);
-  const c = clone(H.get("p38-6-2")); c.lead = "字".repeat(100) + "。";
-  assert.ok(longSentences(c).length, "frac-compare 篇也要量句長");
+  assert.ok(tooLong("字".repeat(MAX_SENTENCE + 1) + "。").length, "共通判準");
+  assert.ok(harvestSelf("B19") && harvestSelf("B07") && harvestSelf("B14"), "瀏覽器採字：40 字過、41 字攔；數學篇 lead 100 字、步驟標題 100 字都要攔（e2e_kidtext B19、B07、B14）");
 });
 test("自檢④a：數學站連結改指自然站，要抓到", () => {
   const bad = HTML.split('href="' + SITES.math.url + '"').join('href="' + SITES.sci.url + '"');

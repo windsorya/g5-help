@@ -80,7 +80,7 @@ test("checkCommon：分母不同、左右大小改變被抓；用公倍數但不
   const big = F.checkCommon(sa, sb, fr(20, 30), fr(18, 30));
   assert.equal(big.ok, true);
   assert.equal(big.code, "ok-not-lcm");
-  assert.match(big.msg, /最小公倍數 15/);
+  assert.match(big.msg, /最小公倍數（[^）]+）15/);   // 第一次出現就附白話（設計 D・B10：直接練習時孩子沒看過教學）
   assert.equal(F.checkCommon(sa, sb, fr(10, 15), fr(9, 16)).code, "diff-den");
   assert.equal(F.checkCommon(sa, sb, fr(2, 15), fr(9, 15)).code, "left-changed");   // 只改分母沒改分子
   assert.equal(F.checkCommon(sa, sb, fr(10, 15), fr(3, 15)).code, "right-changed");

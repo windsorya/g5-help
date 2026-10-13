@@ -1,0 +1,873 @@
+{
+ "index_sha256": "e9a3508ba361b8b8273035476e2723a0d69f0b3ac037e0aa1677922d6bd0c791",
+ "kidgate_sha256": "eb4b22227f5751cc6a8cb0b8f805f86816d74855030c4e4ec1085b2dc03007dc",
+ "driver_sha256": "a235110ba2c4b2defb7329e73224b6e488e49f6007e9388ff579338f63d42d30",
+ "max": 40,
+ "self_max": 40,
+ "browsers": {
+  "chromium": {
+   "cases": [
+    "home",
+    "p38-6-2:alt",
+    "p38-6-2:direct",
+    "p38-6-2:lesson",
+    "p38-6-2:practice",
+    "p38-6-2:resume",
+    "p38-6-2:video",
+    "sci-q5-bangen:direct",
+    "sci-q5-bangen:lesson",
+    "sci-q5-bangen:mastery",
+    "sci-q5-bangen:resume0",
+    "sci-q5-bangen:resume1",
+    "sci-q5-bangen:resume2",
+    "sci-q5-bangen:resume3",
+    "sci-q5-bangen:video"
+   ],
+   "branches": [
+    "app:alt",
+    "app:finish-clean",
+    "app:finish-hint",
+    "app:finish-wrong",
+    "app:form-bad",
+    "app:form-empty",
+    "app:hint-r1-1",
+    "app:hint-r1-2",
+    "app:hint-r2-1",
+    "app:hint-r2-2",
+    "app:nums-bad",
+    "app:nums-empty",
+    "app:nums-third",
+    "app:nums-wrong",
+    "app:r1-ok",
+    "app:step1-mul",
+    "app:step1-num",
+    "app:step1-red",
+    "app:step4-common",
+    "app:step4-else",
+    "app:step4-le0",
+    "app:step5-ok",
+    "app:step5-wrong",
+    "app:step5b-ok",
+    "app:step5b-wrong",
+    "app:step6-n",
+    "app:step6-ok",
+    "app:step6-x",
+    "app:win",
+    "checkCommon:diff-den",
+    "checkCommon:invalid-d0",
+    "checkCommon:invalid-n0",
+    "checkCommon:left-changed",
+    "checkCommon:ok",
+    "checkCommon:ok-not-lcm",
+    "checkCommon:right-changed",
+    "checkReduce:changed",
+    "checkReduce:invalid-d0",
+    "checkReduce:invalid-n0",
+    "checkReduce:not-simplest",
+    "checkReduce:ok",
+    "checkReduce:unequal-div",
+    "checkSign:ok-eq",
+    "checkSign:ok-neq",
+    "checkSign:wrong-eq",
+    "checkSign:wrong-neq",
+    "p38-6-2:direct",
+    "pickDivisor:bad",
+    "pickDivisor:none-ok",
+    "pickDivisor:none-wrong",
+    "pickDivisor:ok",
+    "sci-q5-bangen:check1:0",
+    "sci-q5-bangen:check1:1",
+    "sci-q5-bangen:check2:0",
+    "sci-q5-bangen:check2:1",
+    "sci-q5-bangen:check3:0",
+    "sci-q5-bangen:check3:1",
+    "sci-q5-bangen:mastery",
+    "sci-q5-bangen:prac1:0",
+    "sci-q5-bangen:prac1:1",
+    "sci-q5-bangen:prac2:0",
+    "sci-q5-bangen:prac2:1",
+    "sci-q5-bangen:prac3:0",
+    "sci-q5-bangen:prac3:1",
+    "sci-q5-bangen:prac4:0",
+    "sci-q5-bangen:prac4:1"
+   ],
+   "violations": [],
+   "selftests": {
+    "B10-judged": {
+     "ok": true,
+     "detail": ""
+    },
+    "B01a": {
+     "ok": true,
+     "detail": [
+      {
+       "kind": "word",
+       "unit": "top",
+       "word": "板根",
+       "text": "先弄清楚板根（）。\n開始學\n我已",
+       "case": "self",
+       "at": "開篇"
+      },
+      {
+       "kind": "word",
+       "unit": "video",
+       "word": "板根",
+       "text": "先弄清楚板根（）。\n開始學\n我已",
+       "case": "self",
+       "at": "開篇"
+      }
+     ]
+    },
+    "B01b": {
+     "ok": true,
+     "detail": [
+      {
+       "kind": "word",
+       "unit": "top",
+       "word": "板根",
+       "text": "先弄清楚板根（ ）。\n開始學\n我",
+       "case": "self",
+       "at": "開篇"
+      },
+      {
+       "kind": "word",
+       "unit": "video",
+       "word": "板根",
+       "text": "先弄清楚板根（ ）。\n開始學\n我",
+       "case": "self",
+       "at": "開篇"
+      }
+     ]
+    },
+    "B02a": {
+     "ok": true,
+     "detail": [
+      {
+       "kind": "word",
+       "unit": "lesson",
+       "word": "蒸散",
+       "text": "部分突出地面，看得到\n再想想蒸散。\n這步看不懂",
+       "case": "self",
+       "at": "第1步選錯"
+      }
+     ]
+    },
+    "B02b": {
+     "ok": true,
+     "detail": [
+      {
+       "kind": "word",
+       "unit": "practice",
+       "word": "蒸散",
+       "text": "\n又扁又寬，突出地面\n再想想蒸散。",
+       "case": "self",
+       "at": "練習選錯"
+      }
+     ]
+    },
+    "B03": {
+     "ok": true,
+     "detail": [
+      {
+       "kind": "word",
+       "unit": "top",
+       "word": "光合作用",
+       "text": "先認識光合作用。\n開始學\n我已經會",
+       "case": "self",
+       "at": "開篇"
+      },
+      {
+       "kind": "word",
+       "unit": "video",
+       "word": "光合作用",
+       "text": "先認識光合作用。\n開始學\n我已經會",
+       "case": "self",
+       "at": "開篇"
+      }
+     ]
+    },
+    "B04": {
+     "ok": true,
+     "detail": [
+      {
+       "kind": "word",
+       "unit": "lesson",
+       "word": "光合作用",
+       "text": "部分突出地面，看得到\n再想想光合作用。\n這步看不懂",
+       "case": "self",
+       "at": "第1步先答錯"
+      }
+     ]
+    },
+    "B05": {
+     "ok": true,
+     "detail": [
+      {
+       "kind": "word",
+       "unit": "lesson",
+       "word": "最小公倍數",
+       "text": "數字小多了！\n3 和 5 的最小公倍數是多少？\n檢查\n這步",
+       "case": "self",
+       "at": "第3步完成"
+      },
+      {
+       "kind": "word",
+       "unit": "lesson",
+       "word": "最小公倍數",
+       "text": "數字小多了！\n3 和 5 的最小公倍數是多少？\n檢查\n要找",
+       "case": "self",
+       "at": "最小公倍數填 0"
+      }
+     ]
+    },
+    "B06": {
+     "ok": true,
+     "detail": [
+      {
+       "kind": "word",
+       "unit": "practice",
+       "word": "蒸散",
+       "text": "扁又寬，突出地面\n對！這就是蒸散。\n第一次就選對！連",
+       "case": "self",
+       "at": "練習答對"
+      }
+     ]
+    },
+    "B07": {
+     "ok": true,
+     "detail": [
+      {
+       "kind": "length",
+       "unit": "top",
+       "chars": 100,
+       "text": "字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字",
+       "case": "self",
+       "at": "開篇"
+      }
+     ]
+    },
+    "B09": {
+     "ok": true,
+     "detail": {
+      "答對": [
+       {
+        "kind": "word",
+        "unit": "lesson",
+        "word": "光合作用",
+        "text": "子，28 比 27 大\n對！光合作用。\n這步看不懂\n2\n",
+        "case": "self",
+        "at": "第一次就答對"
+       }
+      ],
+      "答錯": [],
+      "再答對": [
+       {
+        "kind": "word",
+        "unit": "lesson",
+        "word": "光合作用",
+        "text": "子，28 比 27 大\n對！光合作用。\n這步看不懂\n2\n",
+        "case": "self",
+        "at": "再答對"
+       }
+      ]
+     }
+    },
+    "B12": {
+     "ok": true,
+     "detail": [
+      {
+       "kind": "word",
+       "unit": "lesson",
+       "word": "光合作用",
+       "text": "已經會了，直接練習\n1\n先看光合作用\n大部分的根都埋在土",
+       "case": "self",
+       "at": "開始學"
+      }
+     ]
+    },
+    "B13": {
+     "ok": true,
+     "detail": [
+      {
+       "kind": "word",
+       "unit": "lesson",
+       "word": "光合作用",
+       "text": "：突出地面、像三角形的翅膀\n光合作用\n板根長在哪裡？\n全",
+       "case": "self",
+       "at": "開始學"
+      }
+     ]
+    },
+    "B14": {
+     "ok": true,
+     "detail": [
+      {
+       "kind": "length",
+       "unit": "lesson",
+       "chars": 100,
+       "text": "字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字",
+       "case": "self",
+       "at": "開始學"
+      }
+     ]
+    },
+    "B15": {
+     "ok": true,
+     "detail": {
+      "span": [
+       {
+        "kind": "length",
+        "unit": "lesson",
+        "chars": 50,
+        "text": "甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙",
+        "case": "self",
+        "at": "開始學"
+       }
+      ],
+      "br": [],
+      "br-narrow": [],
+      "plain-narrow": [
+       {
+        "kind": "length",
+        "unit": "lesson",
+        "chars": 50,
+        "text": "丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙",
+        "case": "self",
+        "at": "開始學"
+       }
+      ]
+     }
+    },
+    "B16": {
+     "ok": true,
+     "detail": {
+      "hidden": [
+       {
+        "kind": "word",
+        "unit": "lesson",
+        "word": "光合作用",
+        "text": "面。\n開始學\n1\n測試步驟\n光合作用很重要。\n我懂了，下",
+        "case": "self",
+        "at": "開始學"
+       }
+      ],
+      "closed": [
+       {
+        "kind": "word",
+        "unit": "lesson",
+        "word": "光合作用",
+        "text": "始學\n1\n測試步驟\n看解釋\n光合作用很重要。\n我懂了，下",
+        "case": "self",
+        "at": "開始學"
+       }
+      ],
+      "opened": []
+     }
+    },
+    "B19": {
+     "ok": true,
+     "detail": {
+      "len": {
+       "40": [
+        false,
+        false
+       ],
+       "41": [
+        true,
+        true
+       ],
+       "bold40": [
+        false,
+        false
+       ],
+       "bold41": [
+        true,
+        true
+       ],
+       "entity40": [
+        false,
+        false
+       ],
+       "entity41": [
+        true,
+        true
+       ],
+       "svg41": [
+        true,
+        true
+       ],
+       "svg40": [
+        false,
+        false
+       ]
+      },
+      "gloss": []
+     }
+    },
+    "unclassified": {
+     "ok": true,
+     "detail": [
+      {
+       "kind": "unclassified",
+       "text": "新加的說明文字",
+       "tag": "div",
+       "case": "self",
+       "at": "加一塊沒分類的字"
+      }
+     ]
+    },
+    "U01": {
+     "ok": true,
+     "detail": {
+      "0": [
+       "已送出，等電腦取回",
+       "已送出，等電腦取回"
+      ],
+      "null": [
+       "已送出，等電腦取回",
+       "已送出，等電腦取回"
+      ],
+      "undefined": [
+       "已送出，等電腦取回",
+       "已送出，等電腦取回"
+      ]
+     }
+    }
+   },
+   "errors": [],
+   "snapshots": 116
+  },
+  "webkit": {
+   "cases": [
+    "home",
+    "p38-6-2:alt",
+    "p38-6-2:direct",
+    "p38-6-2:lesson",
+    "p38-6-2:practice",
+    "p38-6-2:resume",
+    "p38-6-2:video",
+    "sci-q5-bangen:direct",
+    "sci-q5-bangen:lesson",
+    "sci-q5-bangen:mastery",
+    "sci-q5-bangen:resume0",
+    "sci-q5-bangen:resume1",
+    "sci-q5-bangen:resume2",
+    "sci-q5-bangen:resume3",
+    "sci-q5-bangen:video"
+   ],
+   "branches": [
+    "app:alt",
+    "app:finish-clean",
+    "app:finish-hint",
+    "app:finish-wrong",
+    "app:form-bad",
+    "app:form-empty",
+    "app:hint-r1-1",
+    "app:hint-r1-2",
+    "app:hint-r2-1",
+    "app:hint-r2-2",
+    "app:nums-bad",
+    "app:nums-empty",
+    "app:nums-third",
+    "app:nums-wrong",
+    "app:r1-ok",
+    "app:step1-mul",
+    "app:step1-num",
+    "app:step1-red",
+    "app:step4-common",
+    "app:step4-else",
+    "app:step4-le0",
+    "app:step5-ok",
+    "app:step5-wrong",
+    "app:step5b-ok",
+    "app:step5b-wrong",
+    "app:step6-n",
+    "app:step6-ok",
+    "app:step6-x",
+    "app:win",
+    "checkCommon:diff-den",
+    "checkCommon:invalid-d0",
+    "checkCommon:invalid-n0",
+    "checkCommon:left-changed",
+    "checkCommon:ok",
+    "checkCommon:ok-not-lcm",
+    "checkCommon:right-changed",
+    "checkReduce:changed",
+    "checkReduce:invalid-d0",
+    "checkReduce:invalid-n0",
+    "checkReduce:not-simplest",
+    "checkReduce:ok",
+    "checkReduce:unequal-div",
+    "checkSign:ok-eq",
+    "checkSign:ok-neq",
+    "checkSign:wrong-eq",
+    "checkSign:wrong-neq",
+    "p38-6-2:direct",
+    "pickDivisor:bad",
+    "pickDivisor:none-ok",
+    "pickDivisor:none-wrong",
+    "pickDivisor:ok",
+    "sci-q5-bangen:check1:0",
+    "sci-q5-bangen:check1:1",
+    "sci-q5-bangen:check2:0",
+    "sci-q5-bangen:check2:1",
+    "sci-q5-bangen:check3:0",
+    "sci-q5-bangen:check3:1",
+    "sci-q5-bangen:mastery",
+    "sci-q5-bangen:prac1:0",
+    "sci-q5-bangen:prac1:1",
+    "sci-q5-bangen:prac2:0",
+    "sci-q5-bangen:prac2:1",
+    "sci-q5-bangen:prac3:0",
+    "sci-q5-bangen:prac3:1",
+    "sci-q5-bangen:prac4:0",
+    "sci-q5-bangen:prac4:1"
+   ],
+   "violations": [],
+   "selftests": {
+    "B10-judged": {
+     "ok": true,
+     "detail": ""
+    },
+    "B01a": {
+     "ok": true,
+     "detail": [
+      {
+       "kind": "word",
+       "unit": "top",
+       "word": "板根",
+       "text": "先弄清楚板根（）。\n開始學\n我已",
+       "case": "self",
+       "at": "開篇"
+      },
+      {
+       "kind": "word",
+       "unit": "video",
+       "word": "板根",
+       "text": "先弄清楚板根（）。\n開始學\n我已",
+       "case": "self",
+       "at": "開篇"
+      }
+     ]
+    },
+    "B01b": {
+     "ok": true,
+     "detail": [
+      {
+       "kind": "word",
+       "unit": "top",
+       "word": "板根",
+       "text": "先弄清楚板根（ ）。\n開始學\n我",
+       "case": "self",
+       "at": "開篇"
+      },
+      {
+       "kind": "word",
+       "unit": "video",
+       "word": "板根",
+       "text": "先弄清楚板根（ ）。\n開始學\n我",
+       "case": "self",
+       "at": "開篇"
+      }
+     ]
+    },
+    "B02a": {
+     "ok": true,
+     "detail": [
+      {
+       "kind": "word",
+       "unit": "lesson",
+       "word": "蒸散",
+       "text": "部分突出地面，看得到\n再想想蒸散。\n這步看不懂",
+       "case": "self",
+       "at": "第1步選錯"
+      }
+     ]
+    },
+    "B02b": {
+     "ok": true,
+     "detail": [
+      {
+       "kind": "word",
+       "unit": "practice",
+       "word": "蒸散",
+       "text": "\n又扁又寬，突出地面\n再想想蒸散。",
+       "case": "self",
+       "at": "練習選錯"
+      }
+     ]
+    },
+    "B03": {
+     "ok": true,
+     "detail": [
+      {
+       "kind": "word",
+       "unit": "top",
+       "word": "光合作用",
+       "text": "先認識光合作用。\n開始學\n我已經會",
+       "case": "self",
+       "at": "開篇"
+      },
+      {
+       "kind": "word",
+       "unit": "video",
+       "word": "光合作用",
+       "text": "先認識光合作用。\n開始學\n我已經會",
+       "case": "self",
+       "at": "開篇"
+      }
+     ]
+    },
+    "B04": {
+     "ok": true,
+     "detail": [
+      {
+       "kind": "word",
+       "unit": "lesson",
+       "word": "光合作用",
+       "text": "部分突出地面，看得到\n再想想光合作用。\n這步看不懂",
+       "case": "self",
+       "at": "第1步先答錯"
+      }
+     ]
+    },
+    "B05": {
+     "ok": true,
+     "detail": [
+      {
+       "kind": "word",
+       "unit": "lesson",
+       "word": "最小公倍數",
+       "text": "數字小多了！\n3 和 5 的最小公倍數是多少？\n檢查\n這步",
+       "case": "self",
+       "at": "第3步完成"
+      },
+      {
+       "kind": "word",
+       "unit": "lesson",
+       "word": "最小公倍數",
+       "text": "數字小多了！\n3 和 5 的最小公倍數是多少？\n檢查\n要找",
+       "case": "self",
+       "at": "最小公倍數填 0"
+      }
+     ]
+    },
+    "B06": {
+     "ok": true,
+     "detail": [
+      {
+       "kind": "word",
+       "unit": "practice",
+       "word": "蒸散",
+       "text": "扁又寬，突出地面\n對！這就是蒸散。\n第一次就選對！連",
+       "case": "self",
+       "at": "練習答對"
+      }
+     ]
+    },
+    "B07": {
+     "ok": true,
+     "detail": [
+      {
+       "kind": "length",
+       "unit": "top",
+       "chars": 100,
+       "text": "字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字",
+       "case": "self",
+       "at": "開篇"
+      }
+     ]
+    },
+    "B09": {
+     "ok": true,
+     "detail": {
+      "答對": [
+       {
+        "kind": "word",
+        "unit": "lesson",
+        "word": "光合作用",
+        "text": "子，28 比 27 大\n對！光合作用。\n這步看不懂\n2\n",
+        "case": "self",
+        "at": "第一次就答對"
+       }
+      ],
+      "答錯": [],
+      "再答對": [
+       {
+        "kind": "word",
+        "unit": "lesson",
+        "word": "光合作用",
+        "text": "子，28 比 27 大\n對！光合作用。\n這步看不懂\n2\n",
+        "case": "self",
+        "at": "再答對"
+       }
+      ]
+     }
+    },
+    "B12": {
+     "ok": true,
+     "detail": [
+      {
+       "kind": "word",
+       "unit": "lesson",
+       "word": "光合作用",
+       "text": "已經會了，直接練習\n1\n先看光合作用\n大部分的根都埋在土",
+       "case": "self",
+       "at": "開始學"
+      }
+     ]
+    },
+    "B13": {
+     "ok": true,
+     "detail": [
+      {
+       "kind": "word",
+       "unit": "lesson",
+       "word": "光合作用",
+       "text": "：突出地面、像三角形的翅膀\n光合作用\n板根長在哪裡？\n全",
+       "case": "self",
+       "at": "開始學"
+      }
+     ]
+    },
+    "B14": {
+     "ok": true,
+     "detail": [
+      {
+       "kind": "length",
+       "unit": "lesson",
+       "chars": 100,
+       "text": "字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字",
+       "case": "self",
+       "at": "開始學"
+      }
+     ]
+    },
+    "B15": {
+     "ok": true,
+     "detail": {
+      "span": [
+       {
+        "kind": "length",
+        "unit": "lesson",
+        "chars": 50,
+        "text": "甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙",
+        "case": "self",
+        "at": "開始學"
+       }
+      ],
+      "br": [],
+      "br-narrow": [],
+      "plain-narrow": [
+       {
+        "kind": "length",
+        "unit": "lesson",
+        "chars": 50,
+        "text": "丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙",
+        "case": "self",
+        "at": "開始學"
+       }
+      ]
+     }
+    },
+    "B16": {
+     "ok": true,
+     "detail": {
+      "hidden": [
+       {
+        "kind": "word",
+        "unit": "lesson",
+        "word": "光合作用",
+        "text": "面。\n開始學\n1\n測試步驟\n光合作用很重要。\n我懂了，下",
+        "case": "self",
+        "at": "開始學"
+       }
+      ],
+      "closed": [
+       {
+        "kind": "word",
+        "unit": "lesson",
+        "word": "光合作用",
+        "text": "始學\n1\n測試步驟\n看解釋\n光合作用很重要。\n我懂了，下",
+        "case": "self",
+        "at": "開始學"
+       }
+      ],
+      "opened": []
+     }
+    },
+    "B19": {
+     "ok": true,
+     "detail": {
+      "len": {
+       "40": [
+        false,
+        false
+       ],
+       "41": [
+        true,
+        true
+       ],
+       "bold40": [
+        false,
+        false
+       ],
+       "bold41": [
+        true,
+        true
+       ],
+       "entity40": [
+        false,
+        false
+       ],
+       "entity41": [
+        true,
+        true
+       ],
+       "svg41": [
+        true,
+        true
+       ],
+       "svg40": [
+        false,
+        false
+       ]
+      },
+      "gloss": []
+     }
+    },
+    "unclassified": {
+     "ok": true,
+     "detail": [
+      {
+       "kind": "unclassified",
+       "text": "新加的說明文字",
+       "tag": "div",
+       "case": "self",
+       "at": "加一塊沒分類的字"
+      }
+     ]
+    },
+    "U01": {
+     "ok": true,
+     "detail": {
+      "0": [
+       "已送出，等電腦取回",
+       "已送出，等電腦取回"
+      ],
+      "null": [
+       "已送出，等電腦取回",
+       "已送出，等電腦取回"
+      ],
+      "undefined": [
+       "已送出，等電腦取回",
+       "已送出，等電腦取回"
+      ]
+     }
+    }
+   },
+   "errors": [],
+   "snapshots": 116
+  }
+ }
+}

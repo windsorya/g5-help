@@ -93,55 +93,50 @@ test("白話程度跟著年級：今天的年級、每一篇每一句都不超�
 // 用詞難度（交辦 #1319，2026-10-13 律師問「只檢查句長、用詞靠我注意，這機制合理嗎」）：
 // 句長只是代理指標；看不懂多半卡在詞。三道：①難詞第一次出現就要附白話（本測試）②第二個模型依年級審過（readReview）
 // ③孩子按「這步看不懂」的真實回饋（app.html → GAS Inbox）。①擋得住「已知的難詞」，擋不住沒列進表的詞 ⇒ 靠②③補。
-// 括號裡要真的有白話：「板根（）」不算（Codex 審 5367999：舊版只看後面是不是「（」）。
-const stripTags = (x) => String(x || "").replace(/<[^>]*>/g, "").replace(/&[a-z]+;/g, "");
-function glossed(text, w, at) {
-  const rest = text.slice(at + w.length), around = text.slice(Math.max(0, at - 3), at);
-  return /^（[^）\s]+）/.test(rest) || (/[^\s（）]（$/.test(text.slice(Math.max(0, at - 2), at)) && rest.startsWith("）")) || /叫做?「$/.test(around);
-}
-// 孩子看到的文字一律從 tests/kidtext.js 取（依畫面顯示順序的路徑；Codex 審 bdad9d6：舊版自己串、把 ok 排在 why 前面、漏 practice.ok 與數學篇步驟字）。
+// 括號裡要真的有白話：「板根（）」不算（Codex 審 5367999）。
+// 設計 D・B2（#1347 第 4 輪起）：主閘改成真瀏覽器採字（tests/kidgate.js＋tests/e2e_kidtext.py），這裡讀它的結果（tests/kidtext_harvest.json；
+// 不是這一版 index.html 量的就紅）。舊版用原始碼 regex 重建畫面，三輪審查證明它猜錯分支、量不到 frac.js 回傳字與拼接後全句、漏標題與 SVG 字。
+// 靜態部分（tests/kidtext.js）只剩輔助：欄位、詞表、案例完整性。
 const KT = require("./kidtext.js");
-// 每一種 kind 都查（Codex 審 5367999：舊版只篩 steps，數學篇寫什麼都過）。回傳問題清單，空＝通過。
-function wordProblems(e) {
-  const out = [];
-  if (e.kind === "steps" && !(e.words && typeof e.words === "object" && !Array.isArray(e.words))) out.push(e.id + " 要列出 words（本篇用到的難詞→白話；真的沒有就寫 {}）");
-  const { paths, pieces } = KT.kidText(e);
-  const words = Object.keys(H.HARD_WORDS).concat(Object.keys(e.words || {}));
-  paths.forEach((p, pi) => {
-    const body = p.join("\n");
-    words.forEach((w) => {
-      const at = body.indexOf(w);
-      if (at >= 0 && !glossed(body, w, at)) out.push(e.id + (pi ? "（答錯分支 " + pi + "）" : "") + " 的難詞「" + w + "」第一次出現沒有附白話（寫成「" + w + "（白話）」或「白話（" + w + "）」或「叫「" + w + "」」）：…" + body.slice(Math.max(0, at - 12), at + w.length + 8) + "…");
-    });
-  });
-  pieces.forEach((t) => words.forEach((w) => {
-    const at = t.indexOf(w);
-    if (at >= 0 && !glossed(t, w, at) && !/就是$/.test(t.slice(Math.max(0, at - 2), at))) out.push(e.id + " 畫面程式字串的難詞「" + w + "」沒有附白話：" + t);
-  }));
-  // readReview 從 #1319（2026-10-13）起才規定；之前上線的篇（p38-6-2，10-12）不追溯，下次改寫那篇時補。
-  const r = e.readReview;
-  if (e.date >= "2026-10-13" && !(r && typeof r.by === "string" && r.by && /^\d{4}-\d{2}-\d{2}$/.test(r.date) && r.grade === H.gradeAt(new Date(r.date + "T12:00:00+08:00")) && Array.isArray(r.fixed)))
-    out.push(e.id + " 要有 readReview {by: 審查模型, date, grade: 當天年級, fixed: [依審查改了哪些詞句]}——上線前請第二個模型依年級列出看不懂的詞句");
-  return [...new Set(out)];
-}
+const KG = require("./kidgate.js");
 
 test("難詞第一次出現就要附白話；每篇都要有第二個模型的年級閱讀審查紀錄", () => {
-  H.LIST.forEach((e) => assert.deepEqual(wordProblems(e), []));
+  assert.deepEqual(KT.wordTableProblems(), [], "欄位與詞表");
+  // readReview 從 #1319（2026-10-13）起才規定；之前上線的篇（p38-6-2，10-12）不追溯，下次改寫那篇時補。
+  H.LIST.forEach((e) => {
+    const r = e.readReview;
+    if (e.date >= "2026-10-13") assert.ok(r && typeof r.by === "string" && r.by && /^\d{4}-\d{2}-\d{2}$/.test(r.date) && r.grade === H.gradeAt(new Date(r.date + "T12:00:00+08:00")) && Array.isArray(r.fixed),
+      e.id + " 要有 readReview {by: 審查模型, date, grade: 當天年級, fixed: [依審查改了哪些詞句]}——上線前請第二個模型依年級列出看不懂的詞句");
+  });
+  // 主閘：Chromium、WebKit 實際操作每個入口與分支後採到的字，用詞違規＋未歸類的可見文字都要是 0，案例與分支都要走到、自檢都要過
+  assert.deepEqual(KT.harvestProblems(["word", "unclassified"]), []);
 });
 
-test("用詞閘自檢：Codex 審 5367999、bdad9d6 的突變都要被抓到", () => {
-  const clone = (id) => JSON.parse(JSON.stringify(H.get(id)));
-  const has = (e, w) => wordProblems(e).some((x) => x.includes(w));
-  const a = clone("sci-q5-bangen"); a.lead = "先弄清楚板根（）。";
-  assert.ok(wordProblems(a).length, "空括號不算附白話");
-  const b = clone("sci-q5-bangen"); b.lead = "看下面。"; b.steps[0].say = "看圖。"; b.steps[0].check.why[0] = "再想想蒸散。";
-  assert.ok(has(b, "蒸散"), "答錯回饋裡的難詞也要查");
-  const b2 = clone("sci-q5-bangen"); b2.lead = "看下面。"; b2.steps[0].say = "看圖。";
-  b2.steps[0].check.ok = "對！光合作用（植物用陽光做成養分）。"; b2.steps[0].check.why[0] = "再想想光合作用。";
-  assert.ok(has(b2, "光合作用"), "答錯分支先看到 why，後面的 ok 不能替它解釋");
-  const b3 = clone("sci-q5-bangen"); b3.practice[0].ok = "對！這就是蒸散。";
-  assert.ok(has(b3, "蒸散"), "練習答對回饋也是孩子看得到的字");
-  const c = clone("p38-6-2"); c.lead = "先認識光合作用。";
-  assert.ok(has(c, "光合作用"), "數學篇（frac-compare）也要查");
-  assert.ok(KT.kidText(H.get("p38-6-2")).pieces.some((t) => /最小公倍數/.test(t)), "數學篇步驟字串要進用詞閘（第四步問最小公倍數）");
+test("用詞閘自檢：判準本身（node 端同一份 kidgate.js）＋案例完整性的來源都對得上", () => {
+  const g = (t, w) => KG.glossed(t, w, t.indexOf(w));
+  assert.equal(g("先弄清楚板根（）。", "板根"), false, "空括號不算附白話");
+  assert.equal(g("先弄清楚板根（　）。", "板根"), false, "全形空白也不算");
+  assert.equal(g("板根（突出地面的根）", "板根"), true);
+  assert.equal(g("像三角形的翅膀（翼狀）", "翼狀"), true);
+  assert.equal(g("所以叫「板根」", "板根"), true);
+  const v = KG.evaluate([{text: "先看光合作用", cat: "kid", unit: "lesson"}, {text: "光合作用（植物用陽光做養分）", cat: "kid", unit: "lesson"}], ["光合作用"]);
+  assert.ok(v.some((x) => x.kind === "word"), "後面的解釋不能替前面第一次出現的詞解釋");
+  // 畫面上教學在練習上方（教學做完按「換你自己做」）：DOM 順序也是教學在前
+  assert.ok(KG.evaluate([{text: "蒸散（水變成水蒸氣）", cat: "kid", unit: "lesson"}, {text: "練習第 1 題", cat: "kid", unit: "practice"}, {text: "蒸散是什麼？", cat: "kid", unit: "practice"}], ["蒸散"])
+    .some((x) => x.kind === "word" && x.unit === "practice"), "練習題不能借用教學的解釋");
+  assert.ok(KG.evaluate([{text: "新加的字", cat: "unknown", unit: "unknown"}], []).some((x) => x.kind === "unclassified"));
+  assert.deepEqual(KT.appBranchProblems(), [], "app.html 數學篇每個回饋字串都要對到一個要走到的分支");
+  const src = fs.readFileSync(path.join(__dirname, "../src/app.html"), "utf8");
+  const sect = src.slice(src.indexOf("// ---------- 互動元件"), src.indexOf("// ---------- 首頁按鈕"));
+  assert.ok(KT.appBranchProblems(sect + '\n    if (v === 99) return {ok:false, msg:"新加的回饋"};\n').length, "新加一個回饋字串、沒有對應案例 ⇒ 要紅");
+  const more = JSON.parse(JSON.stringify(H.LIST)), bg = more.find((e) => e.id === "sci-q5-bangen");
+  bg.practice.push({q: "新的一題？", opts: ["甲", "乙"], a: 0, why: ["", "不是乙。"]});
+  const miss = KT.harvestProblems(["word"], {list: more});
+  assert.ok(miss.some((p) => p.includes("沒有走到案例 sci-q5-bangen:resume4")) && miss.some((p) => p.includes("沒有走到分支 sci-q5-bangen:prac5:1")), "新增一題練習卻沒有實際走到 ⇒ 要紅");
+  assert.deepEqual(KT.requiredCases().filter((c) => /^sci-q5-bangen:(resume\d|direct|lesson|mastery|video)$/.test(c)).sort(),
+    ["sci-q5-bangen:direct", "sci-q5-bangen:lesson", "sci-q5-bangen:mastery", "sci-q5-bangen:resume0", "sci-q5-bangen:resume1", "sci-q5-bangen:resume2", "sci-q5-bangen:resume3", "sci-q5-bangen:video"], "每一題都要有重開續練的獨立入口");
+  const tmp = path.join(require("os").tmpdir(), "g5help-stale-index-" + process.pid + ".html");
+  fs.writeFileSync(tmp, fs.readFileSync(path.join(__dirname, "../index.html"), "utf8") + "<!-- changed -->");
+  try { assert.ok(KT.harvestProblems(["word"], {indexPath: tmp}).some((p) => /過期/.test(p)), "index.html 改過、沒重跑採字 ⇒ 要紅"); } finally { fs.unlinkSync(tmp); }
+  assert.ok(KT.fracBranches().includes("checkCommon:ok-not-lcm") && KT.fracBranches().includes("checkReduce:unequal-div"), "frac.js 判題代碼要推得出分支");
 });

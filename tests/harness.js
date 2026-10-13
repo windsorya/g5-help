@@ -120,7 +120,8 @@ function device(server, options = {}) {
     qr.addData = data => { d.qrLinks.push(data); return add(data); }; return qr;
   };
   sandbox.module = {exports: {}};
-  vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/sync.js'), 'utf8'), sandbox, {filename: 'sync.js'});
+  // syncPath：A18 相容性差分測試用（同一情境分別載入舊版／新版 sync.js 比對）；預設是 src/sync.js
+  vm.runInContext(fs.readFileSync(options.syncPath || path.join(__dirname, '../src/sync.js'), 'utf8'), sandbox, {filename: 'sync.js'});
   const fetch = (url, config) => {
     d.active++; d.maxActive = Math.max(d.maxActive, d.active);
     const req = JSON.parse(config.body); d.calls.push({url, config, req, at: clock.now()});

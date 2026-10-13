@@ -8,7 +8,7 @@
 }(typeof window !== 'undefined' ? window : (typeof globalThis !== 'undefined' ? globalThis : this), function (root) {
   'use strict';
   var ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
-  var KEYS = ['g5sci.v3', 'g5help.v1', 'g5math.v1', 'g5math.v2'];
+  var KEYS = ['g5sci.v3', 'g5help.v1', 'g5math.v1', 'g5math.v2', 'g5chi.v1', 'g5soc.v1'];   // g5chi／g5soc：五上國語、社會站（GAS 白名單 f53bd54／@7）
   var CODE = 'g5sync.code';
   var META = 'g5sync.meta';
   var BAD_CODE = '同步碼須為 12 碼英文字母或數字，不含 0、O、1、I、L；可包含空白與連字號。';
@@ -90,14 +90,19 @@
     var code = null, epoch = 0, destroyed = false, stopped = false;
     var busy = null, activeAbort = null, retryTimer = null, failures = 0, retryAt = 0;
     var needsGet = {}, conflicts = {}, decisions = {}, observed = {}, replaced = [], deferred = {};
-    // sent[key]＝上次確認（baseline）之後，這個分頁送出過的每份內容。回應遺失時雲端可能已經是其中任何一份——
-    // 那是自己的寫入，不是另一台裝置（Codex 審 5367999、bdad9d6）。
-    var sent = {}, SENT_KEEP = 20;   // cap-why: 每 4 秒最多送一次、成功就清空；20 份＝連續 80 秒回應全遺失，再多就當成真的衝突
     var status = '尚未開啟同步', notice = '', viewCode, view = {};
     // 頁面自己是唯一寫入者（提供 accept，難題站）：#1303 第 7 輪後依升級階梯縮範圍——關閉「留這台／留雲端」衝突選擇，
     // 兩台不一樣就各自保留（這台用這台的、雲端那份不動），不出按鈕、resolve 拒絕。自然站（沒有 accept）照舊。
     var pageOwned = typeof options.accept === 'function';
     var KEPT = '兩台裝置的紀錄不一樣：這台照常用這台的，雲端那份不動（各自保留，不會互相蓋掉）。';
+    var UNSURE = '雲端的紀錄跟這台送出的對不上，無法確認是哪一台寫的：這台照常用這台的，雲端那份不動（各自保留）。';
+    var JOURNAL = '這台的同步紀錄讀不懂，為了不蓋掉任何一邊，先暫停上傳；進度都還在這台（停止同步後重新加入可恢復）。';
+    // 設計 D・A1（Codex 設計者，#1347 第 4 輪起）：有 accept 的頁面，每個 key 只有一筆「待確認上傳」，送出前就存好。
+    // checkpoint（g5sync.ckpt.<key>，本站自己的 namespace，不改別站共用的 g5sync.meta）＝
+    //   {version, codeHash, key, baseline: 已確認的 {rev, hash, updated} | null, pending: {baseRev, data, hash} | null}
+    // baseline 與 pending 放在同一筆，一次 setItem 原子替換；寫完一定讀回核對，失敗就不送（A15）。
+    // 回應遺失時不再猜「雲端是不是我送過的某一份」（舊版記憶體 sent 清單，重開頁就不見）——一律拿雲端跟 pending 比（recover）。
+    var CKPT = 'g5sync.ckpt.';
 
     function read(key) {
       if (!storage) { throw error('storage'); }
@@ -114,18 +119,56 @@
       if (!meta || meta.version !== 1 || meta.codeHash !== contentHash(code) || !meta.keys || typeof meta.keys !== 'object' || Array.isArray(meta.keys)) { return blankMeta(); }
       return meta;
     }
-    function baseline(key) {
+    function validHash(h) { return typeof h === 'string' && /^sha256-utf16le:[a-f0-9]{64}$/.test(h); }
+    function metaBaseline(key) {
       var entry = readMeta().keys[key];
-      if (!entry || !integer(entry.rev) || typeof entry.hash !== 'string' || !/^sha256-utf16le:[a-f0-9]{64}$/.test(entry.hash)) { return null; }
+      if (!entry || !integer(entry.rev) || !validHash(entry.hash)) { return null; }
       return entry;
     }
+    // ---- checkpoint（只給有 accept 的頁面）----
+    function blankCk(key) {
+      var ck = {version: 1, codeHash: contentHash(code), key: key, baseline: null, pending: null};
+      var old = metaBaseline(key);   // 舊版只有 g5sync.meta：只遷移已確認的 baseline，不編造 pending（A16）
+      if (old) { ck.baseline = {rev: old.rev, hash: old.hash, updated: integer(old.updated) ? old.updated : null}; }
+      return ck;
+    }
+    function readCk(key) {
+      var raw = read(CKPT + key), ck;
+      if (raw === null) { return blankCk(key); }
+      try { ck = JSON.parse(raw); } catch (ignore) { throw error('journal'); }
+      if (!ck || typeof ck !== 'object' || ck.version !== 1 || ck.key !== key || typeof ck.codeHash !== 'string') { throw error('journal'); }
+      if (ck.codeHash !== contentHash(code)) { return blankCk(key); }   // 別的家庭留下的：不沿用
+      var b = ck.baseline, p = ck.pending;
+      if (b !== null && !(b && integer(b.rev) && validHash(b.hash))) { throw error('journal'); }
+      if (p !== null && !(p && integer(p.baseRev) && typeof p.data === 'string' && p.hash === contentHash(p.data) &&
+          p.baseRev === (b ? b.rev : 0))) { throw error('journal'); }
+      return ck;
+    }
+    function writeCk(key, ck) {
+      if (ck.codeHash !== contentHash(code)) { throw error('stale'); }
+      var raw = JSON.stringify(ck);
+      write(CKPT + key, raw);
+      if (read(CKPT + key) !== raw) { throw error('storage'); }   // 讀回不符＝沒存好（A10、A15）
+    }
+    function baseline(key) { return pageOwned ? readCk(key).baseline : metaBaseline(key); }
+    // 已確認的 baseline 也照舊寫一份到 g5sync.meta 自己那一格（保留別站的格子）：只是相容鏡像（例如還開著舊版頁面的分頁讀 meta），
+    // checkpoint 存在時一律以 checkpoint 為準；鏡像寫不進去不影響同步判斷。
+    function mirrorMeta(key, b) {
+      try { var meta = readMeta(); meta.keys[key] = {rev: b.rev, hash: b.hash, updated: b.updated}; write(META, JSON.stringify(meta)); }
+      catch (ignoreMirror) { /* best effort */ }
+    }
     function saveBaseline(key, rev, data, updated) {
+      if (pageOwned) {
+        var ck = readCk(key);
+        if (ck.baseline && ck.baseline.rev > rev) { needsGet[key] = true; return; }
+        ck.baseline = {rev: rev, hash: contentHash(data), updated: updated}; ck.pending = null;
+        writeCk(key, ck); mirrorMeta(key, ck.baseline); return;
+      }
       var meta = readMeta(); // Preserve other sites' key entries on the same origin.
       var previous = meta.keys[key];
       if (previous && integer(previous.rev) && previous.rev > rev) { needsGet[key] = true; return; }
       meta.keys[key] = {rev: rev, hash: contentHash(data), updated: updated};
       write(META, JSON.stringify(meta));
-      delete sent[key];
     }
     function active(token) {
       return !destroyed && !stopped && token === epoch && code && read(CODE) === code;
@@ -234,7 +277,7 @@
       var signature = keys.map(function (key) {
         if (!conflicts[key]) { return ''; }
         var local = read(key);
-        return key + ':' + conflicts[key].rev + ':' + observe(key, local).hash + ':' + (decisions[key] || '');
+        return key + ':' + conflicts[key].rev + ':' + observe(key, local).hash + ':' + (decisions[key] || '') + (conflicts[key].unsure ? ':u' : '');
       }).join('|');
       if (view.signature === signature) { return; }
       view.signature = signature;
@@ -249,7 +292,7 @@
         box.appendChild(el('p', 'local-time', '本機變更偵測時間：' + taipei(obs.detected, true) + '；實際作答時間由各站紀錄提供。'));
         box.appendChild(el('p', 'cloud-summary', '雲端：' + summary(key, cloud.data)));
         box.appendChild(el('p', 'cloud-time', '雲端更新時間：' + taipei(cloud.updated, true)));
-        if (pageOwned) { box.appendChild(el('p', 'kept', KEPT)); view.conflicts.appendChild(box); return; }
+        if (pageOwned) { box.appendChild(el('p', 'kept', cloud.unsure ? UNSURE : KEPT)); view.conflicts.appendChild(box); return; }
         var keepLocal = button('留這台的', function () { resolve(key, 'local'); }); keepLocal.disabled = local === null || !!decisions[key];
         var keepCloud = button('留雲端的', function () { resolve(key, 'cloud'); }); keepCloud.disabled = cloud.data === null || !!decisions[key];
         box.appendChild(keepLocal); box.appendChild(keepCloud); view.conflicts.appendChild(box);
@@ -296,17 +339,22 @@
         }).catch(function (err) { finish(err); });
       });
     }
-    function showConflict(key, cloud) {
+    function keptStatus() {
+      return keys.some(function (key) { return conflicts[key] && conflicts[key].unsure; }) ? UNSURE : KEPT;
+    }
+    // unsure＝雲端版本對不上這台已確認／待確認的紀錄（倒退、跳號、同 rev 不同內容），無法確認是不是另一台寫的（只給有 accept 的頁面）
+    function showConflict(key, cloud, unsure) {
       delete decisions[key]; // A newly observed cloud version requires a new choice.
       conflicts[key] = {rev: cloud.rev, data: cloud.data, updated: cloud.updated};
-      status = pageOwned ? KEPT : '有兩份進度，請選擇要保留的紀錄。';
+      if (pageOwned && unsure) { conflicts[key].unsure = true; }
+      status = pageOwned ? keptStatus() : '有兩份進度，請選擇要保留的紀錄。';
       render();
     }
     function replaceLocal(key, cloud, token) {
       assertActive(token);
       if (cloud.data === null) { throw error('server'); }
       var currentMeta = baseline(key);
-      if (currentMeta && currentMeta.rev > cloud.rev) { showConflict(key, cloud); return; }
+      if (currentMeta && currentMeta.rev > cloud.rev) { showConflict(key, cloud, true); return; }
       // 頁面自己是唯一寫入者時（難題站，#1303 第 5 輪）：先問能不能換（有未存進度、正在某一篇裡就不行），
       // 不行就什麼都不動（不備份、不寫），下一輪再 GET 再問；可以才備份，並交給頁面自己寫入與重畫（不 reload）。
       if (typeof options.canReplace === 'function' && !options.canReplace(key)) {
@@ -329,24 +377,90 @@
       if (data === null) { return Promise.resolve(); }
       if (data.length > 900000) { return Promise.reject(error('too-big')); }
       if (chosenCloud) { backup(key, chosenCloud.data); }
-      var mine = sent[key] || (sent[key] = []);
-      if (mine.indexOf(data) < 0) { mine.push(data); if (mine.length > SENT_KEEP) { mine.shift(); } }
       return request({op: 'put', key: key, rev: rev, data: data}, token).then(function (r) {
         assertActive(token);
-        // 上傳回應遺失後重試：雲端是這個分頁先前送過的某一份（後端其實存好了）⇒ 不是兩份紀錄：
-        // baseline 改成雲端那份，下一輪再把本機最新的推上去。
-        // 只給有 accept 的頁面（難題站：沒有選擇按鈕，出衝突＝從此不再同步）；自然站照 S31 出衝突讓人選。
-        if (r.err === 'conflict' && typeof options.accept === 'function' && typeof r.rev === 'number' &&
-            typeof r.data === 'string' && (sent[key] || []).indexOf(r.data) >= 0) {
-          saveBaseline(key, r.rev, r.data, r.updated); delete conflicts[key]; return;
-        }
         if (r.err === 'conflict') { showConflict(key, r); return; }
         // The baseline is the exact request payload, never a newer local edit.
         saveBaseline(key, r.rev, data, r.updated);
         delete conflicts[key];
       });
     }
+    // ---- 有 accept 的頁面：待確認上傳（設計 D・A1）----
+    // 建立下一筆：先存進 checkpoint 並讀回，成功才送；確認舊 pending 之前不會呼叫這裡（pending 不會被新進度改寫）。
+    function startPending(key, data, baseRev, token) {
+      if (data.length > 900000) { return Promise.reject(error('too-big')); }
+      var ck = readCk(key);
+      if (ck.pending) { return sendPending(key, ck, token); }
+      ck.pending = {baseRev: baseRev, data: data, hash: contentHash(data)};
+      writeCk(key, ck);   // 寫入或讀回失敗就丟錯，不送 PUT（A15）
+      assertActive(token);
+      return sendPending(key, ck, token);
+    }
+    // 重送一律是同一份 baseRev＋payload（A01、A09、A13）
+    function sendPending(key, ck, token) {
+      var p = ck.pending;
+      return request({op: 'put', key: key, rev: p.baseRev, data: p.data}, token).then(function (r) {
+        assertActive(token);
+        if (r.err === 'conflict') { return recover(key, r, token, true); }
+        confirm(key, p, r.rev, r.updated);
+      });
+    }
+    // 確認 pending 已提交：只認 checkpoint 裡現在那一筆；遲到或重複的回應不動 baseline、不倒退（A11）
+    function confirm(key, p, rev, updated) {
+      var ck = readCk(key);
+      if (!ck.pending || ck.pending.hash !== p.hash || ck.pending.baseRev !== p.baseRev) { return; }
+      if (rev !== p.baseRev + 1 || (ck.baseline && ck.baseline.rev >= rev)) { throw error('server'); }
+      ck.baseline = {rev: rev, hash: p.hash, updated: updated}; ck.pending = null;
+      writeCk(key, ck);   // 寫入／讀回失敗：pending 留著，下一輪再用雲端確認（A10）
+      mirrorMeta(key, ck.baseline);
+      delete conflicts[key];
+    }
+    // 確認完舊 pending 之後，才從本機最新資料建立下一筆（A02、A13）
+    function nextFromLocal(key, token) {
+      assertActive(token);
+      var ck = readCk(key), local = read(key);
+      if (!ck.pending && ck.baseline && local !== null && contentHash(local) !== ck.baseline.hash) { return startPending(key, local, ck.baseline.rev, token); }
+    }
+    // 首次啟用、重開頁（GET）、PUT 衝突都走這一個判斷（A03–A08）
+    function recover(key, cloud, token, fromPut) {
+      assertActive(token);
+      var ck = readCk(key), local = read(key), b = ck.baseline, p = ck.pending;
+      needsGet[key] = false;
+      if (p) {
+        var stillBase = cloud.rev === p.baseRev && (p.baseRev === 0 ? cloud.data === null : contentHash(cloud.data) === b.hash);
+        if (stillBase) {   // 還沒提交：重送原 pending（PUT 被拒卻說雲端還在基準版本＝壞回應，不重送迴圈）
+          if (fromPut) { throw error('server'); }
+          return sendPending(key, ck, token);
+        }
+        if (cloud.rev === p.baseRev + 1 && cloud.data !== null && contentHash(cloud.data) === p.hash) {
+          confirm(key, p, cloud.rev, cloud.updated);   // 雲端正是這份 pending、版本剛好下一號：自己的提交
+          return nextFromLocal(key, token);
+        }
+        // 下一號是別的內容＝另一台寫的（真正分歧）；其他（倒退、跳號、同號不同內容）＝無法確認。都各自保留、不覆蓋（A12、A14）
+        showConflict(key, cloud, !(cloud.rev === p.baseRev + 1)); return;
+      }
+      if (b && cloud.rev < b.rev) { showConflict(key, cloud, true); return; }   // 雲端倒退：不憑內容認領、不重傳（A14）
+      if (cloud.rev === 0) {
+        if (local !== null) { return startPending(key, local, 0, token); }
+        saveBaseline(key, 0, null, null); return;
+      }
+      if (!b) {   // 第一次加入、雙邊都有資料：照 A4 不猜，各自保留
+        if (local === null) { replaceLocal(key, cloud, token); }
+        else { showConflict(key, cloud); }
+        return;
+      }
+      // 本機已經和雲端一字不差（例如頁面寫進去了但讀回失敗，#1303 第 6 輪）：只補 baseline
+      if (local !== null && local === cloud.data) { saveBaseline(key, cloud.rev, cloud.data, cloud.updated); delete conflicts[key]; delete deferred[key]; return; }
+      if (cloud.rev === b.rev && contentHash(cloud.data) !== b.hash) { showConflict(key, cloud, true); return; }
+      if (cloud.rev > b.rev) {
+        if (contentHash(local) === b.hash) { replaceLocal(key, cloud, token); }
+        else { showConflict(key, cloud); }
+        return;
+      }
+      if (local !== null && contentHash(local) !== b.hash) { return startPending(key, local, b.rev, token); }
+    }
     function reconcile(key, cloud, token) {
+      if (pageOwned) { return recover(key, cloud, token, false); }
       assertActive(token);
       var local = read(key), meta = baseline(key), hash = observe(key, local).hash;
       needsGet[key] = false;
@@ -359,8 +473,6 @@
         else { showConflict(key, cloud); }
         return;
       }
-      // 本機內容已經和雲端一字不差（已同步過的裝置；例如頁面寫進去了但讀回失敗，#1303 第 6 輪）。第一次加入仍照 A4 一律問：只補 baseline，不出衝突、不備份、不換
-      if (pageOwned && local !== null && local === cloud.data) { saveBaseline(key, cloud.rev, cloud.data, cloud.updated); delete conflicts[key]; delete deferred[key]; return; }
       if (cloud.rev < meta.rev || (cloud.rev === meta.rev && contentHash(cloud.data) !== meta.hash)) {
         showConflict(key, cloud); return;
       }
@@ -372,7 +484,7 @@
       if (hash !== meta.hash && local !== null) { return put(key, local, meta.rev, token); }
     }
     function resetSession(nextCode) {
-      epoch += 1; code = nextCode; needsGet = {}; sent = {}; conflicts = {}; decisions = {}; observed = {}; replaced = []; deferred = {};
+      epoch += 1; code = nextCode; needsGet = {}; conflicts = {}; decisions = {}; observed = {}; replaced = []; deferred = {};
       failures = 0; retryAt = 0; notice = '';
       if (retryTimer !== null) { root.clearTimeout(retryTimer); retryTimer = null; }
       keys.forEach(function (key) { needsGet[key] = true; });
@@ -386,12 +498,13 @@
       status = err.kind === 'offline' ? '離線中，連上網路會自動補上' : '同步失敗，稍後自動再試';
       if (err.kind === 'storage' || err.name === 'QuotaExceededError') { notice = '本機儲存空間不足或無法使用，請保留原進度並檢查瀏覽器儲存設定。'; }
       if (err.kind === 'too-big') { notice = '這份進度超過 900000 字元，請先保留本機資料。'; }
+      if (err.kind === 'journal') { notice = JOURNAL; }
       if (retryTimer !== null) { root.clearTimeout(retryTimer); }
       retryTimer = root.setTimeout(function () { retryTimer = null; sync(); }, delay);
     }
     function completed() {
       if (keys.some(function (key) { return !!conflicts[key]; })) {
-        status = pageOwned ? KEPT : '有兩份進度，請選擇要保留的紀錄。'; return;
+        status = pageOwned ? keptStatus() : '有兩份進度，請選擇要保留的紀錄。'; return;
       }
       var dirty = keys.some(function (key) {
         var meta = baseline(key), local = read(key);
@@ -444,6 +557,18 @@
             assertActive(token);
             if (decisions[key]) { return applyDecision(key, token); }
             if (conflicts[key]) { observe(key, read(key)); return; }
+            if (pageOwned) {
+              // 有待確認上傳：開頁先 GET 再進 recover；同頁重試直接重送同一份（衝突回應也進 recover）
+              var ck = readCk(key);
+              if (needsGet[key] || (!ck.baseline && !ck.pending)) {
+                needsGet[key] = true;
+                return request({op: 'get', key: key}, token).then(function (r) { return reconcile(key, r, token); });
+              }
+              if (ck.pending) { return sendPending(key, ck, token); }
+              var mineNow = read(key);
+              if (mineNow !== null && contentHash(mineNow) !== ck.baseline.hash) { return startPending(key, mineNow, ck.baseline.rev, token); }
+              return;
+            }
             if (needsGet[key]) {
               return request({op: 'get', key: key}, token).then(function (r) { return reconcile(key, r, token); });
             }
@@ -464,6 +589,7 @@
     function activate(newCode) {
       // Clear the old baseline first. A partial storage failure then fails conservatively.
       storage.removeItem(META);
+      if (pageOwned) { keys.forEach(function (key) { storage.removeItem(CKPT + key); }); }   // 換家庭：舊的待確認上傳作廢（A16）
       write(CODE, newCode);
       stopped = false; resetSession(newCode); render();
       return sync(true);
@@ -522,7 +648,10 @@
       if (retryTimer !== null) { root.clearTimeout(retryTimer); retryTimer = null; }
       code = null; conflicts = {}; decisions = {}; replaced = []; notice = '';
       var ok = true;
-      try { storage.removeItem(CODE); storage.removeItem(META); }
+      try {
+        storage.removeItem(CODE); storage.removeItem(META);
+        if (pageOwned) { keys.forEach(function (key) { storage.removeItem(CKPT + key); }); }
+      }
       catch (err) { ok = false; notice = '同步已暫停，但瀏覽器無法清除設定；請檢查儲存權限。'; }
       status = ok ? '這台已停止同步，進度仍保留。' : '同步已暫停';
       render(); return ok;

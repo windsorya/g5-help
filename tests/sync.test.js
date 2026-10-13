@@ -375,6 +375,15 @@ test('S35 CommonJS export can initialize directly in Node with injected DOM owne
   try { await api.ready; assert.equal(api.getState().code, null); } finally { api.destroy(); }
 });
 
+test('S41 五上國語、社會站的 key（g5chi.v1、g5soc.v1）可以初始化，不丟 bad-key；不在白名單的 key 仍拒絕', async () => {
+  for (const key of ['g5chi.v1', 'g5soc.v1']) {
+    const doc = new Document(), storage = new Storage();
+    const api = G5Sync.init({container: doc.container, storage, fetch: async () => { throw Error('must not fetch'); }, endpoint: 'unused', keys: [key]});
+    try { await api.ready; assert.equal(api.getState().code, null); } finally { api.destroy(); }
+  }
+  assert.throws(() => G5Sync.init({container: new Document().container, storage: new Storage(), keys: ['g5xyz.v1']}), /bad-key/);
+});
+
 test('S36 an explicitly chosen local version is retried after network recovery; it never pushes before the choice', async t => {
   const {clock, backend, a, b, code} = await pair(t);
   a.storage.setItem(KEY, data(10)); b.storage.setItem(KEY, data(20)); await a.api.sync(); await b.api.sync();

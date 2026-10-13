@@ -77,7 +77,7 @@
     if (!same(sa, ia)) return { ok: false, code: "left-changed", msg: "左邊的 " + txt(sa) + " 大小變了：分母乘幾，分子也要乘幾。" };
     if (!same(sb, ib)) return { ok: false, code: "right-changed", msg: "右邊的 " + txt(sb) + " 大小變了：分母乘幾，分子也要乘幾。" };
     var L = lcm(sa.d, sb.d);
-    if (ia.d !== L) return { ok: true, code: "ok-not-lcm", msg: "也對！分母用 " + ia.d + " 可以；用 " + sa.d + " 和 " + sb.d + " 的最小公倍數 " + L + "，數字會最小、最好算。" };
+    if (ia.d !== L) return { ok: true, code: "ok-not-lcm", msg: "也對！分母用 " + ia.d + " 可以。用 " + sa.d + " 和 " + sb.d + " 的最小公倍數（共同倍數裡最小的）" + L + "，數字會最小、最好算。" };
     return { ok: true, code: "ok", msg: "對了：分母都變成 " + L + "。" };
   }
 

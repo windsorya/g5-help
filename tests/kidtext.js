@@ -1,54 +1,141 @@
-// 孩子實際看到的文字（hard.test 用詞閘、standard.test 句長閘共用；Codex 審 5367999、bdad9d6 連兩輪抓到兩支測試
-// 各自重組文字、順序與範圍都跟畫面不一樣 ⇒ 改成一份「依畫面顯示順序」的資料模型）。
-//
-// steps 篇（app.html stepsLesson／stepsEnd／choicePractice）：每一步依序顯示 say → 確認題 q＋選項 →
-// 答錯時先看到 why[選的那個]、最後答對才看到 ok；之後是答案、寫法、練習（q＋選項 → why → ok）。
-// 所以「路徑」＝主線（全部一次答對）＋每一個答錯分支各一條（那條在 ok 前面多看到一句 why）。
-// 用詞閘以每一條路徑「第一次出現」判斷有沒有附白話——答錯分支先看到的難詞不能靠後面的 ok 解釋。
-//
-// frac-compare 篇：步驟文字由 app.html「教學（習作那一題）」到「通用格式 steps」之間的程式組出來，
-// 只能讀程式裡的字串常數（aria 標籤是讀屏用，不是畫面字，不算）。顯示順序無法從原始碼得知 ⇒
-// 每一個含難詞的字串都要自己附白話（保守）；句長也逐字串量（字串是句子的片段，量到的是下限）。
+// 孩子看得到的字：輔助檢查（設計 D・B2，Codex 設計者 #1347）。
+// 主閘已改成真瀏覽器採字（tests/kidgate.js＋tests/e2e_kidtext.py，結果在 tests/kidtext_harvest.json）。
+// 舊版這支用原始碼 regex 重建「畫面顯示順序」——三輪審查證明它猜錯分支（直接練習、hint／ok 互斥）、量不到 frac.js 回傳字與拼接後全句、
+// 漏標題與 SVG 字，所以不再宣告「孩子看到的字全部合格」。現在只負責三件事：
+//   ①欄位：steps 篇要有 words；②詞表：HARD_WORDS 與各篇 words 的白話不可空白；
+//   ③案例完整性：從題目資料、frac.js 的判題代碼、app.html 的回饋字串推出「一定要實際走到」的案例與分支，對照採字結果；
+//     新增題目、選項、判題代碼或回饋字串卻沒有對應案例 ⇒ 紅。另驗採字結果是不是這一版 index.html 量的（過期 ⇒ 紅）。
 "use strict";
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
+const H = require("../src/hard.js");
 
-const stripTags = (x) => String(x || "").replace(/<[^>]*>/g, "").replace(/&[a-z]+;/g, "");
+const ROOT = path.join(__dirname, "..");
+const HARVEST = path.join(__dirname, "kidtext_harvest.json");
+const BROWSERS = ["chromium", "webkit"];
+const SELFTESTS = ["B01a", "B01b", "B02a", "B02b", "B03", "B04", "B05", "B06", "B07", "B09", "B10-judged", "B12", "B13", "B14", "B15", "B16", "B19", "unclassified", "U01"];
+const sha = (p) => crypto.createHash("sha256").update(fs.readFileSync(p)).digest("hex");
 
-// 一篇 steps 的顯示序列：每格 {text} 或 {ok, wrongs[]}
-function stepsSlots(e) {
-  const slots = [{ text: e.lead }];
-  const ask = (c) => { slots.push({ text: c.q + "\n" + (c.opts || []).join("／") }); slots.push({ ok: c.ok || "對了！", wrongs: (c.why || []).filter(Boolean) }); };
-  (e.steps || []).forEach((s) => { slots.push({ text: s.say }); if (s.check) ask(s.check); });
-  slots.push({ text: e.answer }); if (e.write) slots.push({ text: e.write });
-  (e.practice || []).forEach(ask);
-  return slots;
-}
-
-function stepsPaths(e) {
-  const slots = stepsSlots(e);
-  const line = (pick) => slots.map((s, i) => (s.text !== undefined ? [s.text] : (pick && pick[0] === i ? [s.wrongs[pick[1]], s.ok] : [s.ok]))).flat().map(stripTags);
-  const paths = [line(null)];
-  slots.forEach((s, i) => (s.wrongs || []).forEach((_, j) => paths.push(line([i, j]))));
-  return paths;
-}
-
-let APP = null;
-function fracLiterals() {
-  if (APP === null) APP = fs.readFileSync(path.join(__dirname, "..", "src", "app.html"), "utf8");
-  const a = APP.indexOf("// ---------- 教學（習作那一題）"), b = APP.indexOf("// ---------- 通用格式 steps");
-  if (a < 0 || b < a) throw new Error("app.html 找不到 frac-compare 教學區段的標記（教學（習作那一題）…通用格式 steps）");
-  const src = APP.slice(a, b).replace(/aria\s*:\s*("[^"]*"|'[^']*')/g, "").replace(/aria-label=\\?"[^"]*"/g, "");
+// ---- ①②欄位與詞表 ----
+function wordTableProblems(list = H.LIST, table = H.HARD_WORDS) {
   const out = [];
-  src.replace(/"((?:[^"\\\n]|\\.)*)"|'((?:[^'\\\n]|\\.)*)'/g, (_, d, s) => { const t = stripTags(d !== undefined ? d : s); if (/[\u4e00-\u9fff]/.test(t)) out.push(t); return ""; });
+  const gloss = (where, obj) => Object.keys(obj).forEach((w) => {
+    if (!w.trim()) out.push(where + " 有空白的難詞");
+    if (typeof obj[w] !== "string" || !obj[w].replace(/\s/g, "")) out.push(where + " 的「" + w + "」白話是空的");
+  });
+  gloss("HARD_WORDS", table || {});
+  list.forEach((e) => {
+    if (e.kind === "steps" && !(e.words && typeof e.words === "object" && !Array.isArray(e.words))) out.push(e.id + " 要列出 words（本篇用到的難詞→白話；真的沒有就寫 {}）");
+    if (e.words && typeof e.words === "object") gloss(e.id + ".words", e.words);
+  });
   return out;
 }
 
-// 回傳 {paths: 依序顯示的文字路徑[], pieces: 各自要附白話的獨立字串[]}
-function kidText(e) {
-  if (e.kind === "steps") return { paths: stepsPaths(e), pieces: [] };
-  const p = e.prior || {};
-  return { paths: [[e.lead, p.q, p.hint, p.ok].map(stripTags)], pieces: fracLiterals() };
+// ---- ③案例完整性 ----
+// app.html 數學篇（互動元件～首頁按鈕之間）每一個 msg: 回饋都要對到一個分支名；分支名由 tests/e2e_kidtext.py 在真的觸發那個回饋時記下。
+const APP_BRANCHES = {
+  "app:nums-empty": "先填一個數字。", "app:nums-bad": "只能填整數，例如 15。", "app:nums-wrong": "msg:\"再算一次。\"", "app:nums-third": "　答案是 ",
+  "app:step1-red": "msg:pr.ok", "app:step1-mul": "一起乘，數字只會更大喔", "app:step1-num": "分子大的不一定比較大",
+  "app:step4-le0": "要找比 0 大的公倍數", "app:step4-common": "的公倍數，但還有更小的", "app:step4-else": "第一個兩邊都有的數，就是最小公倍數",
+  "app:step5-ok": "對！分母一樣，比分子", "app:step5-wrong": "看塗色的格子", "app:step5b-ok": "一樣大，所以答案一樣是", "app:step5b-wrong": "剛剛比出來哪個大",
+  "app:step6-ok": "對！先約分讓數字變小", "app:step6-x": "先通分的話", "app:step6-n": "分母不一樣時，不能直接比分子。",
+  "app:form-bad": "只能填整數，例如 2、15。", "app:form-empty": "還有格子沒填。", "app:r1-ok": "msg:\"對了：\" + F.txt(a)",
+  "F:checkReduce": "\"左邊：\" + x.msg", "F:checkCommon": "msg:x.msg",
+  "app:hint-r1-1": "從 2、3、5、7、9 開始試", "app:hint-r1-2": "\"，一起除以 \" + t.g", "app:hint-r2-1": "\"先找 \" + sa.d", "app:hint-r2-2": "最小公倍數（共同的倍數裡最小的）是",
+  "app:finish-clean": "完全自己做對！", "app:finish-hint": "這題看了提示，", "app:finish-wrong": "這題有改過答案，", "app:win": "這種題你會了！", "app:alt": "另一種做法：直接通分",
+};
+function appSection() {
+  const app = fs.readFileSync(path.join(ROOT, "src", "app.html"), "utf8");
+  const a = app.indexOf("// ---------- 互動元件"), b = app.indexOf("// ---------- 首頁按鈕");
+  if (a < 0 || b < a) throw new Error("app.html 找不到「互動元件」～「首頁按鈕」區段標記");
+  return app.slice(a, b);
+}
+// 回傳問題清單：沒對到分支名的 msg: 行、對不到原始碼的過期錨點
+function appBranchProblems(src = appSection()) {
+  const out = [];
+  src.split("\n").forEach((line, i) => {
+    const n = (line.match(/msg\s*:/g) || []).length;
+    if (!n) return;
+    const hit = Object.values(APP_BRANCHES).filter((anchor) => line.includes(anchor)).length;
+    if (hit < n) out.push("app.html 數學篇第 " + (i + 1) + " 行有 " + n + " 個回饋、只對到 " + hit + " 個分支名：" + line.trim().slice(0, 90));
+  });
+  Object.entries(APP_BRANCHES).forEach(([name, anchor]) => { if (!src.includes(anchor)) out.push("分支 " + name + " 的錨點已不在 app.html：" + anchor); });
+  return out;
+}
+// frac.js 判題代碼 ⇒ 一定要實際觸發的分支（invalid 依訊息再分分母 0／分子 0）
+const FRAC_UNREACHABLE = {
+  "checkReduce:empty": "app.html formCheck 先攔下空格，判題函式收不到",
+  "checkCommon:empty": "app.html formCheck 先攔下空格，判題函式收不到",
+  "checkReduce:invalid-other": "輸入只收 0–9（parseNum），非正整數只剩 0，已由 -n0／-d0 涵蓋",
+  "checkCommon:invalid-other": "同上",
+};
+function fracBranches() {
+  const src = fs.readFileSync(path.join(ROOT, "src", "frac.js"), "utf8");
+  const slice = (name, next) => src.slice(src.indexOf("function " + name), next ? src.indexOf("function " + next) : undefined);
+  const out = [];
+  [["checkReduce", "checkCommon"], ["checkCommon", "checkSign"]].forEach(([fn, next]) => {
+    const body = slice(fn, next), codes = new Set([...body.matchAll(/code:\s*"([\w-]+)"/g)].map((m) => m[1]));
+    if (/invalid\(/.test(body)) { codes.delete("invalid"); ["n0", "d0", "other"].forEach((x) => codes.add("invalid-" + x)); }
+    codes.forEach((c) => out.push(fn + ":" + c));
+  });
+  ["none-ok", "none-wrong", "bad", "ok"].forEach((x) => out.push("pickDivisor:" + x));
+  ["ok-eq", "ok-neq", "wrong-eq", "wrong-neq"].forEach((x) => out.push("checkSign:" + x));
+  return out.filter((b) => !FRAC_UNREACHABLE[b]);
+}
+function requiredCases(list = H.LIST) {
+  const out = ["home"];
+  list.forEach((e) => {
+    if (e.kind === "steps") {
+      out.push(e.id + ":lesson", e.id + ":direct");
+      (e.practice || []).forEach((_, q) => out.push(e.id + ":resume" + q));
+      if ((e.practice || []).length) out.push(e.id + ":mastery");
+    } else {
+      out.push(e.id + ":lesson", e.id + ":alt", e.id + ":direct", e.id + ":practice", e.id + ":resume");
+    }
+    if ((e.videos || []).length) out.push(e.id + ":video");
+  });
+  return out;
+}
+function requiredBranches(list = H.LIST) {
+  const out = [];
+  list.forEach((e) => {
+    if (e.kind === "steps") {
+      (e.steps || []).forEach((s, i) => { if (s.check) s.check.opts.forEach((_, k) => out.push(e.id + ":check" + (i + 1) + ":" + k)); });
+      (e.practice || []).forEach((q, n) => q.opts.forEach((_, k) => out.push(e.id + ":prac" + (n + 1) + ":" + k)));
+      if ((e.practice || []).length) out.push(e.id + ":mastery");
+    } else {
+      out.push(e.id + ":direct");
+      out.push(...Object.keys(APP_BRANCHES).filter((n) => n.startsWith("app:")));
+      out.push(...fracBranches());
+    }
+  });
+  return [...new Set(out)];
 }
 
-module.exports = { kidText, stepsPaths, fracLiterals, stripTags };
+// ---- 採字結果 ----
+function readHarvest() { return fs.existsSync(HARVEST) ? JSON.parse(fs.readFileSync(HARVEST, "utf8")) : null; }
+// kinds：要算進來的違規種類（word／length／unclassified）
+// opt.indexPath：自檢用（換一份不同的 index.html，應判為過期）
+function harvestProblems(kinds, opt = {}) {
+  const h = readHarvest(), out = [];
+  if (!h) return ["沒有 tests/kidtext_harvest.json：先 python3.12 build.py，再跑 python3.12 tests/e2e_kidtext.py"];
+  const fresh = [["index.html", opt.indexPath || path.join(ROOT, "index.html"), h.index_sha256], ["tests/kidgate.js", path.join(__dirname, "kidgate.js"), h.kidgate_sha256],
+    ["tests/e2e_kidtext.py", path.join(__dirname, "e2e_kidtext.py"), h.driver_sha256]];
+  fresh.forEach(([name, p, want]) => { if (sha(p) !== want) out.push("採字結果過期：" + name + " 改過了，請重跑 tests/e2e_kidtext.py"); });
+  const lim = H.readingAt(new Date()).maxSentence;
+  if (h.max !== lim) out.push("採字時用的句長上限 " + h.max + " ≠ 今天年級上限 " + lim);
+  const cases = requiredCases(opt.list), branches = requiredBranches(opt.list);   // opt.list：自檢用（多一題卻沒走到 ⇒ 要紅）
+  BROWSERS.forEach((b) => {
+    const r = h.browsers && h.browsers[b];
+    if (!r) { out.push(b + "：沒有採字結果"); return; }
+    (r.errors || []).forEach((e) => out.push(b + "：" + e));
+    (r.violations || []).filter((v) => kinds.includes(v.kind)).forEach((v) => out.push(b + " [" + v.kind + "] " + v.case + " @ " + v.at + "：" + (v.word ? "「" + v.word + "」" : (v.chars || "") + " 字 ") + v.text));
+    cases.filter((c) => !r.cases.includes(c)).forEach((c) => out.push(b + "：沒有走到案例 " + c));
+    branches.filter((c) => !r.branches.includes(c)).forEach((c) => out.push(b + "：沒有走到分支 " + c));
+    SELFTESTS.forEach((t) => { if (!(r.selftests && r.selftests[t] && r.selftests[t].ok)) out.push(b + "：自檢 " + t + " 沒有通過"); });
+  });
+  return out;
+}
+
+module.exports = { wordTableProblems, appBranchProblems, fracBranches, requiredCases, requiredBranches, readHarvest, harvestProblems, APP_BRANCHES, FRAC_UNREACHABLE, SELFTESTS, BROWSERS };

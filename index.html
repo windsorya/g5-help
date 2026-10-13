@@ -140,7 +140,7 @@ details p{margin:0 0 10px}
 
   <div id="saveWarn" class="banner" role="alert" hidden style="background:var(--sun-soft);border-radius:12px;padding:12px 16px;margin-bottom:12px">這台裝置還有練習進度沒存好（可能空間不足或瀏覽器限制），請先不要關閉這一頁；每 3 秒會自動再試。 <button class="btn ghost sm" type="button" id="saveRetry">現在再存一次</button></div>
   <section id="home" style="display:grid;gap:18px">
-    <div class="panel"><p style="margin:0">每一篇都是她說「看不懂」的那一題：跟著步驟自己動手做，做完再練幾題同類型的，練到會為止。不用重看整張考卷。</p></div>
+    <div class="panel"><p style="margin:0">每一篇都是她說「看不懂」的那一題。跟著步驟自己動手做，做完再練幾題同類型的，練到會為止。不用重看整張考卷。</p></div>
     <div id="subjects" style="display:grid;gap:18px"></div>
     <details id="upBox"><summary>家長傳題目（她說看不懂的那一題）</summary>
       <div style="display:grid;gap:12px" id="upForm">
@@ -261,7 +261,7 @@ details p{margin:0 0 10px}
     if (!same(sa, ia)) return { ok: false, code: "left-changed", msg: "左邊的 " + txt(sa) + " 大小變了：分母乘幾，分子也要乘幾。" };
     if (!same(sb, ib)) return { ok: false, code: "right-changed", msg: "右邊的 " + txt(sb) + " 大小變了：分母乘幾，分子也要乘幾。" };
     var L = lcm(sa.d, sb.d);
-    if (ia.d !== L) return { ok: true, code: "ok-not-lcm", msg: "也對！分母用 " + ia.d + " 可以；用 " + sa.d + " 和 " + sb.d + " 的最小公倍數 " + L + "，數字會最小、最好算。" };
+    if (ia.d !== L) return { ok: true, code: "ok-not-lcm", msg: "也對！分母用 " + ia.d + " 可以。用 " + sa.d + " 和 " + sb.d + " 的最小公倍數（共同倍數裡最小的）" + L + "，數字會最小、最好算。" };
     return { ok: true, code: "ok", msg: "對了：分母都變成 " + L + "。" };
   }
 
@@ -353,7 +353,7 @@ details p{margin:0 0 10px}
       // 每段都讀過字幕（whisper 全片）、抽格看過才放；playable_in_embed=True（2026-10-12 驗證）
       videos: [
         { id: "XIdh6AxYItA", start: 662, end: 748, len: "約 1 分半", title: "先約分，再通分（臺北酷課雲・濱江國小吳政達老師）",
-          note: "比 7/9 和 10/12：先把 10/12 約分成 5/6，再用 9 和 6 的最小公倍數 18 通分，14/18 < 15/18。跟習作這題的做法一樣。" },
+          note: "比 7/9 和 10/12。先把 10/12 約分成 5/6。再用 9 和 6 的最小公倍數（共同倍數裡最小的）18 通分。14/18 < 15/18，跟習作這題的做法一樣。" },
         { id: "xdAu15d7MRs", start: 158, end: 224, len: "約 1 分鐘", title: "用約分讓分母變一樣（均一教育平台）",
           note: "8/12 一路約成 2/3、6/18 約成 1/3，約完分母一樣就能比。這段只約分，沒有再通分。" }
       ]
@@ -392,15 +392,17 @@ details p{margin:0 0 10px}
       readReview: { by: "codex", date: "2026-10-13", grade: 5, fixed: ["翼狀：已在「三角形的翅膀（翼狀）」先講白話", "抓住地面的面積變大→幫大樹抓住更多地面", "增加抓地面積→加括號（抓住更多地面）；確認題選項改成白話", "穩固生長→加括號（站穩）"] },
       write: "( )(1)　(ˇ)(2)　(ˇ)(3)　( )(4)",
       practice: [
-        { q: "榕樹從樹枝垂下來、細細長長的根，叫做什麼？", opts: ["板根", "氣生根"], a: 1, why: ["板根是突出地面、像三角形翅膀的根。", ""] },
-        { q: "銀葉樹的板根有什麼好處？", opts: ["讓樹在鬆軟的泥地站得更穩", "讓樹更快開花結果"], a: 0, why: ["", "開花結果跟板根沒有關係；板根是幫忙站穩的。"] },
-        { q: "下面哪一個是植物用來「繁殖」的構造？", opts: ["板根", "種子"], a: 1, why: ["板根是幫忙站穩的根，不負責繁殖。", ""] },
+        // 第 1 題原本問「叫做什麼？」選「氣生根」：直接練習時這是第一次看到這個詞，附白話（長在空氣中的根）等於說出答案
+        // ⇒ 依設計 D 改問外形判斷（同樣在分板根和氣生根），解釋放在題目裡（2026-10-13 #1347）
+        { q: "榕樹的氣生根（長在空氣中的根）長什麼樣子？", opts: ["細細長長，從樹枝垂下來", "又扁又寬，突出地面"], a: 0, why: ["", "又扁又寬、突出地面的是板根。"] },
+        { q: "銀葉樹（長在海邊的一種大樹）的板根有什麼好處？", opts: ["讓樹在鬆軟的泥地站得更穩", "讓樹更快開花結果"], a: 0, why: ["", "開花結果跟板根沒有關係；板根是幫忙站穩的。"] },
+        { q: "下面哪一個是植物用來繁殖（生出新的植物）的構造？", opts: ["板根", "種子"], a: 1, why: ["板根是幫忙站穩的根，不負責繁殖。", ""] },
         { q: "板根長在哪裡？", opts: ["突出地面", "全部埋在土裡"], a: 0, why: ["", "板根特別的地方就是突出地面、看得到。"] }
       ],
       // 2026-10-13 驗證：whisper／作者字幕全文讀過、抽格看過（A_95ff_240「板根」字卡＋手摸板根；B_LQPR_330 板根實景）；playable_in_embed=True
       videos: [
-        { id: "95ffZ3un7eg", start: 149, end: 297, len: "約 2 分半", title: "榕樹的氣生根、板根和支柱根（教學節目片段）",
-          note: "先看榕樹從樹枝垂下來的氣生根，再看真的板根：講解員摸著樹幹底部說明板根讓樹站得更穩。畫面有繁體字幕。" },
+        { id: "95ffZ3un7eg", start: 149, end: 297, len: "約 2 分半", title: "榕樹的氣生根（長在空氣中的根）、板根和支柱根（教學節目片段）",
+          note: "先看榕樹從樹枝垂下來的氣生根。再看真的板根：講解員摸著樹幹底部，說明板根讓樹站得更穩。畫面有繁體字幕。" },
         { id: "LQPR67ud3UI", start: 317, end: 352, len: "約 35 秒", title: "板根像電線桿的基座（有夠好。就是要讓你懂）",
           note: "長在硬地或土層淺的地方，根會長成一片片的板根來撐住大樹，就像電線桿底下的基座。" }
       ],
@@ -753,7 +755,7 @@ function step4(){
     if (v <= 0) return {ok:false, msg:"要找比 0 大的公倍數：從 " + sa.d + " 的倍數和 " + sb.d + " 的倍數裡，找第一個一樣的數。"};
     if (v % sa.d === 0 && v % sb.d === 0) return {ok:false, msg:v + " 也是 " + sa.d + " 和 " + sb.d + " 的公倍數，但還有更小的，再找找看。"};
     var ma = [], mb = []; for (var i = 1; i <= L / sa.d + 1; i++) ma.push(sa.d * i); for (var j = 1; j <= L / sb.d + 1; j++) mb.push(sb.d * j);
-    return {ok:false, msg:sa.d + " 的倍數：" + ma.join("、") + "…；" + sb.d + " 的倍數：" + mb.join("、") + "…。第一個兩邊都有的數，就是最小公倍數。"};
+    return {ok:false, msg:sa.d + " 的倍數：" + ma.join("、") + "…。" + sb.d + " 的倍數：" + mb.join("、") + "…。第一個兩邊都有的數，就是最小公倍數。"};
   }}], function(){
     convert(b, sa, L, function(ea){
       convert(b, sb, L, function(eb){
@@ -854,8 +856,9 @@ function renderPractice(){
       return {ok:false, countable:x.code !== "empty", msg:x.msg};
     }, [
       function(){ var ma = [], mb = []; for (var i = 1; i <= s.lcm / sa.d; i++) ma.push(sa.d * i); for (var j = 1; j <= s.lcm / sb.d; j++) mb.push(sb.d * j);
-        return "先找 " + sa.d + " 和 " + sb.d + " 的最小公倍數（兩個數共同的倍數裡，最小的那一個）。" + sa.d + " 的倍數：" + ma.join("、") + "…；" + sb.d + " 的倍數：" + mb.join("、") + "…，第一個兩邊都有的就是。"; },
-      function(){ return "最小公倍數（共同的倍數裡最小的）是 " + s.lcm + "。" + F.txt(sa) + " 的分子分母都乘 " + (s.lcm / sa.d) + " → " + F.txt(s.ea) + "；" + F.txt(sb) + " 的分子分母都乘 " + (s.lcm / sb.d) + " → " + F.txt(s.eb) + "。"; }
+        // 倍數列表一個分母一句（舊版用「；」「，」串成一句，3 和 10 時 61 字，設計 D・B11）
+        return "先找 " + sa.d + " 和 " + sb.d + " 的最小公倍數（兩個數共同的倍數裡，最小的那一個）。" + sa.d + " 的倍數：" + ma.join("、") + "…。" + sb.d + " 的倍數：" + mb.join("、") + "…。第一個兩邊都有的就是。"; },
+      function(){ return "最小公倍數（共同的倍數裡最小的）是 " + s.lcm + "。" + F.txt(sa) + " 的分子分母都乘 " + (s.lcm / sa.d) + " → " + F.txt(s.ea) + "。" + F.txt(sb) + " 的分子分母都乘 " + (s.lcm / sb.d) + " → " + F.txt(s.eb) + "。"; }
     ]);
     reveal(r2);
   }
