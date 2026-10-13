@@ -15,7 +15,7 @@ function store(families) {
     markFetched: (id) => { const r = rows.find((x) => x.cells[0] === id); if (!r) return false; r.status = 'fetched'; return true; },
     getToken: () => token, setToken: (t) => { token = t; },
     last: 0, getLastFetch() { return this.last; }, setLastFetch(t) { this.last = t; },
-    listByCode: (h) => rows.filter((r) => r.cells[4] === h).map((r) => ({ id: r.cells[0], status: r.status, url: r.url || '' })),
+    listByCode: (h, prefix) => rows.filter((r) => r.cells[4] === h && (!prefix || r.cells[3].indexOf('~' + prefix) === 0)).map((r) => ({ id: r.cells[0], status: r.status, url: r.url || '', note: r.cells[3].slice(1, 41) })),
     markDone: (id, url) => { const r = rows.find((x) => x.cells[0] === id); if (!r) return false; r.status = 'done'; r.url = url; return true; }
   };
 }
@@ -148,4 +148,51 @@ test('W04 已做好的題目：電腦遲到的 ack 不得把狀態打回 fetched
   I.handleInbox(s, { op: 'ack', token: TOK, id: up.id }, now);
   assert.equal(I.handleInbox(s, { op: 'mine', code: CODE }, now).items[0].status, 'done', '遲到的 ack 把做好了打回製作中');
   assert.equal(I.handleInbox(s, { op: 'withdraw', code: CODE, id: up.id }, now).err, 'done');
+});
+
+// 各科目站補題區（#1618）：做好了連回各科站 #c/<觀念id>；清單先依本科前綴篩、再取最近 20 筆（Codex 審 8601526）
+test('C01 done 收四個科目站的 #c/<觀念id>；科目站用 #h、未知站、別的網域仍拒絕', () => {
+  const s = store(['h-' + CODE]);
+  const sites = ['g5-sci-review', 'g5-math-review', 'g5-chinese-review', 'g5-social-review'];
+  sites.forEach((site, i) => {
+    const up = I.handleInbox(s, { op: 'upload', code: CODE, subject: '國語', note: '【補題:國語:L1】' + i, image: IMG }, now);
+    assert.equal(I.handleInbox(s, { op: 'done', token: TOK, id: up.id, url: 'https://windsorya.github.io/' + site + '/#c/c' + i }, now).ok, true, site);
+  });
+  const up = I.handleInbox(s, { op: 'upload', code: CODE, subject: '國語', note: 'x', image: IMG }, now);
+  ['https://windsorya.github.io/g5-math-review/#h/c1', 'https://windsorya.github.io/g5-art-review/#c/c1', 'https://evil.example/g5-math-review/#c/c1',
+   'https://windsorya.github.io/g5-math-review/#c/c1"x', 'https://windsorya.github.io/g5-help/#c/c1'].forEach((url) => {
+    assert.equal(I.handleInbox(s, { op: 'done', token: TOK, id: up.id, url }, now).err, 'bad-done', url);
+  });
+});
+
+test('C02 mine 帶本科前綴：只回本科補題；前綴格式不對就拒絕；不帶前綴照舊回全部', () => {
+  const s = store(['h-' + CODE]);
+  I.handleInbox(s, { op: 'upload', code: CODE, subject: '自然', note: '【補題:自然:1】一', image: IMG }, now);
+  I.handleInbox(s, { op: 'upload', code: CODE, subject: '國語', note: '【補題:國語:L1】二', image: IMG }, now);
+  I.handleInbox(s, { op: 'upload', code: CODE, subject: '國語', note: '第 5 題', image: IMG }, now);
+  const r = I.handleInbox(s, { op: 'mine', code: CODE, prefix: '【補題:自然:' }, now);
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.items.map((x) => x.note), ['【補題:自然:1】一']);
+  assert.equal(I.handleInbox(s, { op: 'mine', code: CODE }, now).items.length, 3);
+  ['【補題:體育:', '【錯題】', '', 42, '【補題:自然:1】'].forEach((prefix) => {
+    assert.equal(I.handleInbox(s, { op: 'mine', code: CODE, prefix }, now).err, 'bad-prefix', String(prefix));
+  });
+});
+
+test('C03 正式儲存的挑選：先篩本科、再取最近 20 筆（別科傳了 20 筆，本科那一筆仍看得到）', () => {
+  const H = 'h-' + CODE, rows = [];
+  rows.push(['u0', 1, '自然', '~【補題:自然:1】最早那一題', H, 'new']);
+  for (let i = 1; i <= 20; i += 1) rows.push(['u' + i, 1 + i, '國語', '~【補題:國語:L1】' + i, H, 'new']);
+  rows.push(['x1', 99, '自然', '~【補題:自然:1】別家', 'h-OTHER', 'new']);
+  rows.push(['w1', 100, '自然', '~【補題:自然:1】撤回的', H, 'withdrawn']);
+  rows.push(['d1', 101, '自然', '~【補題:自然:2】做好了', H, I.doneCell('https://windsorya.github.io/g5-sci-review/#c/a1', 555)]);
+  const sci = I.pickMine(rows, H, '【補題:自然:');
+  assert.deepEqual(sci.map((x) => x.id), ['d1', 'u0']);
+  assert.equal(sci[0].status, 'done');
+  assert.equal(sci[0].url, 'https://windsorya.github.io/g5-sci-review/#c/a1');
+  assert.equal(sci[0].doneAt, 555);
+  const all = I.pickMine(rows, H, '');
+  assert.equal(all.length, 20);
+  assert.equal(all[0].id, 'd1');
+  assert.ok(!all.some((x) => x.id === 'u0'), '不帶前綴照舊只給最近 20 筆');
 });

@@ -75,3 +75,14 @@ test('多張照片送出結果的訊息：全成功／部分失敗講清楚哪�
   assert.match(none, /再按一次/);
   assert.doesNotMatch(none, /送出 0 張/);
 });
+
+test('清單查詢的本科前綴：與說明前綴同形、後端 PREFIX_RE 收得下；科目不對丟錯', () => {
+  const I = require('../gas/inbox.js');
+  U.SUBJECTS.forEach((sj) => {
+    const pre = U.minePrefix(sj);
+    assert.ok(U.makeNote(sj, 'u1', 'x', 1, 1).startsWith(pre));
+    const s = { hash: (c) => 'h', listByCode: (h, p) => [{ id: 'a', status: 'new', p }], getLastFetch: () => 0 };
+    assert.equal(I.handleInbox(s, { op: 'mine', code: 'ABCDEFGHJKMN', prefix: pre }, () => 1).ok, true, sj);
+  });
+  assert.throws(() => U.minePrefix('體育'));
+});

@@ -19,6 +19,11 @@
     if (typeof unit !== "string" || !UNIT_RE.test(unit)) throw new Error("bad-unit");
     return "【補題:" + subject + ":" + unit + "】";
   }
+  // 清單查詢用的本科前綴（gas/inbox.js PREFIX_RE 只收這個形狀）
+  function minePrefix(subject) {
+    if (SUBJECTS.indexOf(subject) < 0) throw new Error("bad-subject");
+    return "【補題:" + subject + ":";
+  }
   // 家長的字放中間，超長時只截家長的字（前綴與「第幾張」一定留著，取題腳本靠它們）
   function makeNote(subject, unit, text, i, n) {
     var head = prefix(subject, unit), tail = n > 1 ? "（第 " + i + "/" + n + " 張）" : "";
@@ -132,13 +137,18 @@
     }
     function load(auto) {
       var code = myCode();
-      if (!code) { $(".g5u-health").textContent = "這台裝置還沒開啟跨裝置同步，所以還不能補題、也看不到進度。"; return; }
+      if (!code) {
+        // 停止同步（或從沒開過）：清單清空，停止前發出的查詢晚到一律作廢（Codex 審 8601526）
+        EPOCH += 1; LAST = null; render();
+        $(".g5u-health").textContent = "這台裝置還沒開啟跨裝置同步，所以還不能補題、也看不到進度。"; return;
+      }
       if (auto && INFLIGHT > 0) return;
       var mySeq = ++SEQ, myEpoch = EPOCH, landed = false;
       INFLIGHT += 1;
       var fin = function () { if (!landed) { landed = true; INFLIGHT -= 1; } };
-      var stale = function () { return myEpoch !== EPOCH || mySeq < APPLIED; };
-      post(ep, { op: "mine", code: code }).then(function (r) {
+      var stale = function () { return myEpoch !== EPOCH || mySeq < APPLIED || myCode() !== code; };   // 換了家庭碼或停止同步＝舊家庭的回應不採用
+      // 帶本科前綴：後端先篩本科再取最近 20 筆（Codex 審 8601526：先取全家 20 筆再分科，別科傳多了本科就看不到）
+      post(ep, { op: "mine", code: code, prefix: minePrefix(cfg.subject) }).then(function (r) {
         fin(); if (stale()) return; APPLIED = mySeq;
         if (!r || !r.ok) { $(".g5u-health").textContent = "進度暫時讀不到，稍後再看。"; return; }
         $(".g5u-health").textContent = "";
@@ -150,8 +160,10 @@
       if (!code) return msg(out, "請先在本頁「跨裝置同步」開啟或加入同步，這台裝置才能補題。", true);
       var files = Array.prototype.slice.call($(".g5u-file").files || []);
       if (!files.length) return msg(out, "請先選照片。", true);
-      var unit = $(".g5u-unit").value, text = $(".g5u-note").value, btn = this, oks = [];
-      btn.disabled = true;
+      var unit = $(".g5u-unit").value, text = $(".g5u-note").value, oks = [];
+      // 送出途中照片、說明、單元、送出鈕都鎖住：途中改的內容不會在送完時被清掉（Codex 審 8601526）
+      var lock = function (on) { [".g5u-send", ".g5u-file", ".g5u-note", ".g5u-unit"].forEach(function (c) { $(c).disabled = on; }); };
+      lock(true);
       // 一張一張送（每張一次 op:"upload"）；前一張失敗不擋後面的，最後講清楚哪幾張沒送到
       var chain = Promise.resolve();
       files.forEach(function (f, i) {
@@ -163,7 +175,7 @@
         });
       });
       chain.then(function () {
-        btn.disabled = false;
+        lock(false);
         var all = oks.every(Boolean);
         msg(out, oks.noFamily ? "這台裝置的同步碼在雲端找不到紀錄：請先在「跨裝置同步」按一次同步再送。" : sendSummary(files.length, oks), !all);
         if (all) { $(".g5u-file").value = ""; $(".g5u-note").value = ""; }
@@ -175,6 +187,6 @@
     return { reload: load, stop: function () { clearInterval(timer); } };
   }
 
-  var api = { mount: mount, makeNote: makeNote, parseNote: parseNote, mineFor: mineFor, unitName: unitName, safeDoneUrl: safeDoneUrl, sendSummary: sendSummary, esc: esc, SUBJECTS: SUBJECTS };
+  var api = { mount: mount, minePrefix: minePrefix, makeNote: makeNote, parseNote: parseNote, mineFor: mineFor, unitName: unitName, safeDoneUrl: safeDoneUrl, sendSummary: sendSummary, esc: esc, SUBJECTS: SUBJECTS };
   if (typeof module !== "undefined" && module.exports) module.exports = api; else root.G5Upload = api;
 })(typeof window !== "undefined" ? window : this);

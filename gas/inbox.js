@@ -1,6 +1,7 @@
 /* 家長傳題目（2026-10-13 律師：「自己匯入或放入難題的入口在哪」）。
  * 網頁送出：{op:"upload", code, subject, note, image}；只收已開啟同步的家庭碼（雲端至少有一份紀錄），防陌生人亂塞。
  * 本機抓取：{op:"inbox", token} 列出未取走的題目（含照片）；{op:"ack", token, id} 標記已取走。
+ * 補題（各科目站，#1618）：{op:"mine", code, prefix:"【補題:國語:"} 只回本科補題（先篩再取最近 20 筆）；done 也收四個科目站 /#c/<觀念id>。
  * 撤回：{op:"withdraw", code, id}：家長撤回自己傳的、還沒做好的題目（狀態 withdrawn；mine／inbox 都不再給）。
  * token 第一次呼叫 inbox 時設定（之後只認同一個；存在 Script Properties，不進 repo）。
  * 照片只存在律師自己的試算表（Inbox 工作表），不放公開網頁。
@@ -10,6 +11,8 @@ var G5Inbox = (function () {
   var MAX_IMAGE = 880000;   // cap-why: 試算表單筆紀錄切塊上限 21×45000 字元（同步核心同一上限），留 2 萬給其他欄
   var MAX_NOTE = 500;
   var CHUNK = 45000;        // cap-why: Google 試算表單格上限 50000 字元
+  var MINE_MAX = 20;        // cap-why: 網頁清單只顯示最近的題目，試算表整列讀回後回傳量要小（GAS 回應時間）
+  var PREFIX_RE = /^【補題:(?:國語|數學|自然|社會):$/;
   function str(x) { return typeof x === 'string'; }
   function handleInbox(store, req, now) {
     if (req.op === 'upload') {
@@ -41,7 +44,9 @@ var G5Inbox = (function () {
       // 網頁看自己傳的題目進度：new＝等電腦取回、fetched＝製作中、done＝做好了（附連結）；也回電腦上次取題時間（判斷有無故障）
       // withdrawn（家長撤回的）不列
       if (!str(req.code) || !/^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{12}$/.test(req.code)) { return {ok: false, err: 'bad-code'}; }
-      return {ok: true, items: store.listByCode(store.hash(req.code)).filter(function (it) { return it.status !== 'withdrawn'; }), lastFetch: store.getLastFetch()};
+      // prefix（可省略）：各科目站補題區只看本科（Codex 審 8601526：舊版先取全家最近 20 筆再由網頁分科，別科傳多了本科就看不到）
+      if (req.prefix !== undefined && !(str(req.prefix) && PREFIX_RE.test(req.prefix))) { return {ok: false, err: 'bad-prefix'}; }
+      return {ok: true, items: store.listByCode(store.hash(req.code), req.prefix || '').filter(function (it) { return it.status !== 'withdrawn'; }), lastFetch: store.getLastFetch()};
     }
     if (req.op === 'withdraw') {
       // 撤回家長自己傳的題目（2026-10-13 律師：「為何我測試用的題目，我沒法清除？」）：{op:"withdraw", code, id}
@@ -63,7 +68,7 @@ var G5Inbox = (function () {
       if (req.op === 'inbox') { store.setLastFetch(now()); return {ok: true, items: store.listNew()}; }
       var was = str(req.id) ? store.find(req.id) : null;
       if (req.op === 'done') {
-        if (!str(req.id) || !str(req.url) || !/^https:\/\/windsorya\.github\.io\/(?:g5-help\/#h|g5-wrong-review\/#w)\/[\w-]+$/.test(req.url)) { return {ok: false, err: 'bad-done'}; }
+        if (!str(req.id) || !str(req.url) || !/^https:\/\/windsorya\.github\.io\/(?:g5-help\/#h|g5-wrong-review\/#w|g5-(?:sci|math|chinese|social)-review\/#c)\/[\w-]+$/.test(req.url)) { return {ok: false, err: 'bad-done'}; }
         if (was && was.status === 'withdrawn') { return {ok: false, err: 'withdrawn'}; }   // 家長已撤回：不變回做好了
         return {ok: store.markDone(req.id, req.url, now())};
       }
@@ -83,6 +88,16 @@ var G5Inbox = (function () {
     if (st.indexOf('done:') === 0) { return {status: 'done', url: st.slice(5), doneAt: 0}; }
     return {status: st, url: '', doneAt: 0};
   }
+  // 「你傳的題目」清單：試算表整列 [id, time, subject, '~說明', 家庭碼雜湊, 狀態, …] → 這個家庭、沒撤回、（有前綴就只要本科補題）的最近 MINE_MAX 筆。
+  // 先篩再取最近 N 筆；正式儲存與 node 測試共用這一支（tests/inbox.test.js C03）。
+  function pickMine(rows, hash, prefix) {
+    return rows.filter(function (r) {
+      return r[4] === hash && r[5] !== 'withdrawn' && (!prefix || String(r[3]).indexOf('~' + prefix) === 0);
+    }).map(function (r) {
+      var p = parseStatus(r[5]);
+      return {id: r[0], time: r[1], subject: r[2], note: String(r[3]).slice(1, 41), status: p.status, url: p.url, doneAt: p.doneAt};
+    }).reverse().slice(0, MINE_MAX);
+  }
   function toCells(u) {
     var parts = [];
     for (var i = 0; i < u.image.length; i += CHUNK) { parts.push(u.image.slice(i, i + CHUNK)); }
@@ -93,7 +108,7 @@ var G5Inbox = (function () {
     for (var i = 0; i < n; i += 1) { img += String(c[7 + i]).slice(1); }
     return {id: c[0], time: c[1], subject: c[2], note: String(c[3]).slice(1), image: img};
   }
-  return {handleInbox: handleInbox, doneCell: doneCell, parseStatus: parseStatus, toCells: toCells, fromCells: fromCells, SUBJECTS: SUBJECTS, MAX_IMAGE: MAX_IMAGE, CHUNK: CHUNK};
+  return {handleInbox: handleInbox, pickMine: pickMine, doneCell: doneCell, parseStatus: parseStatus, toCells: toCells, fromCells: fromCells, SUBJECTS: SUBJECTS, MAX_IMAGE: MAX_IMAGE, CHUNK: CHUNK};
 })();
 if (typeof module !== 'undefined' && module.exports) { module.exports = G5Inbox; }
 
@@ -142,14 +157,10 @@ function g5InboxStore() {
       for (var i = 0; i < ids.length; i += 1) { if (ids[i][0] === id) { s.getRange(i + 1, 6).setValue(st); SpreadsheetApp.flush(); return true; } }
       return false;
     },
-    listByCode: function (hash) {
+    listByCode: function (hash, prefix) {
       var s = inbox(), n = s.getLastRow();
       if (n < 1) { return []; }
-      // 撤回的先濾掉再取最近 20 筆（不佔名額）
-      return s.getRange(1, 1, n, 6).getValues().filter(function (r) { return r[4] === hash && r[5] !== 'withdrawn'; }).map(function (r) {
-        var p = G5Inbox.parseStatus(r[5]);
-        return {id: r[0], time: r[1], subject: r[2], note: String(r[3]).slice(1, 41), status: p.status, url: p.url, doneAt: p.doneAt};
-      }).reverse().slice(0, 20);
+      return G5Inbox.pickMine(s.getRange(1, 1, n, 6).getValues(), hash, prefix);   // 撤回的、別科的先濾掉再取最近 20 筆（不佔名額）
     },
     markDone: function (id, url, t) {
       var s = inbox(), n = s.getLastRow();

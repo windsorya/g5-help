@@ -53,11 +53,14 @@ def run(bt, tmp):
     pg.close()
 
     # ②開了同步：兩張照片送兩次 upload，前綴＋第幾張、科目對；送完重抓清單、只列本科補題
-    state = {"items": [], "uploads": [], "fail_second": False, "withdrawn": [], "mine_calls": 0, "hold": None}
+    state = {"items": [], "uploads": [], "fail_second": False, "withdrawn": [], "mine_calls": 0, "mine_reqs": [], "hold_mine": False, "hold_up": False, "held": []}
 
     def gas(route):
         req = json.loads(route.request.post_data)
         if req["op"] == "upload":
+            if state["hold_up"]:
+                state["held"].append((route, req))
+                return
             state["uploads"].append(req)
             n = len(state["uploads"])
             if state["fail_second"] and n == 2:
@@ -66,6 +69,10 @@ def run(bt, tmp):
             return route.fulfill(status=200, content_type="application/json", body=json.dumps({"ok": True, "id": f"u{n}"}))
         if req["op"] == "mine":
             state["mine_calls"] += 1
+            state["mine_reqs"].append(req)
+            if state["hold_mine"]:
+                state["held"].append((route, req))
+                return
             body = json.dumps({"ok": True, "items": [dict(x) for x in state["items"]], "lastFetch": 0})
             return route.fulfill(status=200, content_type="application/json", body=body)
         if req["op"] == "withdraw":
@@ -92,6 +99,25 @@ def run(bt, tmp):
     check(f"{tag} 別站網址的『做好了』不給連結", pg.locator('.g5u-card[data-id="x3"] a').count() == 0)
     check(f"{tag} 本站網址的『做好了』有連結", pg.get_attribute('.g5u-card[data-id="x4"] a', "href") == "https://windsorya.github.io/g5-chinese-review/#c/k2")
     check(f"{tag} 做好了的不能撤回", pg.locator('.g5u-card[data-id="x4"] button').count() == 0)
+    # Codex 審 8601526：清單要請後端先依本科前綴篩（別科傳多了，本科不會被擠出最近 20 筆）
+    check(f"{tag} 清單查詢帶本科前綴", state["mine_reqs"] and all(r.get("prefix") == "【補題:國語:" for r in state["mine_reqs"]), state["mine_reqs"][:2])
+    # Codex 審 8601526：送出途中照片、說明、單元都鎖住（否則途中改的內容會在送完時被清掉）
+    state["hold_up"] = True
+    pg.set_input_files(".g5u-file", pics[:1])
+    pg.click(".g5u-send")
+    pg.wait_for_function("document.querySelector('.g5u-out').textContent.indexOf('送出第') >= 0", timeout=10000)
+    pg.wait_for_timeout(300)
+    locked = pg.evaluate("['.g5u-file','.g5u-note','.g5u-unit','.g5u-send'].every(function(c){return document.querySelector(c).disabled;})")
+    check(f"{tag} 送出途中照片、說明、單元、送出鈕都鎖住", locked)
+    state["hold_up"] = False
+    for r0, req in state["held"]:
+        state["uploads"].append(req)
+        r0.fulfill(status=200, content_type="application/json", body='{"ok":true,"id":"h1"}')
+    state["held"].clear()
+    pg.wait_for_function("document.querySelector('.g5u-out').textContent.indexOf('送出了') >= 0", timeout=10000)
+    check(f"{tag} 送完解鎖", pg.evaluate("['.g5u-file','.g5u-note','.g5u-unit','.g5u-send'].every(function(c){return !document.querySelector(c).disabled;})"))
+    state["uploads"] = []
+    pg.wait_for_timeout(500)
 
     pg.select_option(".g5u-unit", "L2")
     pg.fill(".g5u-note", "生字和注音")
@@ -124,6 +150,20 @@ def run(bt, tmp):
     check(f"{tag} 部分失敗點名第 2 張", "第 2 張沒有送出" in out and "送出 2 張" in out, out)
     check(f"{tag} 部分失敗不清空照片", pg.evaluate("document.querySelector('.g5u-file').files.length") == 3)
     check(f"{tag} 部分失敗後送出鈕可再按", pg.is_enabled(".g5u-send"))
+    # Codex 審 8601526：停止同步後，停止前發出的清單查詢晚到不得把舊家庭的題目畫回來
+    pg.wait_for_timeout(300)
+    state["hold_mine"] = True
+    pg.evaluate("window.__h.reload()")
+    pg.wait_for_function("1", timeout=2000)
+    pg.wait_for_timeout(300)
+    pg.evaluate("localStorage.removeItem('g5sync.code'); window.__h.reload()")
+    state["hold_mine"] = False
+    for r0, req in state["held"]:
+        r0.fulfill(status=200, content_type="application/json", body=json.dumps({"ok": True, "items": [dict(x) for x in state["items"]], "lastFetch": 0}))
+    state["held"].clear()
+    pg.wait_for_timeout(600)
+    check(f"{tag} 停止同步：清單清空、舊回應晚到也不回填", pg.locator(".g5u-card").count() == 0, pg.locator(".g5u-card").count())
+    check(f"{tag} 停止同步：提示還沒開啟同步", "還沒開啟跨裝置同步" in pg.inner_text(".g5u-health"), pg.inner_text(".g5u-health"))
     ctx.close()
     b.close()
 
