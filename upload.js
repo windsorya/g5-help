@@ -8,7 +8,8 @@
 //
 // 清單、撤回、上傳的生命週期（連 3 輪審查 FAIL 後，依 Codex 設計者結論 docs/upload-list-lifecycle-codex-designer-20261013.md (d) 重做）：
 // - 每個元件同時只有一筆有效的清單查詢；同家庭、同世代再要求刷新（手動或每分鐘自動）就合併等它，不另發。
-// - 換家庭、撤回成功、上傳成功 ⇒ 舊查詢失效（先釋放自己的 slot，再 abort）。回應要同時對得上 owner、家庭版本、查詢世代、期限才採用。
+// - 換家庭、撤回結束（不論結果）、上傳成功 ⇒ 舊查詢失效（先釋放自己的 slot，再 abort）。回應要同時對得上 owner、家庭版本、查詢世代、期限才採用。
+// - 家庭版本靠單調的家庭世代：同步碼每被改一次就換世代（A→B→A 也是新世代），同頁寫入在 localStorage 寫入端攔、別頁看 storage 事件新舊值（審 117bbb0）。
 // - 撤回、上傳各帶自己的操作身分；換家庭、stop、同容器重掛都讓它們失去資格。舊操作只能結束自己，不碰別人的鎖、草稿、訊息。
 // - familyCheck() 只讀家庭碼、作廢狀態，不發請求；要不要查由 refresh() 這個唯一入口決定。每個操作入口與回應入口都先重讀家庭碼。
 // - AbortController 只是省資源：abort 沒效果時，上面的規則照樣成立。
@@ -129,6 +130,37 @@
   }
   function myCode() { var c = null; try { c = localStorage.getItem(CODE_KEY); } catch (e) {} return familyOf(c); }
 
+  // 家庭世代（Codex 審 117bbb0①）：同步碼每被改一次就 +1，換回原碼（A→B→A）也是新世代；元件與在途操作只認自己看到的世代。
+  // 2 秒輪詢只讀得到「現在的碼」，兩次輪詢之間的 A→B→A 看不出來（設計者 (c)）。所以在寫入端攔：
+  // 同一頁的寫入（sync.js 走 localStorage.setItem／removeItem）包一層，值真的變了才 +1；別的分頁的寫入看 storage 事件的新舊值。
+  // 包裝只多讀一次舊值、不改寫入行為（寫入丟錯照樣丟出）；sessionStorage 等其他 Storage 不受影響。
+  var CODE_GEN = 0, WATCHED = false;
+  function bumpGen() { CODE_GEN += 1; }
+  function peekCode(s) { try { return s.getItem(CODE_KEY); } catch (e) { return null; } }
+  function watchCode(store, onChange) {
+    if (!store) return false;
+    var host = typeof Storage === "function" && store instanceof Storage ? Storage.prototype : store, hooked = false;
+    ["setItem", "removeItem", "clear"].forEach(function (name) {
+      var orig = host[name];
+      if (typeof orig !== "function") return;
+      host[name] = function () {
+        var mine = this === store, before = mine ? peekCode(this) : null;
+        try { return orig.apply(this, arguments); } finally { if (mine && peekCode(this) !== before) onChange(); }
+      };
+      hooked = true;
+    });
+    return hooked;
+  }
+  // storage 事件：同步碼的新舊值不同（含別的分頁 A→B、B→A 各一次），或整個 localStorage 被清掉（key 為 null）
+  function codeEventChanged(e) { return !!e && (e.key === null || (e.key === CODE_KEY && e.oldValue !== e.newValue)); }
+  // 上傳途中換家庭的提示：只算伺服器回 ok 的張數（審 117bbb0②）；送出去還沒回來的那張，不說送到、也不說沒送到
+  function switchMessage(ok, unsure) {
+    var head = "同步設定改了（停止同步或換了家庭），";
+    if (!ok && !unsure) return head + "照片沒有送出；確認後再按一次送出。";
+    return head + "後面的照片沒有送出" + (ok ? "；已確認送出的 " + ok + " 張不受影響" : "") +
+      (unsure ? "；正在送的那張還沒收到結果，不確定有沒有送到" : "") + "。";
+  }
+
   var CSS = ".g5u{display:grid;gap:10px}.g5u label{display:grid;gap:4px;font-weight:600}" +
     ".g5u select,.g5u textarea,.g5u input[type=file]{font-size:16px;min-height:44px;padding:6px 10px;border:2px solid #cbd5e1;border-radius:12px;background:inherit;color:inherit}" +
     ".g5u textarea{min-height:72px}.g5u .g5u-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}" +
@@ -163,7 +195,8 @@
     function msg(node, t, bad) { node.textContent = t; node.classList.toggle("g5u-bad", !!bad); node.classList.toggle("g5u-good", !bad && !!t); }
     function health(t) { $(".g5u-health").textContent = t; }
 
-    var FAMILY = myCode(), FREV = 0;   // 目前的家庭碼與它的版本：每看到一次變化就 +1（A→B→A 也是兩次）
+    if (!WATCHED) { WATCHED = true; try { watchCode(localStorage, bumpGen); } catch (e) {} }
+    var FAMILY = myCode(), SEEN = CODE_GEN, FREV = 0;   // 目前的家庭碼、看過的家庭世代、元件自己的家庭版本（每認出一次換家庭就 +1）
     var GEN = 0, ACTIVE = null;        // 查詢世代、目前唯一有效的在途查詢
     var LAST = null, GONE = [];        // 最後一份有效清單、本家庭已確認撤回的題目 id
     var ARMED = null, WD_OP = null, UP_OP = null;   // 撤回確認、撤回中、上傳中：各是一個操作身分
@@ -185,16 +218,15 @@
     function familyCheck() {
       if (!live()) return false;
       var c = myCode();
-      if (c === FAMILY) return false;
-      FAMILY = c; FREV += 1;
+      if (c === FAMILY && SEEN === CODE_GEN) return false;   // 碼一樣、而且中間沒被改過（A→B→A 世代已變，照樣算換家庭）
+      FAMILY = c; SEEN = CODE_GEN; FREV += 1;
       dropQuery(); LAST = null; GONE = [];
       disarm();
       if (WD_OP) { endOp(WD_OP); WD_OP = null; msg($(".g5u-wmsg"), ""); }
       if (UP_OP) {
         var u = UP_OP;
         UP_OP = null; endOp(u); lock(false);
-        msg($(".g5u-out"), u.sent ? "同步設定改了（停止同步或換了家庭），後面的照片沒有送出；前面已送出的 " + u.sent + " 張不受影響。" :
-          "同步設定改了（停止同步或換了家庭），照片沒有送出；確認後再按一次送出。", true);
+        msg($(".g5u-out"), switchMessage(u.ok, u.unsure), true);
       }
       health(FAMILY ? "" : NO_SYNC);
       render();
@@ -265,13 +297,11 @@
       endOp(op);
       if (mine) WD_OP = null;
       if (!live() || !mine || op.frev !== FREV) return;
-      if (outcome === "ok") {
-        GONE.push(op.id);   // 本機立刻移除，之後任何回應都濾掉
-        dropQuery();        // 撤回前發出的查詢：失效
-      }
+      if (outcome === "ok") GONE.push(op.id);   // 本機立刻移除，之後任何回應都濾掉
+      dropQuery();          // 撤回不論結果（成功、done、not-found、失敗、還沒確認）：撤回前發出的查詢都失效（審 117bbb0③）
       msg($(".g5u-wmsg"), withdrawMessage(outcome), outcome !== "ok");
       render();
-      refresh();            // 照伺服器現況重查（撤回成功開新世代；沒成功或沒確認也讓清單對上實際狀態）；不重送撤回
+      refresh();            // 照伺服器現況重查一次（新世代，不與舊查詢合併）；不重送撤回
     }
 
     function render() {
@@ -307,7 +337,8 @@
       var files = Array.prototype.slice.call($(".g5u-file").files || []);
       if (!files.length) return msg(out, "請先選照片。", true);
       var unit = $(".g5u-unit").value, text = $(".g5u-note").value, oks = [], SKIP = {};
-      var op = { family: FAMILY, frev: FREV, done: false, sent: 0, noFamily: false, timer: null };
+      // ok：伺服器回 ok 的張數（已確認送出）；unsure：有一張已送出去、還沒收到回應（換家庭的提示只用這兩個，不用嘗試數）
+      var op = { family: FAMILY, frev: FREV, done: false, ok: 0, unsure: false, noFamily: false, timer: null };
       UP_OP = op;
       // 送出途中照片、說明、單元、送出鈕都鎖住：途中改的內容不會在送完時被清掉（Codex 審 8601526）
       lock(true);
@@ -325,13 +356,16 @@
           msg(out, "送出第 " + (i + 1) + "/" + files.length + " 張…");
           return shrink(f).then(function (img) {
             if (!still()) return SKIP;
-            op.sent += 1;
+            op.unsure = true;
             return post(ep, { op: "upload", code: op.family, subject: cfg.subject, note: makeNote(cfg.subject, unit, text, i + 1, files.length), image: img });
           }).then(function (r) {
-            if (r === SKIP || !still()) return;
+            if (r === SKIP) return;
+            op.unsure = false;
+            if (r && r.ok === true) op.ok += 1;   // 先記確認數，再核對身分：這張若剛好碰上換家庭，提示也算得到它
+            if (!still()) return;
             oks.push(!!(r && r.ok === true));
             if (r && r.err === "no-family") op.noFamily = true;
-          }, function () { if (still()) oks.push(false); });
+          }, function () { op.unsure = false; if (still()) oks.push(false); });
         });
       });
       chain.then(function () {
@@ -351,7 +385,8 @@
       if (ACTIVE && now >= ACTIVE.deadline) endQuery(ACTIVE, "timeout");
       if (WD_OP && now >= WD_OP.deadline) endWithdraw(WD_OP, "timeout");
     }
-    function onStorage(e) { if (!e || !e.key || e.key === CODE_KEY) { if (familyCheck()) refresh(); } }
+    // 別的分頁改了同步碼：用事件的新舊值換世代（本頁讀到的碼可能前後一樣，例如那邊 A→B→A）
+    function onStorage(e) { if (codeEventChanged(e)) bumpGen(); if (!e || !e.key || e.key === CODE_KEY) { if (familyCheck()) refresh(); } }
     // 回到前景（切回分頁、從上一頁回來）：計時器可能被延後，先照期限收掉過期的，再看家庭碼
     function onShow() { if (!live() || document.visibilityState === "hidden") return; checkDeadlines(); if (familyCheck()) refresh(); }
     var familyTimer = setInterval(function () { if (familyCheck()) refresh(); }, FAMILY_MS);
@@ -386,6 +421,7 @@
   }
 
   var api = { mount: mount, minePrefix: minePrefix, makeNote: makeNote, parseNote: parseNote, mineFor: mineFor, unitName: unitName, safeDoneUrl: safeDoneUrl, sendSummary: sendSummary, esc: esc, SUBJECTS: SUBJECTS,
-    familyOf: familyOf, parseReply: parseReply, mineItems: mineItems, withdrawOutcome: withdrawOutcome, withdrawMessage: withdrawMessage, dropWithdrawn: dropWithdrawn, DEADLINE_MS: DEADLINE_MS };
+    familyOf: familyOf, parseReply: parseReply, mineItems: mineItems, withdrawOutcome: withdrawOutcome, withdrawMessage: withdrawMessage, dropWithdrawn: dropWithdrawn, DEADLINE_MS: DEADLINE_MS,
+    watchCode: watchCode, codeEventChanged: codeEventChanged, switchMessage: switchMessage };
   if (typeof module !== "undefined" && module.exports) module.exports = api; else root.G5Upload = api;
 })(typeof window !== "undefined" ? window : this);
