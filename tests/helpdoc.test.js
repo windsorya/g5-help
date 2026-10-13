@@ -1,0 +1,81 @@
+// 難題站存檔 g5help.v1 的格式（src/helpdoc.js）：2026-10-13 律師「為何我測試用的題目，我沒法清除？有無清除或重置按鈕？」
+// 新增 hidden 欄位（家長隱藏的篇）＋清除全部作答紀錄。執行：node --test tests/helpdoc.test.js
+"use strict";
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const D = require("../src/helpdoc.js");
+
+const plain = (x) => JSON.parse(JSON.stringify(x));
+const OLD = JSON.stringify({v: 1, entries: {"p38-6-2": {lessonDone: true, idx: 2, seed: 7, streak: 2, clean: 2, solved: 2, mastered: false, log: [], cur: null, r: 3}}});
+
+test("H01 舊存檔沒有 hidden 欄位 ⇒ 照常讀、預設全不隱藏", () => {
+  const d = D.parse(OLD);
+  assert.ok(d, "舊格式要讀得懂");
+  assert.equal(d.entries["p38-6-2"].solved, 2);
+  assert.deepEqual(plain(d.hidden), {});
+});
+
+test("H02 新欄位 hidden：{篇id: 隱藏時間} 接受並保留；序列化後再讀一模一樣", () => {
+  const raw = JSON.stringify({v: 1, entries: {}, hidden: {"sci-q5-bangen": 1791868607799, "t-guoyu": 5}});
+  const d = D.parse(raw);
+  assert.deepEqual(plain(d.hidden), {"sci-q5-bangen": 1791868607799, "t-guoyu": 5});
+  const back = D.parse(D.serialize(d.entries, d.hidden));
+  assert.deepEqual(plain(back.hidden), plain(d.hidden));
+  assert.equal(JSON.parse(D.serialize(d.entries, d.hidden)).v, 1, "版本號維持 1：舊版頁面仍讀得懂這份存檔");
+});
+
+test("H03 hidden 壞掉不拖垮整份存檔：陣列／字串／壞 id／壞時間各自丟掉，作答紀錄照留", () => {
+  for (const bad of [[1, 2], "x", null, 5]) {
+    const d = D.parse(JSON.stringify({v: 1, entries: JSON.parse(OLD).entries, hidden: bad}));
+    assert.ok(d, "hidden=" + JSON.stringify(bad) + " 仍讀得懂");
+    assert.deepEqual(plain(d.hidden), {});
+    assert.equal(d.entries["p38-6-2"].solved, 2);
+  }
+  // 原始 JSON 字串（物件字面量的 "__proto__" 會變成設原型，不會出現在 JSON 裡）
+  const d = D.parse('{"v":1,"entries":{},"hidden":{"ok-1":9,"<b>":1,"neg":-1,"str":"1","frac":1.5,"__proto__":3}}');
+  assert.deepEqual(Object.keys(d.hidden).sort(), ["__proto__", "ok-1"], "__proto__ 當普通 id 存（hidden 沒有原型），不污染物件");
+  assert.equal(Object.getPrototypeOf(d.hidden), null);
+  assert.equal(d.hidden["ok-1"], 9);
+  assert.ok(!("<b>" in d.hidden) && !("neg" in d.hidden) && !("str" in d.hidden) && !("frac" in d.hidden));
+});
+
+test("H04 不是存檔的東西照舊回 null（壞資料備份流程不變）", () => {
+  for (const raw of ["{bad", "null", JSON.stringify({v: 2, entries: {}}), JSON.stringify({v: 1, entries: []}), JSON.stringify({v: 1})]) assert.equal(D.parse(raw), null, raw);
+});
+
+test("H05 隱藏、恢復、全部恢復：不碰任何一篇的作答紀錄", () => {
+  const d = D.parse(OLD);
+  const h1 = D.hide(d.hidden, "p38-6-2", 100);
+  assert.equal(h1["p38-6-2"], 100);
+  assert.deepEqual(plain(d.hidden), {}, "回傳新物件，不改原本的");
+  const h2 = D.unhide(h1, "p38-6-2");
+  assert.deepEqual(plain(h2), {});
+  assert.equal(d.entries["p38-6-2"].solved, 2);
+  assert.deepEqual(plain(D.unhide(D.hide(D.hide({}, "a", 1), "b", 2), "zzz")), {a: 1, b: 2}, "恢復沒隱藏的篇不出錯");
+  assert.throws(() => D.hide({}, "<b>", 1), "壞 id 不收");
+});
+
+test("H06 只算目前清單裡有的篇（舊篇 id 留在 hidden 裡不算進「已隱藏 N 篇」）", () => {
+  const list = [{id: "a"}, {id: "b"}, {id: "c"}];
+  assert.deepEqual(D.hiddenIn({a: 1, gone: 2, c: 3}, list).map((e) => e.id), ["a", "c"]);
+  assert.equal(D.isHidden({a: 1}, "a"), true);
+  assert.equal(D.isHidden({a: 1}, "constructor"), false, "內建屬性名不能被當成已隱藏");
+});
+
+test("H07 清除全部作答紀錄：每一篇都回到空白；隱藏清單不清（另有全部恢復）", () => {
+  const d = D.parse(JSON.stringify({v: 1, entries: JSON.parse(OLD).entries, hidden: {"t-guoyu": 5}}));
+  const c = D.cleared(d.hidden);
+  assert.deepEqual(Object.keys(c.entries), []);
+  assert.deepEqual(plain(c.hidden), {"t-guoyu": 5});
+  const back = D.parse(D.serialize(c.entries, c.hidden));
+  assert.deepEqual(Object.keys(back.entries), []);
+  assert.equal(back.hidden["t-guoyu"], 5);
+});
+
+test("H08 原有欄位清洗不變（從 app.html 搬進 helpdoc.js，行為與搬家前相同）", () => {
+  const d = D.parse(JSON.stringify({v: 1, entries: {x: {idx: -5, streak: "x", lessonDone: "yes", log: 5, seed: 700000, cur: {idx: 6, hints: 1, wrongs: 1}}, y: {idx: 9007199254740992}}}));
+  assert.equal(d.entries.x.idx, 0); assert.equal(d.entries.x.lessonDone, false); assert.deepEqual(d.entries.x.log, []);
+  assert.equal(d.entries.x.seed, 700000); assert.deepEqual(plain(d.entries.x.cur), {idx: 6, hints: 1, wrongs: 1});
+  assert.equal(d.entries.y.idx, 0);
+  assert.equal(Object.getPrototypeOf(d.entries), null, "entries 不能撞內建屬性");
+});

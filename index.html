@@ -79,6 +79,12 @@ details p{margin:0 0 10px}
 .hcard .meta{font-size:15px;color:var(--muted)}
 .hcard .st{font-size:15px;color:var(--pri)} .hcard .st.done{color:var(--leaf)}
 .subj{display:grid;gap:10px}
+/* 家長：隱藏這篇／清除紀錄（兩段式確認） */
+.hwrap{display:grid;gap:4px}
+.hact{justify-content:flex-end;gap:8px}
+.btn.quiet{font-size:15px;min-height:44px;padding:6px 14px;color:var(--muted);border-color:var(--line-soft)}
+.btn.warn{background:var(--bad);color:var(--on-pri);border:0}
+.hrow{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px;border-top:1px solid var(--line-soft);padding-top:10px}
 .empty{font-size:15px;color:var(--muted)}
 .back{color:var(--pri);font-size:16px;justify-self:start;min-height:40px;display:inline-flex;align-items:center}
 /* 跨裝置同步面板（src/sync.js 產生，class 前綴 g5s-） */
@@ -150,9 +156,10 @@ details p{margin:0 0 10px}
         <label for="upNote">哪一題、她說哪裡不懂</label>
         <textarea id="upNote" maxlength="500" style="font-size:16px;min-height:80px;border:2px solid var(--line);border-radius:12px;padding:10px;background:var(--bg);color:var(--ink)" placeholder="例：右上角第 6 題②，她不知道怎麼通分"></textarea>
         <div class="row"><button class="btn" type="button" id="upSend">送出</button><span class="small" id="upMsg" aria-live="polite"></span></div>
-        <div style="display:grid;gap:8px;border-top:1px solid var(--line-soft);padding-top:12px"><b>你傳的題目</b><div class="small" id="upHealth"></div><div id="upList" class="hlist"></div></div>
+        <div style="display:grid;gap:8px;border-top:1px solid var(--line-soft);padding-top:12px"><b>你傳的題目</b><div class="small" id="upHealth"></div><div class="small" id="upWMsg" aria-live="polite"></div><div id="upList" class="hlist"></div></div>
       </div>
     </details>
+    <details id="setBox"><summary>家長設定</summary><div id="setBody" style="display:grid;gap:12px"></div></details>
     <details id="syncBox"><summary>換電腦或 iPad 也能接著練（跨裝置同步）</summary><div id="g5sync"></div></details>
   </section>
 
@@ -325,6 +332,65 @@ details p{margin:0 0 10px}
 
 </script>
 <script>
+// 難題站存檔 g5help.v1 的格式（從 src/app.html 搬出來，node 測試 tests/helpdoc.test.js 與頁面用同一份）。
+// {v:1, entries:{篇id: 那一篇的教學與練習紀錄}, hidden?:{篇id: 隱藏時間(ms)}}
+//   hidden（2026-10-13 律師：「為何我測試用的題目，我沒法清除？有無清除或重置按鈕？」）：家長在首頁按「隱藏這篇」收起來的篇。
+//   只是不列在首頁，不刪任何篇的內容與作答紀錄；跟著 g5help.v1 一起跨裝置同步。舊存檔沒有這個欄位＝全不隱藏。
+//   版本號維持 1：舊版頁面讀到 hidden 會略過（不當壞資料），存檔時會掉這個欄位——只影響還開著舊版的分頁，列為剩餘風險。
+// 讀不懂的 hidden（陣列、字串、壞 id、壞時間）只丟掉那一部分，不拖垮整份存檔。
+(function (root) {
+  "use strict";
+  var ID = /^[\w-]{1,60}$/;   // 篇 id 與 hard.js、GAS confused 的 entry 同一規則
+  function fresh() { return {lessonDone: false, idx: 0, seed: Math.floor(Math.random() * 1e6), streak: 0, clean: 0, solved: 0, mastered: false, log: [], cur: null, r: 0}; }
+  function nat(x) { return typeof x === "number" && Number.isSafeInteger(x) && x >= 0 && x <= 100000; }   // 題號、次數：超過 10 萬當壞資料（Codex 必修 6）
+  function seedOk(x) { return typeof x === "number" && Number.isSafeInteger(x) && x >= 0 && x <= 2147483647; }   // 亂數種子另設範圍（Codex 第 2 輪必修 1）
+  function stamp(x) { return typeof x === "number" && Number.isSafeInteger(x) && x >= 0; }
+  function clean1(s) {
+    var d = fresh();
+    if (!s || typeof s !== "object") return d;
+    ["idx", "streak", "clean", "solved"].forEach(function (k) { if (nat(s[k])) d[k] = s[k]; });
+    if (seedOk(s.seed)) d.seed = s.seed;
+    d.r = (typeof s.r === "number" && Number.isSafeInteger(s.r) && s.r >= 0) ? s.r : 0;   // 這一篇的版本號：每存一次 +1
+    d.lessonDone = s.lessonDone === true; d.mastered = s.mastered === true;
+    if (Array.isArray(s.log)) d.log = s.log.slice(-100);
+    // 正在做的那一題：看過提示、答錯過幾次（Codex 2026-10-12 第 1 輪必修 1、2：重開練習不能洗掉、不能重複計分）
+    if (s.cur && nat(s.cur.idx) && nat(s.cur.hints) && nat(s.cur.wrongs)) d.cur = {idx: s.cur.idx, hints: s.cur.hints, wrongs: s.cur.wrongs};
+    return d;
+  }
+  function own(o, k) { return Object.prototype.hasOwnProperty.call(o, k); }
+  function cleanHidden(h) {
+    var out = Object.create(null);
+    if (!h || typeof h !== "object" || Array.isArray(h)) return out;
+    Object.keys(h).forEach(function (id) { if (ID.test(id) && stamp(h[id])) out[id] = h[id]; });
+    return out;
+  }
+  // 回傳 {entries, hidden}（都是 Object.create(null)，id 叫 constructor、__proto__ 也不會撞到內建屬性）；讀不懂回 null
+  function parse(raw) {
+    try {
+      var x = JSON.parse(raw);
+      if (!x || x.v !== 1 || !x.entries || typeof x.entries !== "object" || Array.isArray(x.entries)) return null;
+      var out = Object.create(null);
+      Object.keys(x.entries).forEach(function (id) { out[id] = clean1(x.entries[id]); });
+      return {entries: out, hidden: cleanHidden(x.hidden)};
+    } catch (e) { return null; }
+  }
+  function plain(o) { var p = {}; Object.keys(o || {}).forEach(function (k) { p[k] = o[k]; }); return p; }
+  function serialize(entries, hidden) { return JSON.stringify({v: 1, entries: plain(entries), hidden: plain(hidden)}); }
+  function hide(hidden, id, t) {
+    if (!ID.test(id) || !stamp(t)) throw new Error("bad-hide");
+    var out = cleanHidden(plain(hidden)); out[id] = t; return out;
+  }
+  function unhide(hidden, id) { var out = cleanHidden(plain(hidden)); delete out[id]; return out; }
+  function isHidden(hidden, id) { return !!hidden && own(hidden, id) && stamp(hidden[id]); }
+  function hiddenIn(hidden, list) { return (list || []).filter(function (e) { return isHidden(hidden, e.id); }); }
+  // 清除全部作答紀錄：每一篇回到空白（之後打開時才用 fresh() 建）；隱藏清單照留（另有「恢復全部隱藏的篇」）
+  function cleared(hidden) { return {entries: Object.create(null), hidden: cleanHidden(plain(hidden))}; }
+  var api = {fresh: fresh, clean1: clean1, parse: parse, serialize: serialize, cleanHidden: cleanHidden, hide: hide, unhide: unhide, isHidden: isHidden, hiddenIn: hiddenIn, cleared: cleared, own: own};
+  if (typeof module !== "undefined" && module.exports) module.exports = api; else root.G5HelpDoc = api;
+})(typeof window !== "undefined" ? window : this);
+
+</script>
+<script>
 // 五年級難題解說：律師傳來「她不懂這題」的題目，一題一篇、只講那一題，不分科目（2026-10-13 律師：「不需要重新解說整張試卷，
 // 而只需要特別解說我傳給你的題目」「不論是哪一種科目，諸如國、數、自然、社會、英文」）。
 // 新增一篇＝在 LIST 加一個物件；tests/hard.test.js 會逐篇驗欄位，數學題另驗算答案。
@@ -493,58 +559,35 @@ function bar(n, d, o){
   return '<svg class="fbar" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="' + esc(o.label || ("切成 " + d + " 格，塗了 " + n + " 格")) + '">' + s + '</svg>';
 }
 
-// ---------- 存檔：g5help.v1＝{v:1, entries:{篇id: 那一篇的教學與練習紀錄}}；不碰自然複習的 g5sci.v3 ----------
-var KEY = "g5help.v1";
-function fresh(){ return {lessonDone:false, idx:0, seed:Math.floor(Math.random() * 1e6), streak:0, clean:0, solved:0, mastered:false, log:[], cur:null, r:0}; }
-function nat(x){ return typeof x === "number" && Number.isSafeInteger(x) && x >= 0 && x <= 100000; }   // 題號、次數：超過 10 萬當壞資料（Codex 必修 6）
-function seedOk(x){ return typeof x === "number" && Number.isSafeInteger(x) && x >= 0 && x <= 2147483647; }   // 亂數種子另設範圍（Codex 第 2 輪必修 1）
-function clean1(s){
-  var d = fresh();
-  if (!s || typeof s !== "object") return d;
-  ["idx","streak","clean","solved"].forEach(function(k){ if (nat(s[k])) d[k] = s[k]; });
-  if (seedOk(s.seed)) d.seed = s.seed;
-  d.r = (typeof s.r === "number" && Number.isSafeInteger(s.r) && s.r >= 0) ? s.r : 0;   // 這一篇的版本號：每存一次 +1
-  d.lessonDone = s.lessonDone === true; d.mastered = s.mastered === true;
-  if (Array.isArray(s.log)) d.log = s.log.slice(-100);
-  // 正在做的那一題：看過提示、答錯過幾次（Codex 2026-10-12 第 1 輪必修 1、2：重開練習不能洗掉、不能重複計分）
-  if (s.cur && nat(s.cur.idx) && nat(s.cur.hints) && nat(s.cur.wrongs)) d.cur = {idx:s.cur.idx, hints:s.cur.hints, wrongs:s.cur.wrongs};
-  return d;
-}
-function own(o, k){ return Object.prototype.hasOwnProperty.call(o, k); }
-function parseDB(raw){
-  // 回傳 entries（Object.create(null)，id 叫 constructor、__proto__ 也不會撞到內建屬性）；讀不懂回 null
-  try {
-    var x = JSON.parse(raw);
-    if (!x || x.v !== 1 || !x.entries || typeof x.entries !== "object" || Array.isArray(x.entries)) return null;
-    var out = Object.create(null);
-    Object.keys(x.entries).forEach(function(id){ out[id] = clean1(x.entries[id]); });
-    return out;
-  } catch (e) { return null; }
-}
+// ---------- 存檔：g5help.v1＝{v:1, entries:{篇id: 那一篇的教學與練習紀錄}, hidden:{篇id: 隱藏時間}}；不碰自然複習的 g5sci.v3 ----------
+// 格式的讀、清洗、寫在 src/helpdoc.js（node 測試 tests/helpdoc.test.js 用同一份）。
+var KEY = "g5help.v1", DOC = window.G5HelpDoc, fresh = DOC.fresh, clean1 = DOC.clean1, own = DOC.own;
+function noHidden(){ return Object.create(null); }
 // 存檔規則（2026-10-13 第 5 輪後 4agent 定案：本頁記憶體是唯一真相，不再做跨分頁版本比對）：
 // ①同一時間只有一個寫入分頁（Web Locks）；sync.js 也不能直接寫 g5help.v1（canReplace／accept 交給本頁）。
 // ②取鎖後要「讀成功」才開放作答（READY）；讀不到＝不是沒有紀錄，給「再讀一次」，不建立空白紀錄。
 // ③作答改記憶體並標 DIRTY；save() 把記憶體整份寫進主 key，寫成功才清 DIRTY；失敗保留、每 3 秒自動再試、
 //   首頁與各篇都看得到警告（#saveWarn）。④壞資料先用不撞名的 key 備份並讀回核對，成功才覆蓋主 key。
 // ⑤不聽 storage 事件換資料（只有本頁會寫）；雲端新版本只在「首頁、沒有未存進度」時由本頁套用並重畫，不 reload。
-var WRITER = false, READY = false, DIRTY = Object.create(null), BACKED = null, RETRY = null;
+// ⑥家長「清除全部作答紀錄」：WIPE＝下一次存檔只寫記憶體（不把磁碟上的舊篇併回來），存成功才放下。
+var WRITER = false, READY = false, DIRTY = Object.create(null), BACKED = null, RETRY = null, WIPE = false;
 // 讀磁碟：只讀、不寫。回 {ok:false}＝讀取失敗（主 key 或舊 key 讀時拋錯；不是「沒有紀錄」）；
 // broken＝主 key 有原文但讀不懂，備份與替換一律在 save() 裡、確認備份成功後才做。
 function readDisk(){
   var raw, oldRaw;
   try { raw = localStorage.getItem(KEY); } catch (e) { return {ok:false}; }
-  var es = raw === null ? null : parseDB(raw);
-  if (es) return {ok:true, entries:es, broken:null};
+  var doc = raw === null ? null : DOC.parse(raw);
+  if (doc) return {ok:true, entries:doc.entries, hidden:doc.hidden, broken:null};
   try { oldRaw = localStorage.getItem("g5math.v1"); } catch (e) { return {ok:false}; }   // 舊 key 讀不到也算讀取失敗（Codex 第 5 輪必修 1）
-  es = Object.create(null);
+  var es = Object.create(null);
   try {
     // 2026-10-12 那一頁放在自然複習網站時存在 g5math.v1：搬進第 1 篇（舊資料原文不動）
     var old = JSON.parse(oldRaw || "null");
     if (old && old.v === 1) es["p38-6-2"] = clean1(old);
   } catch (e) {}
-  return {ok:true, entries:es, broken:raw};   // raw 為 null＝第一次用；非 null＝壞資料待備份
+  return {ok:true, entries:es, hidden:noHidden(), broken:raw};   // raw 為 null＝第一次用；非 null＝壞資料待備份
 }
-function loadDB(){ var d = readDisk(); return {v:1, entries:d.ok ? d.entries : Object.create(null), readOk:d.ok}; }
+function loadDB(){ var d = readDisk(); return {v:1, entries:d.ok ? d.entries : Object.create(null), hidden:d.ok ? d.hidden : noHidden(), readOk:d.ok}; }
 var DB = loadDB(), st = null, NOTICE = "", GEN = 0;
 function stateOf(id){ if (!own(DB.entries, id)) DB.entries[id] = fresh(); return DB.entries[id]; }
 function dirtyCount(){ return Object.keys(DIRTY).length; }
@@ -569,11 +612,11 @@ function save(){
   if (!d.ok) return saveFailed();   // 讀取失敗≠沒有紀錄：不寫，進度留在記憶體
   if (d.broken !== null && !backupBroken(d.broken)) return saveFailed();   // 備份不了就不覆蓋原文
   var out = Object.create(null);
-  Object.keys(d.entries).forEach(function(id){ out[id] = d.entries[id]; });   // 磁碟上有、記憶體沒有的篇（例如搬家來的）照留
+  if (!WIPE) Object.keys(d.entries).forEach(function(id){ out[id] = d.entries[id]; });   // 磁碟上有、記憶體沒有的篇（例如搬家來的）照留；剛清除全部時不併
   Object.keys(DB.entries).forEach(function(id){ out[id] = DB.entries[id]; });   // 記憶體是唯一真相
-  try { localStorage.setItem(KEY, JSON.stringify({v:1, entries:out})); } catch (e) { return saveFailed(); }
+  try { localStorage.setItem(KEY, DOC.serialize(out, DB.hidden)); } catch (e) { return saveFailed(); }   // 隱藏清單也是記憶體這份
   Object.keys(out).forEach(function(id){ if (!own(DB.entries, id)) DB.entries[id] = out[id]; });
-  DIRTY = Object.create(null);
+  DIRTY = Object.create(null); WIPE = false;
   if (RETRY) { clearTimeout(RETRY); RETRY = null; }
   drawWarn(); drawRec();
   return true;
@@ -587,15 +630,15 @@ function retryRead(){
   if (!WRITER || READY) return;   // 已經讀成功：舊的「再讀一次」重播不能把記憶體換回磁碟版（Codex 第 6 輪）
   var d = readDisk();
   if (!d.ok) { NOTICE = "還是讀不到，請稍後再試，或重新整理這一頁。"; route(); return; }
-  DB = {v:1, entries:d.entries, readOk:true}; READY = true; route();
+  DB = {v:1, entries:d.entries, hidden:d.hidden, readOk:true}; READY = true; route();
 }
 // 雲端有較新的紀錄：只在首頁、沒有未存進度時換上；換上＝寫進主 key、重畫首頁，不 reload（Codex 第 5 輪必修 2）
 function canReplace(key){ return key === KEY && WRITER && READY && !E && !dirtyCount(); }
 function applyRemote(key, raw){
   if (!canReplace(key)) return false;
-  var es = parseDB(raw); if (!es) return false;
+  var doc = DOC.parse(raw); if (!doc) return false;
   try { localStorage.setItem(KEY, raw); } catch (e) { return false; }   // 沒寫進去＝磁碟沒變，記憶體也不換
-  GEN++; DB = {v:1, entries:es, readOk:true}; drawHome();   // 寫進去了就一定採用：記憶體與磁碟一致（Codex 第 6 輪必修 1）
+  GEN++; ARM = null; DB = {v:1, entries:doc.entries, hidden:doc.hidden, readOk:true}; drawHome();   // 寫進去了就一定採用：記憶體與磁碟一致（Codex 第 6 輪必修 1）；隱藏清單跟著換
   var back; try { back = localStorage.getItem(KEY); } catch (e) { back = null; }
   return back === raw;   // 讀回失敗只告訴 sync「下次再確認」，sync 下一輪看到本機＝雲端會只補 baseline
 }
@@ -1001,21 +1044,86 @@ function choicePractice(){
 
 // ---------- 首頁（依科目列出每一篇）與切換 ----------
 function statusOf(id){ var s = DB.entries[id]; return !s ? "還沒看" : s.mastered ? "學會了" : s.solved ? "練習中" : s.lessonDone ? "教學看完了" : "還沒看"; }
+// 家長功能（2026-10-13 律師：「為何我測試用的題目，我沒法清除？有無清除或重置按鈕？」）：
+//   首頁每篇「隱藏這篇」（可恢復，不刪內容與紀錄）、家長設定「清除全部作答紀錄」。都是兩段式：第一次按只出現「確定…？」與「取消」，
+//   5 秒沒再按自動取消；不用 confirm()。改的都是記憶體 DB，再走同一個 save()（唯讀分頁、還沒讀成功的分頁不出按鈕）。
+//   清除不清隱藏清單（另有「恢復全部隱藏的篇」）：隱藏是家長整理清單，作答紀錄是孩子的進度，兩件事分開。
+var ARM = null, ARM_T = null, SET_MSG = "";   // ARM＝{kind:"hide", id} 或 {kind:"clear"}
+function canEdit(){ return WRITER && READY; }
+function redrawHome(focusSel){
+  if (E) return;
+  GEN++; drawHome();
+  var f = focusSel && $(focusSel); if (f && f.focus) f.focus();
+}
+function arm(a, focusSel){
+  if (ARM_T) { clearTimeout(ARM_T); ARM_T = null; }
+  ARM = a; SET_MSG = "";
+  if (a) ARM_T = setTimeout(function(){ ARM = null; ARM_T = null; redrawHome(); }, 5000);
+  redrawHome(focusSel);
+}
+function homeSave(tag){ DIRTY[tag] = true; save(); }
+function setHidden(h){ DB.hidden = h; arm(null); homeSave("#hidden"); }
+function clearAllRecords(){
+  var c = DOC.cleared(DB.hidden);
+  DB.entries = c.entries; WIPE = true;
+  arm(null); SET_MSG = "清好了，每一篇都回到「還沒看」。";
+  homeSave("#clear"); redrawHome("#clearAll");
+}
+function hidOf(){ return DB.hidden || noHidden(); }
+function cardHtml(e, can){
+  var t = statusOf(e.id), armed = ARM && ARM.kind === "hide" && ARM.id === e.id;
+  var act = !can ? "" : '<div class="row hact">' + (armed ?
+    '<button class="btn sm warn" type="button" data-hide="' + e.id + '">確定隱藏？</button><button class="btn ghost sm" type="button" data-unarm>取消</button>' :
+    '<button class="btn ghost sm quiet" type="button" data-hide="' + e.id + '">隱藏這篇</button>') + '</div>';
+  return '<div class="hwrap"><a class="hcard" href="#h/' + e.id + '"><b>' + esc(e.title) + '</b><span class="meta">' + esc(e.source) + (e.tag ? "・" + esc(e.tag) : "") + '・' + e.date.slice(5).replace("-", "/") + '</span><span class="st' + (t === "學會了" ? " done" : "") + '">' + t + '</span></a>' + act + '</div>';
+}
+function hiddenHtml(can, open){
+  var hs = DOC.hiddenIn(hidOf(), H.LIST);
+  if (!hs.length) return "";
+  return '<details id="hidBox"' + (open ? " open" : "") + '><summary>顯示已隱藏的 ' + hs.length + ' 篇</summary>' +
+    '<p class="small muted">藏起來的篇不會刪掉，按「恢復」就會回到上面。</p><div class="hlist">' + hs.map(function(e){
+      return '<div class="hrow" data-hid-row><span><b>' + esc(e.title) + '</b><span class="small muted">（' + esc(e.subject) + '）</span></span>' +
+        (can ? '<button class="btn ghost sm" type="button" data-unhide="' + e.id + '">恢復</button>' : '') + '</div>';
+    }).join("") + '</div></details>';
+}
+function drawSet(){
+  var S = $("#setBody"); if (!S) return;
+  if (!canEdit()) { S.innerHTML = '<p class="small muted">這一頁現在不能改設定。可能另一個分頁開著，或紀錄還沒讀到。</p>'; return; }
+  var armed = ARM && ARM.kind === "clear", nh = DOC.hiddenIn(hidOf(), H.LIST).length;
+  S.innerHTML = '<p class="small">清除這台的全部作答紀錄，每一篇都會回到「還沒看」。</p>' +
+    '<p class="small muted">隱藏的篇不會跟著清掉。有開同步的話，別台也會跟著清掉。</p>' +
+    '<div class="row"><button class="btn sm ' + (armed ? "warn" : "ghost") + '" type="button" id="clearAll">' + (armed ? "確定清除？" : "清除全部作答紀錄") + '</button>' +
+    '<button class="btn ghost sm" type="button" id="clearNo"' + (armed ? "" : " hidden") + '>取消</button></div>' +
+    '<p class="small" id="clearMsg" aria-live="polite">' + esc(SET_MSG) + '</p>' +
+    (nh ? '<div class="row"><button class="btn ghost sm" type="button" id="unhideAll">恢復全部隱藏的篇（' + nh + ' 篇）</button></div>' : '');
+  $("#clearAll").onclick = guard(function(){ if (ARM && ARM.kind === "clear") clearAllRecords(); else arm({kind:"clear"}, "#clearAll"); });
+  $("#clearNo").onclick = guard(function(){ arm(null, "#clearAll"); });
+  if (nh) $("#unhideAll").onclick = guard(function(){ setHidden(noHidden()); });
+}
 function drawHome(){
+  var can = canEdit(), hb = $("#hidBox"), open = !!(hb && hb.open), hid = hidOf();
   $("#subjects").innerHTML = H.SUBJECTS.map(function(sj){
-    var es = H.LIST.filter(function(e){ return e.subject === sj; }).slice().reverse();
-    return '<section class="subj" data-subj="' + sj + '"><div class="sect-t">' + sj + '</div>' + (es.length ? '<div class="hlist">' + es.map(function(e){
-      var t = statusOf(e.id);
-      return '<a class="hcard" href="#h/' + e.id + '"><b>' + esc(e.title) + '</b><span class="meta">' + esc(e.source) + (e.tag ? "・" + esc(e.tag) : "") + '・' + e.date.slice(5).replace("-", "/") + '</span><span class="st' + (t === "學會了" ? " done" : "") + '">' + t + '</span></a>';
-    }).join("") + '</div>' : '<span class="empty">還沒有題目。</span>') + '</section>';
-  }).join("");
+    var all = H.LIST.filter(function(e){ return e.subject === sj; }), es = all.filter(function(e){ return !DOC.isHidden(hid, e.id); }).slice().reverse();
+    return '<section class="subj" data-subj="' + sj + '"><div class="sect-t">' + sj + '</div>' + (es.length ? '<div class="hlist">' + es.map(function(e){ return cardHtml(e, can); }).join("") + '</div>' :
+      '<span class="empty">' + (all.length ? "這一科的篇都先藏起來了。" : "還沒有題目。") + '</span>') + '</section>';
+  }).join("") + hiddenHtml(can, open);
+  if (can) {
+    each($("#subjects").querySelectorAll("button[data-hide]"), function(b){ b.onclick = guard(function(){
+      var id = b.getAttribute("data-hide");
+      if (ARM && ARM.kind === "hide" && ARM.id === id) setHidden(DOC.hide(hidOf(), id, Date.now()));
+      else arm({kind:"hide", id:id}, 'button[data-hide="' + id + '"]');
+    }); });
+    each($("#subjects").querySelectorAll("button[data-unarm]"), function(b){ b.onclick = guard(function(){ var id = ARM && ARM.id; arm(null, id ? 'button[data-hide="' + id + '"]' : null); }); });
+    each($("#subjects").querySelectorAll("button[data-unhide]"), function(b){ b.onclick = guard(function(){ setHidden(DOC.unhide(hidOf(), b.getAttribute("data-unhide"))); }); });
+  }
+  drawSet();
 }
 function countdown(){
   var d = new Date(Date.now() + 8 * 3600000), today = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()), left = Math.round((Date.UTC(2026, 10, 5) - today) / 86400000);
   $("#cd").textContent = left >= 0 ? "・期中考 11/5 還有 " + left + " 天" : "";
 }
 function openEntry(e){
-  GEN++; E = e; st = stateOf(e.id);
+  GEN++; E = e; st = stateOf(e.id); ARM = null; SET_MSG = "";
   $("#home").hidden = true; $("#entry").hidden = false;
   $("#lesson").innerHTML = ""; $("#lesson").hidden = true; $("#practice").innerHTML = ""; $("#practice").hidden = true;
   $("#src").textContent = e.source + "（" + e.subject + "）" + (e.ask ? "：" + e.ask : "");
@@ -1101,25 +1209,55 @@ window.G5HelpPage = {state:function(id){ return JSON.parse(JSON.stringify(DB.ent
   }
   // 進度：已送出（等電腦取回，最多 10 分鐘）→ 已收到、解說製作中 → 做好了（連結）；電腦上次取題時間＝有無故障
   function hhmm(t){ var d = new Date(t + 8 * 3600000); return (d.getUTCMonth() + 1) + "/" + d.getUTCDate() + " " + ("0" + d.getUTCHours()).slice(-2) + ":" + ("0" + d.getUTCMinutes()).slice(-2); }
+  // 撤回自己傳的題目（2026-10-13 律師：「為何我測試用的題目，我沒法清除？」）：還沒做好的每筆有「撤回」，兩段式確認（不用 confirm()），
+  // 第一次按變「確定撤回？」＋「取消」，5 秒沒再按自動取消；送 op=withdraw（同步碼＋傳題 id），GAS 只准撤回同一個家庭碼、還沒做好的。
+  var LAST = null, WD = null, WD_T = null;
+  function myCode(){ var c = null; try { c = localStorage.getItem("g5sync.code"); } catch (e) {} return c; }
+  function wmsg(t, bad){ $("#upWMsg").textContent = t; $("#upWMsg").style.color = bad ? "var(--bad)" : "var(--leaf)"; }
+  function wdArm(id){ if (WD_T) clearTimeout(WD_T); WD = id; WD_T = id ? setTimeout(function(){ WD = null; WD_T = null; render(LAST); }, 5000) : null; render(LAST); }
+  function withdraw(id, btn){
+    var code = myCode(); if (!code) return;
+    if (WD_T) { clearTimeout(WD_T); WD_T = null; }
+    btn.disabled = true; wmsg("撤回中…");
+    fetch(EP, {method:"POST", headers:{"Content-Type":"text/plain"}, credentials:"omit", body:JSON.stringify({op:"withdraw", code:code, id:id})}).then(function(r){ return r.json(); }).then(function(r){
+      WD = null;
+      if (r && r.ok) { wmsg("撤回了，電腦不會再做這一題。"); loadMine(); return; }
+      wmsg(r && r.err === "done" ? "這題已經做好了，不能撤回。" : r && r.err === "not-found" ? "找不到這一題，可能已經撤回了。" : "沒有撤回成功，請稍後再試。", true);
+      render(LAST);
+    }).catch(function(){ WD = null; wmsg("沒有撤回成功（可能沒有網路），請稍後再試。", true); render(LAST); });
+  }
+  function render(r){
+    if (!r) return;
+    var items = (r.items || []).filter(function(it){ return it.status !== "withdrawn"; });
+    $("#upList").innerHTML = items.length ? items.map(function(it){
+      // 進度隨時間增加＋預估幾點做好（交辦 #1320；src/upprogress.js）；清單打開時每 60 秒重抓一次
+      var pv = window.G5UpProgress.view(it, items, r.lastFetch, Date.now()), pct = pv.pct, id = String(it.id || "").replace(/[^\w-]/g, "");
+      var st = it.status === "done" ? '<a href="' + it.url + '">做好了，點這裡看解說</a>' : pv.text;
+      var barH = '<div role="progressbar" aria-valuenow="' + pct + '" aria-valuemin="0" aria-valuemax="100" style="height:10px;border-radius:99px;background:var(--line-soft);overflow:hidden;margin:4px 0"><i style="display:block;height:100%;width:' + pct + '%;background:' + (pct === 100 ? "var(--leaf)" : "var(--pri)") + '"></i></div><span class="meta">進度 ' + pct + '%</span>';
+      var wd = it.status === "done" || !id ? "" : '<div class="row hact">' + (WD === id ?
+        '<button class="btn sm warn" type="button" data-wd="' + id + '">確定撤回？</button><button class="btn ghost sm" type="button" data-wd-no>取消</button>' :
+        '<button class="btn ghost sm quiet" type="button" data-wd="' + id + '">撤回</button>') + '</div>';
+      return '<div class="hcard"><b>' + it.subject + '・' + String(it.note || "").replace(/[<>&]/g, "") + '</b><span class="meta">' + hhmm(it.time) + ' 送出</span>' + barH + '<span class="st' + (it.status === "done" ? " done" : "") + '">' + st + '</span>' + wd + '</div>';
+    }).join("") : '<span class="empty">還沒有傳過題目。</span>';
+    Array.prototype.forEach.call($("#upList").querySelectorAll("button[data-wd]"), function(b){ b.onclick = function(){
+      var id = b.getAttribute("data-wd");
+      if (WD === id) withdraw(id, b); else wdArm(id);
+    }; });
+    Array.prototype.forEach.call($("#upList").querySelectorAll("button[data-wd-no]"), function(b){ b.onclick = function(){ wdArm(null); }; });
+  }
   function loadMine(){
-    var code = null; try { code = localStorage.getItem("g5sync.code"); } catch (e) {}
+    var code = myCode();
     if (!code) { $("#upHealth").textContent = "這台裝置還沒開啟跨裝置同步，所以看不到進度。"; return; }
     fetch(EP, {method:"POST", headers:{"Content-Type":"text/plain"}, credentials:"omit", body:JSON.stringify({op:"mine", code:code})}).then(function(r){ return r.json(); }).then(function(r){
       if (!r || !r.ok) { $("#upHealth").textContent = "進度暫時讀不到，稍後再看。"; return; }
       var ago = r.lastFetch ? Math.round((Date.now() - r.lastFetch) / 60000) : null;
       $("#upHealth").innerHTML = ago === null ? "電腦還沒取過題目。" : ago <= 20 ? "電腦運作正常（上次取題 " + hhmm(r.lastFetch) + "，每 10 分鐘取一次）。"
         : '<span style="color:var(--bad)">電腦已經 ' + ago + ' 分鐘沒取題（上次 ' + hhmm(r.lastFetch) + '）：可能關機、睡眠或故障，題目會等電腦開機後再處理。</span>';
-      $("#upList").innerHTML = (r.items || []).length ? r.items.map(function(it){
-        // 進度隨時間增加＋預估幾點做好（交辦 #1320；src/upprogress.js）；清單打開時每 60 秒重抓一次
-        var pv = window.G5UpProgress.view(it, r.items, r.lastFetch, Date.now()), pct = pv.pct;
-        var st = it.status === "done" ? '<a href="' + it.url + '">做好了，點這裡看解說</a>' : pv.text;
-        var barH = '<div role="progressbar" aria-valuenow="' + pct + '" aria-valuemin="0" aria-valuemax="100" style="height:10px;border-radius:99px;background:var(--line-soft);overflow:hidden;margin:4px 0"><i style="display:block;height:100%;width:' + pct + '%;background:' + (pct === 100 ? "var(--leaf)" : "var(--pri)") + '"></i></div><span class="meta">進度 ' + pct + '%</span>';
-        return '<div class="hcard"><b>' + it.subject + '・' + String(it.note || "").replace(/[<>&]/g, "") + '</b><span class="meta">' + hhmm(it.time) + ' 送出</span>' + barH + '<span class="st' + (it.status === "done" ? " done" : "") + '">' + st + '</span></div>';
-      }).join("") : '<span class="empty">還沒有傳過題目。</span>';
+      LAST = r; render(r);
     }).catch(function(){ $("#upHealth").textContent = "進度暫時讀不到（可能沒有網路），稍後再看。"; });
   }
   $("#upBox").addEventListener("toggle", function(){ if ($("#upBox").open) loadMine(); });
-  setInterval(function(){ if ($("#upBox").open) loadMine(); }, 60000);
+  setInterval(function(){ if ($("#upBox").open && !WD) loadMine(); }, 60000);   // 正在確認撤回時不重畫（不吃掉「確定撤回？」）
   $("#upSend").onclick = function(){
     var code = null; try { code = localStorage.getItem("g5sync.code"); } catch (e) {}
     if (!code) return msg("請先在下面「跨裝置同步」開啟或加入同步，這台裝置才能送題目。", true);

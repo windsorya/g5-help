@@ -24,7 +24,10 @@
   var MAX = 40;
   var SVG = 'http://www.w3.org/2000/svg';
   var REGIONS = [   // [selector, 類別, 單元]；依序比對 el.closest(selector)，先中先用
-    ['#saveWarn', 'system', 'system'], ['#upBox', 'parent', 'parent'], ['#syncBox', 'parent', 'parent'], ['#parentBox', 'parent', 'parent'],
+    ['#saveWarn', 'system', 'system'],
+    // 家長功能（2026-10-13）：撤回按鈕與訊息、家長設定也量句長（家長設定在首頁，兩道閘都套）
+    ['#upWMsg', 'label', 'parent'], ['#upList .hact', 'label', 'parent'], ['#setBox', 'kid', 'home'],
+    ['#upBox', 'parent', 'parent'], ['#syncBox', 'parent', 'parent'], ['#parentBox', 'parent', 'parent'],
     ['#siteNav', 'kid', 'nav'], ['.hero', 'kid', 'nav'], ['#entry > .back', 'kid', 'nav'],
     ['#subjects .hcard', 'label', 'home'], ['#subjects', 'kid', 'home'], ['#home > .panel', 'kid', 'home'],
     ['#src', 'exam', 'top'], ['#prob', 'exam', 'top'], ['#lead', 'kid', 'top'], ['#topBtns', 'kid', 'top'], ['#mastery', 'kid', 'top'],

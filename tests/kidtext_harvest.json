@@ -1,13 +1,16 @@
 {
- "index_sha256": "525664b37b7ad095bd4227eeca55b0f5358f396fb3cdec8a89109be5c05d9674",
- "kidgate_sha256": "eb4b22227f5751cc6a8cb0b8f805f86816d74855030c4e4ec1085b2dc03007dc",
- "driver_sha256": "a235110ba2c4b2defb7329e73224b6e488e49f6007e9388ff579338f63d42d30",
+ "index_sha256": "9151694b83bcfce95131f803214dd5dd5e1f2018fa0c840a3ea53aef3e6255bb",
+ "kidgate_sha256": "cad36d3a27ab4dc5716a44ae7151d6760e49f44f9b977a9d931d852e6e5614ae",
+ "driver_sha256": "812c7bc883bfea052494be2b78953dadd79f45c86af43af549ee294aad58d349",
  "max": 40,
  "self_max": 40,
  "browsers": {
   "chromium": {
    "cases": [
     "home",
+    "home:hide",
+    "home:settings",
+    "home:withdraw",
     "p38-6-2:alt",
     "p38-6-2:direct",
     "p38-6-2:lesson",
@@ -435,11 +438,14 @@
     }
    },
    "errors": [],
-   "snapshots": 116
+   "snapshots": 133
   },
   "webkit": {
    "cases": [
     "home",
+    "home:hide",
+    "home:settings",
+    "home:withdraw",
     "p38-6-2:alt",
     "p38-6-2:direct",
     "p38-6-2:lesson",
@@ -867,7 +873,7 @@
     }
    },
    "errors": [],
-   "snapshots": 116
+   "snapshots": 133
   }
  }
 }

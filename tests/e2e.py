@@ -776,6 +776,202 @@ def flow_confused(browser):
     check("#1319 沒有 JS 錯誤", not errors, errors)
     ctx.close()
 
+# ---------------- 家長功能（2026-10-13 律師：「為何我測試用的題目，我沒法清除？有無清除或重置按鈕？」）----------------
+def sentences_over(text, limit=40):
+    """小五句長：以 。！？ 與換行切句，數非空白字元；回傳超過上限的句子（同 tests/kidgate.js 的規則）。"""
+    import re
+    return [s for s in re.split(r"[。！？\n]", text) if len(re.sub(r"\s", "", s)) > limit]
+
+
+def db_of(pg):
+    return json.loads(pg.evaluate("localStorage.getItem('g5help.v1')") or "null") or {}
+
+
+def flow_hide(browser, label="Chromium"):
+    """首頁每篇「隱藏這篇」：兩段式防誤觸、可恢復；隱藏清單存進 g5help.v1（走同一個 save()），不刪任何作答紀錄。"""
+    seed = ("if(!sessionStorage.getItem('h')){sessionStorage.setItem('h','1');localStorage.setItem('g5help.v1',JSON.stringify({v:1,entries:{'t-guoyu':{lessonDone:true,solved:2,idx:2,r:1}}}));}")
+    ctx, pg, errors = open_page(browser, init=FIXTURE + seed, url=HOME)
+    pg.wait_for_function("window.G5HelpWriter && G5HelpWriter()")
+    G = '.subj[data-subj="國語"]'
+    card = lambda: pg.locator(G + " .hcard")
+    btn = pg.locator('button[data-hide="t-guoyu"]')
+    check(f"{label} 隱藏H1 舊存檔沒有 hidden 欄位：每篇照常列出、沒有「已隱藏」", card().count() == 1 and pg.locator("#hidBox").count() == 0 and "練習中" in card().inner_text())
+    check(f"{label} 隱藏H2 每張篇卡片都有「隱藏這篇」", btn.count() == 1 and btn.inner_text() == "隱藏這篇" and pg.locator('button[data-hide="p38-6-2"]').count() == 1)
+    btn.click()
+    check(f"{label} 隱藏H3 按一次只變成「確定隱藏？」＋「取消」，還沒隱藏、也沒寫檔",
+          btn.inner_text() == "確定隱藏？" and pg.locator(G + " button[data-unarm]").is_visible() and card().count() == 1 and not db_of(pg).get("hidden"),
+          (btn.inner_text(), db_of(pg)))
+    pg.locator(G + " button[data-unarm]").click()
+    check(f"{label} 隱藏H4 按「取消」回到「隱藏這篇」，沒有隱藏", btn.inner_text() == "隱藏這篇" and card().count() == 1 and not db_of(pg).get("hidden"))
+    btn.click(); pg.wait_for_timeout(5600)
+    check(f"{label} 隱藏H5 按一次後 5 秒沒再按：自動回到「隱藏這篇」（防誤觸）", btn.inner_text() == "隱藏這篇" and card().count() == 1, btn.inner_text())
+    btn.click(); btn.click()
+    d = db_of(pg)
+    check(f"{label} 隱藏H6 再按「確定隱藏？」：這篇從清單收起來、這一科改說都藏起來了",
+          card().count() == 0 and "藏起來" in pg.locator(G).inner_text(), pg.locator(G).inner_text())
+    check(f"{label} 隱藏H7 存檔：hidden 記這篇＋時間；作答紀錄一筆沒少（教學看完、做完 2 題）",
+          isinstance(d.get("hidden", {}).get("t-guoyu"), int) and d["entries"]["t-guoyu"]["solved"] == 2 and d["entries"]["t-guoyu"]["lessonDone"] is True and d["v"] == 1, d)
+    check(f"{label} 隱藏H8 清單底下出現「顯示已隱藏的 1 篇」", pg.locator("#hidBox summary").inner_text() == "顯示已隱藏的 1 篇", pg.locator("#hidBox").count() and pg.locator("#hidBox summary").inner_text())
+    pg.reload(); pg.wait_for_function("window.G5HelpWriter && G5HelpWriter()")
+    check(f"{label} 隱藏H9 重新整理後仍是隱藏的", card().count() == 0 and pg.locator("#hidBox summary").inner_text() == "顯示已隱藏的 1 篇")
+    pg.goto(HOME + "#h/t-guoyu"); pg.wait_for_selector("#entry:not([hidden])")
+    check(f"{label} 隱藏H10 隱藏的篇直接開網址仍打得開、紀錄還在", "繼續練習" in pg.locator("#topBtns").inner_text(), pg.locator("#topBtns").inner_text())
+    pg.locator("#backHome").click(); pg.wait_for_selector("#home:not([hidden])")
+    pg.locator("#hidBox summary").click()
+    row = pg.locator("#hidBox [data-hid-row]")
+    check(f"{label} 隱藏H11 展開後列出那一篇的篇名和「恢復」", row.count() == 1 and "測試：成語填空" in row.inner_text() and row.get_by_role("button", name="恢復").is_visible())
+    row.get_by_role("button", name="恢復").click()
+    d = db_of(pg)
+    check(f"{label} 隱藏H12 按「恢復」：回到清單、hidden 清空、紀錄照舊", card().count() == 1 and pg.locator("#hidBox").count() == 0 and d.get("hidden") == {} and d["entries"]["t-guoyu"]["solved"] == 2, d)
+    # 存不進去：隱藏也走同一個 save()（DIRTY、首頁警告、自動再試）
+    pg.evaluate("(function(){var s=window.__s0=Storage.prototype.setItem;Storage.prototype.setItem=function(k,v){if(k==='g5help.v1')throw new Error('quota');return s.call(this,k,v);};})(); 0")
+    btn.click(); btn.click()
+    check(f"{label} 隱藏H13 存不進去：畫面先收起來、首頁出現「沒存好」警告、標成未存", card().count() == 0 and pg.locator("#saveWarn").is_visible() and pg.evaluate("G5HelpDirty()") >= 1 and not db_of(pg).get("hidden"))
+    pg.evaluate("Storage.prototype.setItem=window.__s0; 0")
+    pg.locator("#saveRetry").click()
+    check(f"{label} 隱藏H14 空間恢復後再存一次：hidden 寫進去、警告消失", "t-guoyu" in db_of(pg).get("hidden", {}) and pg.locator("#saveWarn").is_hidden() and pg.evaluate("G5HelpDirty()") == 0, db_of(pg))
+    b = ctx.new_page(); b.goto(HOME); b.wait_for_timeout(600)
+    check(f"{label} 隱藏H15 唯讀分頁（另一個分頁開著）沒有隱藏、恢復按鈕", b.evaluate("G5HelpWriter()") is False and b.locator("button[data-hide]").count() == 0 and b.locator("#hidBox button").count() == 0)
+    b.close()
+    txt = pg.locator("#home").inner_text()
+    check(f"{label} 隱藏H16 新字每句不超過 40 字", not sentences_over(txt), sentences_over(txt))
+    check(f"{label} 隱藏 沒有 JS 錯誤", not errors, errors)
+    ctx.close()
+
+
+def flow_clear(browser, label="Chromium"):
+    """家長設定「清除全部作答紀錄」：兩段式確認、走同一個 save()；隱藏清單不清（另有「恢復全部隱藏的篇」）；舊 g5math.v1 不會被搬回來。"""
+    old = {"v": 1, "lessonDone": True, "idx": 2, "seed": 7, "streak": 2, "clean": 2, "solved": 2, "mastered": False, "log": [], "cur": None}
+    seed = ("if(!sessionStorage.getItem('c')){sessionStorage.setItem('c','1');localStorage.setItem('g5math.v1'," + json.dumps(json.dumps(old)) + ");"
+            "localStorage.setItem('g5help.v1',JSON.stringify({v:1,entries:{'p38-6-2':{lessonDone:true,solved:5,idx:5,streak:3,mastered:true,r:4},'t-guoyu':{lessonDone:true,r:1}},hidden:{'p38-6-2':5}}));}")
+    ctx, pg, errors = open_page(browser, init=FIXTURE + seed, url=HOME)
+    pg.wait_for_function("window.G5HelpWriter && G5HelpWriter()")
+    G = '.subj[data-subj="國語"] .hcard'
+    check(f"{label} 清除C1 首頁有「家長設定」", pg.locator("#setBox summary").inner_text() == "家長設定")
+    pg.locator("#setBox summary").click()
+    clr = pg.locator("#clearAll")
+    check(f"{label} 清除C2 設定裡有「清除全部作答紀錄」", clr.inner_text() == "清除全部作答紀錄")
+    before = pg.evaluate("localStorage.getItem('g5help.v1')")
+    clr.click()
+    check(f"{label} 清除C3 按一次只出現「確定清除？」與「取消」，紀錄沒動",
+          clr.inner_text() == "確定清除？" and pg.locator("#clearNo").is_visible() and pg.evaluate("localStorage.getItem('g5help.v1')") == before)
+    pg.locator("#clearNo").click()
+    check(f"{label} 清除C4 按「取消」回到原樣、紀錄沒動", clr.inner_text() == "清除全部作答紀錄" and pg.locator("#clearNo").is_hidden() and pg.evaluate("localStorage.getItem('g5help.v1')") == before)
+    clr.click(); clr.click()
+    d = db_of(pg)
+    check(f"{label} 清除C5 再按「確定清除？」：每一篇回到「還沒看」、存檔 entries 是空的", d.get("entries") == {} and "還沒看" in pg.locator(G).inner_text(), d)
+    check(f"{label} 清除C6 隱藏清單不清：數學那篇仍隱藏、仍有「顯示已隱藏的 1 篇」", d.get("hidden") == {"p38-6-2": 5} and pg.locator('.subj[data-subj="數學"] .hcard').count() == 0 and pg.locator("#hidBox summary").inner_text() == "顯示已隱藏的 1 篇", d)
+    check(f"{label} 清除C7 告訴家長清好了", "清好了" in pg.locator("#clearMsg").inner_text(), pg.locator("#clearMsg").inner_text())
+    pg.reload(); pg.wait_for_function("window.G5HelpWriter && G5HelpWriter()")
+    check(f"{label} 清除C8 重新整理後仍是空白；舊 g5math.v1 沒有被搬回第 1 篇（原文也沒動）",
+          pg.evaluate("G5HelpPage.state('p38-6-2')") is None and pg.evaluate("G5HelpPage.state('t-guoyu')") is None and json.loads(pg.evaluate("localStorage.getItem('g5math.v1')")) == old)
+    pg.locator("#setBox summary").click()
+    allb = pg.locator("#unhideAll")
+    check(f"{label} 清除C9 設定裡有「恢復全部隱藏的篇（1 篇）」", allb.is_visible() and allb.inner_text() == "恢復全部隱藏的篇（1 篇）", allb.count() and allb.inner_text())
+    allb.click()
+    check(f"{label} 清除C10 按了之後數學那篇回到清單、hidden 清空", pg.locator('.subj[data-subj="數學"] .hcard').count() == 1 and db_of(pg).get("hidden") == {} and pg.locator("#unhideAll").count() == 0)
+    # 存不進去時清除：記憶體先清、標成未存；之後存成功也不能把磁碟上的舊紀錄併回來
+    pg.goto(HOME + "#h/t-guoyu"); pg.wait_for_selector("#entry:not([hidden])")
+    pg.get_by_role("button", name="開始學").click()
+    chip(pg, "認真的人"); pg.locator("#lesson button[data-next]").click()
+    pg.locator("#backHome").click(); pg.wait_for_selector("#home:not([hidden])")
+    check(f"{label} 清除C11 （前置）國語看完教學已存檔", db_of(pg)["entries"]["t-guoyu"]["lessonDone"] is True)
+    pg.evaluate("(function(){var s=window.__s0=Storage.prototype.setItem;Storage.prototype.setItem=function(k,v){if(k==='g5help.v1')throw new Error('quota');return s.call(this,k,v);};})(); 0")
+    pg.locator("#setBox summary").click() if not pg.locator("#setBox").evaluate("e => e.open") else None
+    clr.click(); clr.click()
+    check(f"{label} 清除C12 存不進去：畫面已是「還沒看」、出現「沒存好」警告", "還沒看" in pg.locator(G).inner_text() and pg.locator("#saveWarn").is_visible() and db_of(pg)["entries"]["t-guoyu"]["lessonDone"] is True)
+    pg.evaluate("Storage.prototype.setItem=window.__s0; 0")
+    pg.locator("#saveRetry").click()
+    check(f"{label} 清除C13 再存一次成功：磁碟上的舊紀錄沒有被併回來（entries 空）", db_of(pg).get("entries") == {} and pg.evaluate("G5HelpDirty()") == 0, db_of(pg))
+    b = ctx.new_page(); b.goto(HOME); b.wait_for_timeout(600)
+    check(f"{label} 清除C14 唯讀分頁沒有清除按鈕", b.evaluate("G5HelpWriter()") is False and b.locator("#clearAll").count() == 0)
+    b.close()
+    txt = pg.locator("#setBox").inner_text()
+    check(f"{label} 清除C15 新字每句不超過 40 字", not sentences_over(txt), sentences_over(txt))
+    check(f"{label} 清除 沒有 JS 錯誤", not errors, errors)
+    ctx.close()
+
+
+def flow_hide_sync(browser):
+    """隱藏清單跟著跨裝置同步：A 隱藏 → 雲端那份有 hidden → B 加入後也隱藏；B 恢復 → A 在首頁自動換上（不 reload）。"""
+    from e2e_sync import backend, STORE, EP as SEP
+    def dev():
+        c = browser.new_context(); c.add_init_script(FIXTURE); c.route(lambda u: u.startswith(SEP), backend); return c
+    errors = []
+    a = dev(); pa = a.new_page(); pa.on("pageerror", lambda e: errors.append(str(e)))
+    pa.goto(HOME); pa.wait_for_function("window.G5HelpWriter && G5HelpWriter()")
+    pa.locator("#syncBox summary").click()
+    pa.get_by_role("button", name="開啟跨裝置同步", exact=False).click(); pa.wait_for_timeout(1500)
+    code = pa.evaluate("localStorage.getItem('g5sync.code')")
+    pa.locator('button[data-hide="t-guoyu"]').click(); pa.locator('button[data-hide="t-guoyu"]').click()
+    pa.wait_for_timeout(5500)
+    cloud = json.loads((STORE.get((code, "g5help.v1")) or (0, "{}"))[1] or "{}")
+    check("同步S1 A 隱藏後，雲端那份 g5help.v1 也有 hidden", "t-guoyu" in (cloud.get("hidden") or {}), cloud)
+    b = dev(); pb = b.new_page(); pb.on("pageerror", lambda e: errors.append(str(e)))
+    pb.goto(HOME + "#sync=" + code); pb.wait_for_timeout(3000)
+    check("同步S2 B 加入後：國語那篇也隱藏、有「顯示已隱藏的 1 篇」", pb.locator('.subj[data-subj="國語"] .hcard').count() == 0 and pb.locator("#hidBox summary").inner_text() == "顯示已隱藏的 1 篇")
+    pb.locator("#hidBox summary").click(); pb.locator("#hidBox").get_by_role("button", name="恢復").click()
+    pb.wait_for_timeout(5500)
+    cloud = json.loads((STORE.get((code, "g5help.v1")) or (0, "{}"))[1] or "{}")
+    check("同步S3 B 恢復 → 雲端那份 hidden 清空", cloud.get("hidden") == {}, cloud)
+    pa.reload(); pa.wait_for_timeout(3000)   # 同步只在開頁時抓雲端新版（sync.js 現行設計；與 e2e_sync「第一台重開拿到」同）
+    check("同步S4 A 重開後也恢復（由本頁 accept 換上，不是 sync 直接寫）", pa.locator('.subj[data-subj="國語"] .hcard').count() == 1 and not db_of(pa).get("hidden"), db_of(pa))
+    check("同步 沒有 JS 錯誤", not errors, errors)
+    a.close(); b.close()
+
+
+def flow_withdraw(browser):
+    """「你傳的題目」每筆還沒做好的都能撤回（兩段式確認）；送 op=withdraw（code＋傳題 id），成功後清單不再列。後端以記憶體模擬。"""
+    items = [{"id": "u1-1", "time": 1791868600000, "subject": "自然", "note": "【測試】銀葉樹的板根是什麼？", "status": "new", "url": "", "doneAt": 0},
+             {"id": "u2-2", "time": 1791868500000, "subject": "數學", "note": "第 6 題", "status": "done", "url": "https://windsorya.github.io/g5-help/#h/p38-6-2", "doneAt": 1791868550000}]
+    sent, mode = [], {"withdraw": "ok"}
+
+    def gas(route):
+        req = json.loads(route.request.post_data or "{}"); sent.append(req)
+        if req.get("op") == "mine":
+            body = {"ok": True, "lastFetch": 0, "items": [x for x in items if x["status"] != "withdrawn"]}
+        elif req.get("op") == "withdraw":
+            if mode["withdraw"] == "net":
+                return route.abort()
+            if mode["withdraw"] == "ok":
+                for x in items:
+                    if x["id"] == req.get("id"):
+                        x["status"] = "withdrawn"
+                body = {"ok": True}
+            else:
+                body = {"ok": False, "err": mode["withdraw"]}
+        else:
+            body = {"ok": False, "err": "bad-op"}
+        route.fulfill(status=200, content_type="application/json", headers={"Access-Control-Allow-Origin": "*"}, body=json.dumps(body))
+    ctx, pg, errors = open_page(browser, url=HOME)
+    pg.route("**/macros/s/**", gas)
+    pg.evaluate("localStorage.setItem('g5sync.code','ABCDEFGHJKMN'); 0")
+    pg.locator("#upBox summary").click()
+    pg.wait_for_function("document.querySelectorAll('#upList .hcard').length === 2")
+    wb = pg.locator('#upList button[data-wd="u1-1"]')
+    check("撤回W1 還沒做好的那筆有「撤回」；做好了的那筆沒有", wb.inner_text() == "撤回" and pg.locator('#upList button[data-wd="u2-2"]').count() == 0)
+    wb.click()
+    check("撤回W2 按一次只變成「確定撤回？」＋「取消」，還沒送出", wb.inner_text() == "確定撤回？" and pg.locator("#upList button[data-wd-no]").is_visible() and not [r for r in sent if r.get("op") == "withdraw"])
+    pg.locator("#upList button[data-wd-no]").click()
+    check("撤回W3 按「取消」回到「撤回」、沒有送出", wb.inner_text() == "撤回" and not [r for r in sent if r.get("op") == "withdraw"])
+    mode["withdraw"] = "done"
+    wb.click(); wb.click(); pg.wait_for_timeout(400)
+    check("撤回W4 後端說已做好：告訴家長不能撤回、清單照舊", "已經做好了" in pg.locator("#upWMsg").inner_text() and pg.locator("#upList .hcard").count() == 2, pg.locator("#upWMsg").inner_text())
+    mode["withdraw"] = "net"
+    wb.click(); wb.click(); pg.wait_for_timeout(400)
+    check("撤回W5 沒有網路：說沒撤回成功、按鈕可以再按", "沒有撤回成功" in pg.locator("#upWMsg").inner_text() and wb.is_enabled() and wb.inner_text() == "撤回", pg.locator("#upWMsg").inner_text())
+    mode["withdraw"] = "ok"
+    wb.click(); wb.click()
+    pg.wait_for_function("document.querySelectorAll('#upList .hcard').length === 1")
+    w = [r for r in sent if r.get("op") == "withdraw"][-1]
+    check("撤回W6 送出 op=withdraw、同步碼、傳題 id", w == {"op": "withdraw", "code": "ABCDEFGHJKMN", "id": "u1-1"}, w)
+    check("撤回W7 撤回後清單只剩做好的那筆、告訴家長撤回了", "撤回了" in pg.locator("#upWMsg").inner_text() and "銀葉樹" not in pg.locator("#upList").inner_text(), pg.locator("#upWMsg").inner_text())
+    news = [pg.locator("#upWMsg").inner_text(), "確定撤回？", "這題已經做好了，不能撤回。", "沒有撤回成功（可能沒有網路），請稍後再試。"]
+    check("撤回W8 新字每句不超過 40 字", not sentences_over("\n".join(news)), sentences_over("\n".join(news)))
+    check("撤回 沒有 JS 錯誤", not errors, errors)
+    ctx.close()
+
+
 def main():
     with sync_playwright() as p:
         cr = p.chromium.launch()
@@ -797,6 +993,10 @@ def main():
         flow_migrate(cr)
         flow_steps(cr, "手機390", {"viewport": {"width": 390, "height": 844}, "is_mobile": True, "has_touch": True}, shots=True)
         flow_dark(cr)
+        flow_hide(cr)
+        flow_clear(cr)
+        flow_hide_sync(cr)
+        flow_withdraw(cr)
         cr.close()
         wk = p.webkit.launch()
         ipad = p.devices["iPad (gen 7)"]
@@ -805,6 +1005,8 @@ def main():
         flow_single_writer(wk, "WebKit")
         flow_codex_r5(wk, "WebKit")
         flow_codex_r6(wk, "WebKit")
+        flow_hide(wk, "WebKit")
+        flow_clear(wk, "WebKit")
         if BASE.startswith("https:"):
             flow_video_live(wk, "線上iPad", ipad)
         wk.close()

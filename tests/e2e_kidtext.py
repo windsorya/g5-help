@@ -343,7 +343,46 @@ def frac_practice(B):
 def home_case(B):
     r = Run(B, B.device, "home")
     r.go(""); r.snap("首頁")
-    B.absorb(r.close(), ["home"])
+    # 家長功能（2026-10-13 律師：「為何我測試用的題目，我沒法清除？」）：每一個新狀態都採一次字
+    pg = r.pg
+    btn = pg.locator("button[data-hide]").first
+    btn.click(); r.snap("首頁：確定隱藏？")
+    btn.click(); r.snap("首頁：隱藏一篇後")
+    pg.locator("#hidBox summary").click(); r.snap("首頁：已隱藏清單展開")
+    pg.locator("#setBox summary").click(); r.snap("家長設定")
+    pg.locator("#clearAll").click(); r.snap("家長設定：確定清除？")
+    pg.locator("#clearAll").click(); r.snap("家長設定：清好了")
+    ok = "清好了" in pg.locator("#clearMsg").inner_text() and pg.locator("#unhideAll").is_visible()
+    B.absorb(r.close(), ["home", "home:hide", "home:settings"] if ok else ["home"])
+    # 撤回自己傳的題目：撤回、確定撤回？、做好了不能撤、沒網路、撤回了
+    r = Run(B, B.device, "home:withdraw")
+    box = {"withdraw": None}
+    items = [{"id": "u1-1", "time": 1791868600000, "subject": "自然", "note": "【測試】銀葉樹", "status": "new"}]
+
+    def gas(route):
+        req = json.loads(route.request.post_data or "{}")
+        if req.get("op") == "withdraw":
+            if box["withdraw"] == "net":   # 回壞內容＝fetch 那條 catch（WebKit 對 abort 會另報一條 access control 頁面錯誤）
+                return route.fulfill(status=502, content_type="text/html", headers={"Access-Control-Allow-Origin": "*"}, body="<html>")
+            body = {"ok": False, "err": box["withdraw"]} if box["withdraw"] else {"ok": True}
+        else:
+            body = {"ok": True, "lastFetch": 0, "items": items}
+        route.fulfill(status=200, content_type="application/json", headers={"Access-Control-Allow-Origin": "*"}, body=json.dumps(body))
+    r.ctx.route(lambda u: u.startswith(EP), gas)
+    # 同步碼在載入前放好（先開頁再 reload 時，WebKit 會把被中斷的同步請求記成一條 access control 頁面錯誤）
+    r.ctx.add_init_script("try{localStorage.setItem('g5sync.code','ABCDEFGHJKMN')}catch(e){}")
+    r.go("")
+    r.pg.locator("#upBox summary").click()
+    r.pg.wait_for_function("document.querySelector('#upList button[data-wd]')", timeout=5000)
+    wb = r.pg.locator('#upList button[data-wd="u1-1"]')
+    r.snap("撤回")
+    seen = []
+    for mode, label in (("done", "做好了不能撤"), ("not-found", "找不到"), ("server", "沒撤回成功"), ("net", "沒有網路"), (None, "撤回了")):
+        box["withdraw"] = mode
+        wb.click(); r.snap("確定撤回？")
+        wb.click(); r.pg.wait_for_timeout(300); r.snap(label)
+        seen.append(r.pg.locator("#upWMsg").inner_text())
+    B.absorb(r.close(), ["home:withdraw"] if all(seen) and "撤回了" in seen[-1] else [])
 
 
 # ---------------- 自檢 B01–B19：內容改壞要抓到；正例不誤判 ----------------

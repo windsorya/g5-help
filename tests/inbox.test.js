@@ -7,6 +7,8 @@ const I = require('../gas/inbox.js');
 function store(families) {
   const rows = []; let token = null;
   return {
+    find: (id) => { const r = rows.find((x) => x.cells[0] === id); return r ? { codeHash: r.cells[4], status: r.status } : null; },
+    setStatus: (id, st) => { const r = rows.find((x) => x.cells[0] === id); if (!r) return false; r.status = st; return true; },
     rows, hash: (c) => 'h-' + c, familyExists: (h) => families.includes(h),
     addUpload: (u) => rows.push({ cells: I.toCells(u), status: 'new' }),
     listNew: () => rows.filter((r) => r.status === 'new').map((r) => I.fromCells(r.cells)),
@@ -91,4 +93,49 @@ test('done 也收錯題複習站網址（#w/<題id>）；其他站或路徑仍�
   assert.equal(I.handleInbox(s, { op: 'done', token: TOK, id: up.id, url: 'https://windsorya.github.io/g5-wrong-review/#w/m-1013-03' }, now).ok, true);
   for (const bad of ['https://windsorya.github.io/g5-wrong-review/#h/x', 'https://windsorya.github.io/g5-wrong-review/evil#w/x', 'https://windsorya.github.io/g5-wrong-reviewx/#w/x'])
     assert.equal(I.handleInbox(s, { op: 'done', token: TOK, id: up.id, url: bad }, now).err, 'bad-done', bad);
+});
+
+// 撤回家長自己傳的題目（2026-10-13 律師：「為何我測試用的題目，我沒法清除？」）
+test('W01 撤回：同一個家庭碼、還沒做好 ⇒ 記成 withdrawn；mine 不再列、電腦取題也不再給', () => {
+  const s = store(['h-' + CODE]);
+  const keep = I.handleInbox(s, { op: 'upload', code: CODE, subject: '數學', note: '留著', image: IMG }, now);
+  const up = I.handleInbox(s, { op: 'upload', code: CODE, subject: '自然', note: '【測試】銀葉樹', image: IMG }, now);
+  const r = I.handleInbox(s, { op: 'withdraw', code: CODE, id: up.id }, now);
+  assert.deepEqual(r, { ok: true });
+  assert.equal(s.rows.find((x) => x.cells[0] === up.id).status, 'withdrawn');
+  assert.deepEqual(I.handleInbox(s, { op: 'mine', code: CODE }, now).items.map((x) => x.id), [keep.id]);
+  assert.deepEqual(I.handleInbox(s, { op: 'inbox', token: TOK }, now).items.map((x) => x.id), [keep.id]);
+  assert.equal(s.rows.length, 2, '不刪列，只改狀態');
+});
+
+test('W02 撤回的限制：別家的不行、做好了不行、不存在不行、參數壞掉不行；已撤回再撤一次不出錯', () => {
+  const s = store(['h-' + CODE, 'h-ZZZZZZZZZZZZ']);
+  const up = I.handleInbox(s, { op: 'upload', code: CODE, subject: '數學', note: 'n', image: IMG }, now);
+  assert.equal(I.handleInbox(s, { op: 'withdraw', code: 'ZZZZZZZZZZZZ', id: up.id }, now).err, 'not-found', '別家碼看不到這題（不透露存在）');
+  assert.equal(s.rows[0].status, 'new');
+  assert.equal(I.handleInbox(s, { op: 'withdraw', code: CODE, id: 'u0-0' }, now).err, 'not-found');
+  assert.equal(I.handleInbox(s, { op: 'withdraw', code: 'abc', id: up.id }, now).err, 'bad-code');
+  assert.equal(I.handleInbox(s, { op: 'withdraw', code: CODE, id: '<b>' }, now).err, 'bad-id');
+  assert.equal(I.handleInbox(s, { op: 'withdraw', code: CODE }, now).err, 'bad-id');
+  I.handleInbox(s, { op: 'inbox', token: TOK }, now);
+  I.handleInbox(s, { op: 'done', token: TOK, id: up.id, url: 'https://windsorya.github.io/g5-help/#h/sci-q5-bangen' }, now);
+  assert.equal(I.handleInbox(s, { op: 'withdraw', code: CODE, id: up.id }, now).err, 'done');
+  assert.equal(s.rows[0].status, 'done');
+  const up2 = I.handleInbox(s, { op: 'upload', code: CODE, subject: '數學', note: 'n2', image: IMG }, now);
+  assert.equal(I.handleInbox(s, { op: 'withdraw', code: CODE, id: up2.id }, now).ok, true);
+  assert.deepEqual(I.handleInbox(s, { op: 'withdraw', code: CODE, id: up2.id }, now), { ok: true, already: true });
+});
+
+test('W03 電腦已取回（製作中）也能撤回；撤回後電腦遲到的 ack／done 不會把它變回來', () => {
+  const s = store(['h-' + CODE]);
+  const up = I.handleInbox(s, { op: 'upload', code: CODE, subject: '數學', note: 'n', image: IMG }, now);
+  assert.equal(I.handleInbox(s, { op: 'inbox', token: TOK }, now).items.length, 1);   // 電腦拿到清單
+  assert.equal(I.handleInbox(s, { op: 'withdraw', code: CODE, id: up.id }, now).ok, true);   // 家長在 ack 前撤回
+  assert.deepEqual(I.handleInbox(s, { op: 'ack', token: TOK, id: up.id }, now), { ok: true, withdrawn: true });
+  assert.equal(s.rows[0].status, 'withdrawn', 'ack 不覆蓋撤回');
+  assert.equal(I.handleInbox(s, { op: 'done', token: TOK, id: up.id, url: 'https://windsorya.github.io/g5-help/#h/x' }, now).err, 'withdrawn');
+  assert.equal(s.rows[0].status, 'withdrawn');
+  const up2 = I.handleInbox(s, { op: 'upload', code: CODE, subject: '數學', note: 'n2', image: IMG }, now);
+  I.handleInbox(s, { op: 'ack', token: TOK, id: up2.id }, now);
+  assert.equal(I.handleInbox(s, { op: 'withdraw', code: CODE, id: up2.id }, now).ok, true, 'fetched 也能撤回');
 });

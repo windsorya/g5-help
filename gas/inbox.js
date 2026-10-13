@@ -1,6 +1,7 @@
 /* 家長傳題目（2026-10-13 律師：「自己匯入或放入難題的入口在哪」）。
  * 網頁送出：{op:"upload", code, subject, note, image}；只收已開啟同步的家庭碼（雲端至少有一份紀錄），防陌生人亂塞。
  * 本機抓取：{op:"inbox", token} 列出未取走的題目（含照片）；{op:"ack", token, id} 標記已取走。
+ * 撤回：{op:"withdraw", code, id}：家長撤回自己傳的、還沒做好的題目（狀態 withdrawn；mine／inbox 都不再給）。
  * token 第一次呼叫 inbox 時設定（之後只認同一個；存在 Script Properties，不進 repo）。
  * 照片只存在律師自己的試算表（Inbox 工作表），不放公開網頁。
  * handleInbox(store, req, now) 是純函式，node 測試用假 store（tests/inbox.test.js）。 */
@@ -38,8 +39,21 @@ var G5Inbox = (function () {
     }
     if (req.op === 'mine') {
       // 網頁看自己傳的題目進度：new＝等電腦取回、fetched＝製作中、done＝做好了（附連結）；也回電腦上次取題時間（判斷有無故障）
+      // withdrawn（家長撤回的）不列
       if (!str(req.code) || !/^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{12}$/.test(req.code)) { return {ok: false, err: 'bad-code'}; }
-      return {ok: true, items: store.listByCode(store.hash(req.code)), lastFetch: store.getLastFetch()};
+      return {ok: true, items: store.listByCode(store.hash(req.code)).filter(function (it) { return it.status !== 'withdrawn'; }), lastFetch: store.getLastFetch()};
+    }
+    if (req.op === 'withdraw') {
+      // 撤回家長自己傳的題目（2026-10-13 律師：「為何我測試用的題目，我沒法清除？」）：{op:"withdraw", code, id}
+      // 只准同一個家庭碼傳的（別家碼一律回 not-found，不透露有這一題）、還沒做好的（new／fetched）；記成 withdrawn，不刪列。
+      // 之後 mine 不列、inbox（電腦取題）不給、電腦遲到的 ack／done 也不會把它變回來。已撤回再撤一次回 ok（already）。
+      if (!str(req.code) || !/^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{12}$/.test(req.code)) { return {ok: false, err: 'bad-code'}; }
+      if (!str(req.id) || !/^[\w-]{1,60}$/.test(req.id)) { return {ok: false, err: 'bad-id'}; }
+      var row = store.find(req.id);
+      if (!row || row.codeHash !== store.hash(req.code)) { return {ok: false, err: 'not-found'}; }
+      if (row.status === 'done') { return {ok: false, err: 'done'}; }
+      if (row.status === 'withdrawn') { return {ok: true, already: true}; }
+      return store.setStatus(req.id, 'withdrawn') ? {ok: true} : {ok: false, err: 'not-found'};
     }
     if (req.op === 'inbox' || req.op === 'ack' || req.op === 'done') {
       if (!str(req.token) || req.token.length < 24) { return {ok: false, err: 'bad-token'}; }
@@ -47,11 +61,14 @@ var G5Inbox = (function () {
       if (!saved) { store.setToken(req.token); saved = req.token; }
       if (saved !== req.token) { return {ok: false, err: 'bad-token'}; }
       if (req.op === 'inbox') { store.setLastFetch(now()); return {ok: true, items: store.listNew()}; }
+      var was = str(req.id) ? store.find(req.id) : null;
       if (req.op === 'done') {
         if (!str(req.id) || !str(req.url) || !/^https:\/\/windsorya\.github\.io\/(?:g5-help\/#h|g5-wrong-review\/#w)\/[\w-]+$/.test(req.url)) { return {ok: false, err: 'bad-done'}; }
+        if (was && was.status === 'withdrawn') { return {ok: false, err: 'withdrawn'}; }   // 家長已撤回：不變回做好了
         return {ok: store.markDone(req.id, req.url, now())};
       }
       if (!str(req.id)) { return {ok: false, err: 'bad-id'}; }
+      if (was && was.status === 'withdrawn') { return {ok: true, withdrawn: true}; }   // 取題後、ack 前家長撤回：ack 不覆蓋撤回
       return {ok: store.markFetched(req.id)};
     }
     return null;   // 不是傳題目的請求，交給同步核心
@@ -109,10 +126,26 @@ function g5InboxStore() {
       for (var i = 0; i < ids.length; i += 1) { if (ids[i][0] === id) { s.getRange(i + 1, 6).setValue('fetched'); SpreadsheetApp.flush(); return true; } }
       return false;
     },
+    // 一筆的家庭碼與狀態（撤回、ack、done 判斷用）；找不到回 null
+    find: function (id) {
+      var s = inbox(), n = s.getLastRow();
+      if (n < 1) { return null; }
+      var rows = s.getRange(1, 1, n, 6).getValues();
+      for (var i = 0; i < rows.length; i += 1) { if (rows[i][0] === id) { return {codeHash: rows[i][4], status: G5Inbox.parseStatus(rows[i][5]).status}; } }
+      return null;
+    },
+    setStatus: function (id, st) {
+      var s = inbox(), n = s.getLastRow();
+      if (n < 1) { return false; }
+      var ids = s.getRange(1, 1, n, 1).getValues();
+      for (var i = 0; i < ids.length; i += 1) { if (ids[i][0] === id) { s.getRange(i + 1, 6).setValue(st); SpreadsheetApp.flush(); return true; } }
+      return false;
+    },
     listByCode: function (hash) {
       var s = inbox(), n = s.getLastRow();
       if (n < 1) { return []; }
-      return s.getRange(1, 1, n, 6).getValues().filter(function (r) { return r[4] === hash; }).map(function (r) {
+      // 撤回的先濾掉再取最近 20 筆（不佔名額）
+      return s.getRange(1, 1, n, 6).getValues().filter(function (r) { return r[4] === hash && r[5] !== 'withdrawn'; }).map(function (r) {
         var p = G5Inbox.parseStatus(r[5]);
         return {id: r[0], time: r[1], subject: r[2], note: String(r[3]).slice(1, 41), status: p.status, url: p.url, doneAt: p.doneAt};
       }).reverse().slice(0, 20);

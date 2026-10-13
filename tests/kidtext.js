@@ -84,7 +84,7 @@ function fracBranches() {
   return out.filter((b) => !FRAC_UNREACHABLE[b]);
 }
 function requiredCases(list = H.LIST) {
-  const out = ["home"];
+  const out = ["home", "home:hide", "home:settings", "home:withdraw"];   // 家長功能（2026-10-13）：隱藏這篇、家長設定、撤回傳題，每個狀態都要真的採到字
   list.forEach((e) => {
     if (e.kind === "steps") {
       out.push(e.id + ":lesson", e.id + ":direct");
