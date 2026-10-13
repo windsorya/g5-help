@@ -34,9 +34,10 @@ def main() -> None:
     (ROOT / "index.html").write_text(HEAD + body + "</body></html>", encoding="utf-8")
     print(f"built index.html ({len(body)} chars)")
     # 同步函式庫另外當獨立檔放在網站根目錄，自然站等其他站用 <script src> 載入同一份（不另抄一份）
-    for name in ("sync.js", "qrcode.js"):
+    # upload.js：四個科目站的「補題區」共用元件（交辦 #1618），同樣由各站 <script src> 載入
+    for name in ("sync.js", "qrcode.js", "upload.js"):
         (ROOT / name).write_text((ROOT / "src" / name).read_text(encoding="utf-8"), encoding="utf-8")
-    print("copied sync.js, qrcode.js")
+    print("copied sync.js, qrcode.js, upload.js")
 
 
 if __name__ == "__main__":
