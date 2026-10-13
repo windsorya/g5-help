@@ -354,6 +354,7 @@ def flow_home(browser):
     """首頁依科目列出；沒有題目的科目寫「還沒有題目」；點進去、回列表、狀態會跟著變。"""
     ctx, page, errors = open_page(browser, url=HOME)
     subj = page.locator("#subjects .subj")
+    check("三站切換列（#1333）：三項、目前站是「難題解說」", page.locator("#siteNav a, #siteNav [aria-current]").count() == 3 and page.locator('#siteNav [aria-current="page"]').inner_text() == "難題解說")
     check("首頁列出國語、數學、自然、社會、英文、其他六科", [subj.nth(i).get_attribute("data-subj") for i in range(subj.count())] == ["國語", "數學", "自然", "社會", "英文", "其他"])
     math = page.locator('.subj[data-subj="數學"] .hcard')
     check("數學有第 1 篇（28/42），狀態還沒看", math.count() == 1 and "28/42 和 27/45 比大小" in math.inner_text() and "還沒看" in math.inner_text(), math.inner_text())
