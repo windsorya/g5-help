@@ -112,6 +112,18 @@
       if (!storage) { throw error('storage'); }
       storage.setItem(key, value);
     }
+    // 寫入或刪除同步碼後，在 window 派 g5sync:codechange（event.oldValue／event.newValue）：
+    // 補題區（g5-help/upload.js）靠它認出同一頁換家庭（含 A→B→A）。只是通知，派發失敗一律吞掉，不改同步流程（A21）。
+    function peekCode() { try { return storage ? storage.getItem(CODE) : null; } catch (ignore) { return null; } }
+    function announceCode(oldValue) {
+      try {
+        if (!root || typeof root.dispatchEvent !== 'function' || !doc || typeof doc.createEvent !== 'function') { return; }
+        var ev = doc.createEvent('Event');
+        ev.initEvent('g5sync:codechange', false, false);
+        ev.oldValue = oldValue; ev.newValue = peekCode();
+        root.dispatchEvent(ev);
+      } catch (ignore) {}
+    }
     function blankMeta() { return {version: 1, codeHash: contentHash(code), keys: {}}; }
     function readMeta() {
       var raw = read(META), meta;
@@ -598,7 +610,9 @@
       // Clear the old baseline first. A partial storage failure then fails conservatively.
       storage.removeItem(META);
       if (pageOwned) { keys.forEach(function (key) { storage.removeItem(CKPT + key); }); }   // 換家庭：舊的待確認上傳作廢（A16）
+      var oldCode = peekCode();
       write(CODE, newCode);
+      announceCode(oldCode);
       stopped = false; resetSession(newCode); render();
       return sync(true);
     }
@@ -655,12 +669,13 @@
       if (activeAbort) { activeAbort.abort(); }
       if (retryTimer !== null) { root.clearTimeout(retryTimer); retryTimer = null; }
       code = null; conflicts = {}; decisions = {}; replaced = []; notice = '';
-      var ok = true;
+      var ok = true, oldCode = peekCode();
       try {
         storage.removeItem(CODE); storage.removeItem(META);
         if (pageOwned) { keys.forEach(function (key) { storage.removeItem(CKPT + key); }); }
       }
       catch (err) { ok = false; notice = '同步已暫停，但瀏覽器無法清除設定；請檢查儲存權限。'; }
+      announceCode(oldCode);
       status = ok ? '這台已停止同步，進度仍保留。' : '同步已暫停';
       render(); return ok;
     }

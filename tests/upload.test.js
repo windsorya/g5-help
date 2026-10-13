@@ -134,13 +134,6 @@ test('家庭碼：空字串、null、非字串都當作沒開同步（不能拿�
   assert.equal(U.familyOf('ABCDEFGHJKMN'), 'ABCDEFGHJKMN');
 });
 
-test('已確認撤回的題目：之後任何清單回應都濾掉（撤回前發出的查詢晚到、伺服器慢一步都不讓它回來）', () => {
-  const items = [{ id: 'a' }, { id: 'b' }, { id: 'c-1' }, { id: 'd' }, { id: '__proto__' }];
-  assert.deepEqual(U.dropWithdrawn(items, ['b', 'c-1', '__proto__']).map((x) => x.id), ['a', 'd']);
-  assert.deepEqual(U.dropWithdrawn(items, []).map((x) => x.id), ['a', 'b', 'c-1', 'd', '__proto__']);
-  assert.deepEqual(U.dropWithdrawn(null, ['a']), []);
-});
-
 test('查詢與撤回的期限 90 秒（設計者設計值），常數旁寫明 cap-why', () => {
   assert.equal(U.DEADLINE_MS, 90000);
   const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'upload.js'), 'utf8');
@@ -159,24 +152,60 @@ test('清單查詢的本科前綴：與說明前綴同形、後端 PREFIX_RE 收
   assert.throws(() => U.minePrefix('體育'));
 });
 
-// ── Codex 審 117bbb0 三項（設計後第 1 輪）：在記憶體 VM 裡掛元件（假 DOM／fetch／縮圖；計時器一律不跑＝所有事都發生在兩次 2 秒輪詢之間），
-// 重現審查的三個反例。瀏覽器版見 tests/e2e_upload.py U2／U6／U10／U11 的對應變體。G5_UPLOAD_SRC 可指向別份元件（突變自檢用）。
+// ── 4agent 最終方案「(d)-縮」驗收列表 A01–A20（記憶體 VM 版；瀏覽器版見 tests/e2e_upload.py 的 A 列；A21 在 tests/sync.test.js）──
+// 報告：~/scripts/state/fouragent_20261013_upload/4A_upload_report.md【最終方案】1–6。
+// VM：假 DOM（每個容器各一份）、假 fetch（可扣住、可指定回應；abort 一律無效）、假縮圖（可扣住）、
+// 假時鐘（setTimeout／setInterval 與 Date.now 只在 advance 時前進）。G5_UPLOAD_SRC 可指向別份元件（突變自檢用）。
 const vm = require('node:vm');
 const MOUNT_SRC = fs.readFileSync(process.env.G5_UPLOAD_SRC || path.join(__dirname, '..', 'src', 'upload.js'), 'utf8');
-const CA = 'ABCDEFGHJKMN', CB = 'PQRSTUVWXYZ2';
+const CA = 'ABCDEFGHJKMN', CB = 'PQRSTUVWXYZ2', PRE = { 國語: '【補題:國語:', 數學: '【補題:數學:' };
+const NODE_CLASSES = ['g5u-send', 'g5u-file', 'g5u-note', 'g5u-unit', 'g5u-out', 'g5u-health', 'g5u-wmsg', 'g5u-refresh'];
+const D0 = '照片沒有送出；確認後再按一次送出';   // 一張都還沒呼叫 post 時的打斷提示（A09：已送出去過就不能出現這句）
+
+function it(id, status, subject) { return { id, time: 1760000000000, note: (PRE[subject || '國語']) + 'L1】' + id, status: status || 'new' }; }
+async function flush() { for (let i = 0; i < 40; i += 1) await new Promise((r) => setImmediate(r)); }
 
 function makeEnv(code) {
   const store = new Map();
   if (code) store.set('g5sync.code', code);
-  const env = { reqs: [], auto: () => undefined, holdImg: false, imgQ: [] };
+  const env = { reqs: [], db: {}, hold: () => false, once: [], failFrom: Infinity, holdImg: false, imgQ: [],
+    now: 1760000000000, timers: new Map(), seq: 1, boxes: {}, listeners: {} };
   env.localStorage = {
     getItem: (k) => (store.has(k) ? store.get(k) : null),
     setItem: (k, v) => { store.set(k, String(v)); },
     removeItem: (k) => { store.delete(k); },
     clear: () => { store.clear(); }
   };
+  // 別的分頁或 sync.js 寫的同步碼：不經過本頁這個 localStorage 物件的方法（元件只能從事件或輪詢得知）
+  env.rawSet = (v) => { if (v === null) store.delete('g5sync.code'); else store.set('g5sync.code', v); };
+  const noop = () => {};
+  const on = (type, fn) => { (env.listeners[type] ||= new Set()).add(fn); };
+  const off = (type, fn) => { if (env.listeners[type]) env.listeners[type].delete(fn); };
+  env.fire = (type, ev) => { [...(env.listeners[type] || [])].forEach((fn) => fn(Object.assign({ type }, ev))); };
+  env.codeEvent = (oldValue, newValue) => env.fire('g5sync:codechange', { oldValue, newValue });
+  env.storageEvent = (oldValue, newValue) => env.fire('storage', { key: 'g5sync.code', oldValue, newValue });
+  const setT = (fn, ms, rep) => { const id = env.seq++; env.timers.set(id, { fn, at: env.now + (ms || 0), rep: rep ? ms : 0 }); return id; };
+  const clr = (id) => { env.timers.delete(id); };
+  env.advance = async (ms) => {
+    const end = env.now + ms;
+    for (let guard = 0; guard < 10000; guard += 1) {
+      let best = null;
+      for (const [id, t] of env.timers) if (t.at <= end && (!best || t.at < best[1].at)) best = [id, t];
+      if (!best) break;
+      env.now = best[1].at;
+      if (best[1].rep) best[1].at += best[1].rep; else env.timers.delete(best[0]);
+      best[1].fn();
+      await flush();
+    }
+    env.now = end;
+    await flush();
+  };
+  class FakeDate extends Date {
+    constructor(...a) { super(...(a.length ? a : [env.now])); }
+    static now() { return env.now; }
+  }
   function plain() { return { textContent: '', disabled: false, value: '', files: [], classList: { toggle() {} }, onclick: null }; }
-  function items() {
+  function itemsNode() {
     const n = plain();
     n._html = ''; n._btn = [];
     Object.defineProperty(n, 'innerHTML', {
@@ -191,191 +220,454 @@ function makeEnv(code) {
     n.querySelectorAll = (sel) => n._btn.filter((b) => (sel === 'button[data-wd]' ? b.wd : !b.wd));
     return n;
   }
-  const box = {};
-  Object.defineProperty(box, 'innerHTML', {
-    set() {
-      const nodes = {};
-      ['g5u-send', 'g5u-file', 'g5u-note', 'g5u-unit', 'g5u-out', 'g5u-health', 'g5u-wmsg'].forEach((c) => { nodes[c] = plain(); });
-      nodes['g5u-items'] = items();
-      nodes['g5u-unit'].value = 'L1';
-      box.firstChild = { querySelector: (sel) => nodes[sel.slice(1)] };
-      env.nodes = nodes;
+  function makeBox() {
+    const box = {};
+    Object.defineProperty(box, 'innerHTML', {
+      set() {
+        const nodes = {};
+        NODE_CLASSES.forEach((c) => { nodes[c] = plain(); });
+        nodes['g5u-items'] = itemsNode();
+        nodes['g5u-unit'].value = 'L1';
+        box.firstChild = { querySelector: (s) => nodes[s.slice(1)] || null };
+        box.nodes = nodes;
+      }
+    });
+    return box;
+  }
+  function mineResult(b) {
+    return { ok: true, items: (env.db[b.code + '|' + b.prefix] || []).filter((x) => x.status !== 'withdrawn').map((x) => Object.assign({}, x)), lastFetch: 0 };
+  }
+  // 照假伺服器「此刻」的資料回答（撤回、上傳在回答當下才生效）
+  env.answer = (r) => {
+    const b = r.body;
+    if (b.op === 'mine') return r.reply(mineResult(b));
+    if (b.op === 'upload') {
+      const subj = Object.keys(PRE).find((s) => String(b.note).startsWith(PRE[s]));
+      const id = 'up' + (env.ops('upload').indexOf(r) + 1);
+      (env.db[b.code + '|' + PRE[subj]] ||= []).unshift(it(id, 'new', subj));
+      return r.reply({ ok: true, id });
     }
-  });
-  const noop = () => {};
+    if (b.op === 'withdraw') {
+      for (const k of Object.keys(env.db)) {
+        const x = env.db[k].find((y) => y.id === b.id);
+        if (!x) continue;
+        if (!k.startsWith(b.code + '|')) return r.reply({ ok: false, err: 'not-found' });
+        if (x.status === 'done') return r.reply({ ok: false, err: 'done' });
+        x.status = 'withdrawn';
+        return r.reply({ ok: true });
+      }
+      return r.reply({ ok: false, err: 'not-found' });
+    }
+    return r.reply({ ok: false, err: 'unknown-op' });
+  };
   const ctx = {
     localStorage: env.localStorage,
     document: {
-      querySelector: () => box, getElementById: () => ({}), head: { appendChild: noop },
+      querySelector: (s) => (env.boxes[s] ||= makeBox()), getElementById: () => ({}), head: { appendChild: noop },
       createElement: () => ({ width: 0, height: 0, getContext: () => ({ drawImage: noop }), toDataURL: () => 'data:image/jpeg;base64,AAAA' }),
-      addEventListener: noop, removeEventListener: noop, visibilityState: 'visible'
+      addEventListener: on, removeEventListener: off, visibilityState: 'visible'
     },
-    addEventListener: noop, removeEventListener: noop,
-    setTimeout: () => 1, clearTimeout: noop, setInterval: () => 1, clearInterval: noop,
+    addEventListener: on, removeEventListener: off,
+    setTimeout: (fn, ms) => setT(fn, ms, false), clearTimeout: clr, setInterval: (fn, ms) => setT(fn, ms, true), clearInterval: clr,
     URL: { createObjectURL: () => 'blob:x', revokeObjectURL: noop },
-    AbortController, Promise, JSON, Date, Math, Object, Array, String, RegExp, Error,
+    AbortController, Promise, JSON, Date: FakeDate, Math, Object, Array, String, RegExp, Error,
     Image: function () {
       const img = this;
       img.width = 10; img.height = 10;
       Object.defineProperty(img, 'src', { set() { const go = () => img.onload(); if (env.holdImg) env.imgQ.push(go); else setImmediate(go); } });
     },
     fetch: (url, opt) => new Promise((res, rej) => {
-      const r = { body: JSON.parse(opt.body), done: false };
-      r.reply = (json) => { if (!r.done) { r.done = true; res({ ok: true, status: 200, text: () => Promise.resolve(JSON.stringify(json)) }); } };
-      r.fail = () => { if (!r.done) { r.done = true; rej(new TypeError('net')); } };
+      // abort 一律無效（設計者 (d)：正確性不能靠 abort）
+      const r = { url, body: JSON.parse(opt.body), done: false };
+      const settle = (fn) => { if (!r.done) { r.done = true; fn(); } };
+      r.reply = (json, status) => settle(() => res({ ok: !status || (status >= 200 && status < 300), status: status || 200, text: () => Promise.resolve(JSON.stringify(json)) }));
+      r.raw = (text) => settle(() => res({ ok: true, status: 200, text: () => Promise.resolve(text) }));
+      r.fail = () => settle(() => rej(new TypeError('net')));
+      r.release = () => (r.snap ? r.reply(r.snap) : env.answer(r));
       env.reqs.push(r);
-      const a = env.auto(r.body, env);
-      if (a !== undefined) r.reply(a);
+      if (env.reqs.length > env.failFrom) return r.reply({ ok: false, err: 'server' });
+      const k = env.once.findIndex(([c]) => c(r.body));
+      if (k >= 0) { const act = env.once.splice(k, 1)[0][1]; return act(r); }
+      if (env.hold(r.body)) { if (r.body.op === 'mine') r.snap = mineResult(r.body); return; }   // 扣住的清單查詢：固定扣住當下的快照
+      env.answer(r);
     })
   };
   ctx.window = ctx;
   vm.createContext(ctx);
   vm.runInContext(MOUNT_SRC, ctx);
-  env.mount = () => ctx.G5Upload.mount('#box', { subject: '國語', site: 'g5-chinese-review', units: [{ id: 'L1', name: '第一課' }] });
-  env.ops = (op) => env.reqs.filter((r) => r.body.op === op);
+  env.G = ctx.G5Upload;
+  env.mount = (sel = '#box', subject = '國語', endpoint) => ctx.G5Upload.mount(sel, Object.assign(
+    { subject, site: subject === '國語' ? 'g5-chinese-review' : 'g5-math-review', units: [{ id: 'L1', name: '第一課' }] }, endpoint ? { endpoint } : {}));
+  env.n = (sel = '#box') => env.boxes[sel].nodes;
+  env.ops = (op, code) => env.reqs.filter((r) => r.body.op === op && (code === undefined || r.body.code === code));
   env.pending = (op) => env.ops(op).filter((r) => !r.done);
-  env.ids = () => (env.nodes['g5u-items'].innerHTML.match(/data-id="[^"]*"/g) || []).map((s) => s.slice(9, -1));
-  env.card = (id) => {
-    const h = env.nodes['g5u-items'].innerHTML, i = h.indexOf('data-id="' + id + '"'), j = h.indexOf('g5u-card', i + 1);
+  env.tally = (code, since = 0) => { const rs = env.reqs.slice(since).filter((r) => r.body.code === code); return ['mine', 'upload', 'withdraw'].map((o) => rs.filter((r) => r.body.op === o).length).join('/'); };
+  env.html = (sel = '#box') => env.n(sel)['g5u-items'].innerHTML;
+  env.ids = (sel = '#box') => (env.html(sel).match(/data-id="[^"]*"/g) || []).map((s) => s.slice(9, -1));
+  env.card = (id, sel = '#box') => {
+    const h = env.html(sel), i = h.indexOf('data-id="' + id + '"'), j = h.indexOf('g5u-card', i + 1);
     return i < 0 ? null : h.slice(i, j < 0 ? h.length : j);
   };
-  env.wd = (id) => env.nodes['g5u-items']._btn.find((b) => b.wd === id).onclick();
-  env.text = (c) => env.nodes[c].textContent;
+  env.wdBtns = (sel = '#box') => env.n(sel)['g5u-items']._btn.filter((b) => b.wd);
+  env.wd = (id, sel = '#box') => env.wdBtns(sel).find((b) => b.wd === id).onclick();
+  env.withdraw = async (id, sel = '#box') => { env.wd(id, sel); env.wd(id, sel); await flush(); };
+  env.text = (c, sel = '#box') => env.n(sel)[c].textContent;
+  env.refreshBtn = (sel = '#box') => { const b = env.n(sel)['g5u-refresh']; assert.equal(typeof b.onclick, 'function', '沒有「重新整理」鈕'); b.onclick(); };
+  env.send = async (files, note, sel = '#box') => {
+    const n = env.n(sel);
+    n['g5u-file'].files = files.map(() => ({}));
+    if (note !== undefined) n['g5u-note'].value = note;
+    n['g5u-send'].onclick();
+    await flush();
+  };
+  env.view = (sel = '#box') => {
+    const n = env.n(sel);
+    return JSON.stringify({ items: env.html(sel), out: n['g5u-out'].textContent, health: n['g5u-health'].textContent, wmsg: n['g5u-wmsg'].textContent,
+      note: n['g5u-note'].value, locks: ['g5u-send', 'g5u-file', 'g5u-note', 'g5u-unit'].map((c) => n[c].disabled) });
+  };
   return env;
 }
-async function flush() { for (let i = 0; i < 30; i += 1) await new Promise((r) => setImmediate(r)); }
-function it(id, status) { return { id, time: 1760000000000, note: '【補題:國語:L1】' + id, status: status || 'new' }; }
 
-test('審 117bbb0①：兩次輪詢之間 A→B→A，在途上傳不沿用（第二張不送、不清草稿、提示沒有送出）', async () => {
+test('A01 掛載 A：A:1/0/0、清單是 A 的', async () => {
   const E = makeEnv(CA);
-  E.auto = (b) => (b.op === 'mine' ? { ok: true, items: [] } : undefined);
-  E.mount();
-  await flush();
-  E.nodes['g5u-file'].files = [{}, {}];
-  E.nodes['g5u-note'].value = '草稿';
-  E.nodes['g5u-send'].onclick();
-  await flush();
+  E.db[CA + '|' + PRE.國語] = [it('a1')]; E.db[CB + '|' + PRE.國語] = [it('b1')];
+  E.mount(); await flush();
+  assert.equal(E.tally(CA), '1/0/0'); assert.equal(E.tally(CB), '0/0/0');
+  assert.deepEqual(E.ids(), ['a1']);
+});
+
+test('A02 連按「重新整理」三次、回應扣住：只發 1 筆；放行後更新', async () => {
+  const E = makeEnv(CA);
+  E.db[CA + '|' + PRE.國語] = [it('a1')];
+  E.mount(); await flush();
+  const n0 = E.reqs.length;
+  E.db[CA + '|' + PRE.國語].unshift(it('a2'));
+  E.hold = (b) => b.op === 'mine';
+  E.refreshBtn(); E.refreshBtn(); E.refreshBtn(); await flush();
+  assert.equal(E.tally(CA, n0), '1/0/0');
+  E.pending('mine').forEach((r) => r.release()); await flush();
+  assert.deepEqual(E.ids(), ['a2', 'a1']);
+});
+
+test('A03 兩張都回 ok：A:1/2/0、「2 張都送出了」、清空草稿', async () => {
+  const E = makeEnv(CA);
+  E.mount(); await flush();
+  const n0 = E.reqs.length;
+  await E.send([1, 2], '草稿');
+  assert.equal(E.tally(CA, n0), '1/2/0');
+  assert.match(E.text('g5u-out'), /2 張都送出了/);
+  assert.equal(E.n()['g5u-note'].value, '');
+  assert.deepEqual(E.ids(), ['up2', 'up1']);
+});
+
+test('A04 閒置 65 秒：零請求（拿掉 60 秒自動重查；2 秒家庭碼檢查只讀不發）', async () => {
+  const E = makeEnv(CA);
+  E.db[CA + '|' + PRE.國語] = [it('a1')];
+  E.mount(); await flush();
+  const n0 = E.reqs.length;
+  await E.advance(65000);
+  assert.equal(E.reqs.length - n0, 0);
+});
+
+test('A05 同頁刪碼（不派任何事件）、推進 2.1 秒：零請求、清單空白、提示沒開同步、沒有撤回鈕', async () => {
+  const E = makeEnv(CA);
+  E.db[CA + '|' + PRE.國語] = [it('a1')];
+  E.mount(); await flush();
+  const n0 = E.reqs.length;
+  E.rawSet(null);
+  await E.advance(2100);
+  assert.equal(E.reqs.length - n0, 0);
+  assert.deepEqual(E.ids(), []);
+  assert.match(E.text('g5u-health'), /還沒開啟跨裝置同步/);
+  assert.equal(E.wdBtns().length, 0);
+});
+
+test('A06 沒有任何事件、也沒被輪詢看到的 A→B→A（期間上傳）：視為同一家庭，第二張照送 A、B 零請求；註解寫明此不變量', async () => {
+  const E = makeEnv(CA);
+  E.mount(); await flush();
+  const n0 = E.reqs.length;
+  E.hold = (b) => b.op === 'upload' && E.ops('upload').length === 1;
+  await E.send([1, 2], '草稿');
   assert.equal(E.pending('upload').length, 1);
-  E.localStorage.setItem('g5sync.code', CB);
-  E.localStorage.setItem('g5sync.code', CA);
-  E.pending('upload')[0].reply({ ok: true, id: 'u1' });
-  await flush();
-  assert.deepEqual(E.ops('upload').map((r) => r.body.code), [CA], '第二張不得送出');
-  assert.equal(E.nodes['g5u-note'].value, '草稿', '草稿不得被清掉');
-  assert.match(E.text('g5u-out'), /沒有送出/);
-  assert.doesNotMatch(E.text('g5u-out'), /都送出了|^送出了/);
+  E.rawSet(CB); E.rawSet(CA);   // 例如開發者工具直接改：沒有事件、輪詢也沒跑
+  E.hold = () => false;
+  E.pending('upload')[0].release(); await flush();
+  assert.deepEqual(E.ops('upload').map((r) => r.body.code), [CA, CA]);
+  assert.equal(E.tally(CB, n0), '0/0/0');
+  assert.match(MOUNT_SRC, /A06/);
 });
 
-test('審 117bbb0①：兩次輪詢之間 A→B→A，在途撤回的成功不沿用；在途查詢不採用、改發新世代查詢', async () => {
+for (const [label, flip] of [
+  ['同頁 sync.js 自訂事件', (E) => { E.rawSet(CB); E.codeEvent(CA, CB); E.rawSet(CA); E.codeEvent(CB, CA); }],
+  ['別頁 storage 事件', (E) => { E.rawSet(CB); E.rawSet(CA); E.storageEvent(CA, CB); E.storageEvent(CB, CA); }]
+]) {
+  test(`A07 有事件的 A→B→A（${label}）：在途上傳第二張不送、草稿保留、提示不確定有沒有送到；在途撤回的成功不顯示`, async () => {
+    const E = makeEnv(CA);
+    E.mount(); await flush();
+    E.hold = (b) => b.op === 'upload' && E.ops('upload').length === 1;
+    await E.send([1, 2], '草稿');
+    assert.equal(E.pending('upload').length, 1);
+    flip(E);
+    E.hold = () => false;
+    E.pending('upload')[0].release(); await flush();
+    assert.equal(E.ops('upload').length, 1, '第二張不得送出');
+    assert.equal(E.n()['g5u-note'].value, '草稿');
+    assert.match(E.text('g5u-out'), /不確定有沒有送到/);
+
+    const W = makeEnv(CA);
+    W.db[CA + '|' + PRE.國語] = [it('x'), it('w')];
+    W.mount(); await flush();
+    W.hold = (b) => b.op === 'withdraw';
+    await W.withdraw('x');
+    assert.equal(W.pending('withdraw').length, 1);
+    flip(W);
+    W.hold = () => false;
+    W.pending('withdraw')[0].release(); await flush();
+    assert.doesNotMatch(W.text('g5u-wmsg'), /撤回了/);
+    assert.ok(W.wdBtns().every((b) => !b.disabled));
+  });
+}
+
+test('A08 第一張回 no-family、第二張縮圖時換 B：A:0/1/0、B:1/0/0、B 的清單、提示不確定、草稿保留', async () => {
   const E = makeEnv(CA);
-  E.auto = (b) => (b.op === 'mine' && E.ops('mine').length === 1 ? { ok: true, items: [it('x'), it('w')] } : undefined);
-  E.mount();
-  await flush();
-  assert.deepEqual(E.ids(), ['x', 'w']);
-  E.wd('x'); E.wd('x');
-  await flush();
-  assert.equal(E.pending('withdraw').length, 1);
+  E.db[CA + '|' + PRE.國語] = [it('a1')]; E.db[CB + '|' + PRE.國語] = [it('b1')];
+  E.mount(); await flush();
+  const n0 = E.reqs.length;
+  E.hold = (b) => b.op === 'upload';
+  await E.send([1, 2], '草稿');
+  E.holdImg = true;
+  E.pending('upload')[0].reply({ ok: false, err: 'no-family' }); await flush();
+  assert.equal(E.imgQ.length, 1);
   E.localStorage.setItem('g5sync.code', CB);
-  E.localStorage.setItem('g5sync.code', CA);
-  E.pending('withdraw')[0].reply({ ok: true });
-  await flush();
-  assert.doesNotMatch(E.text('g5u-wmsg'), /撤回了/, '舊世代的撤回結果不得顯示');
-
-  const E2 = makeEnv(CA);
-  E2.auto = (b) => (b.op === 'mine' && E2.ops('mine').length === 1 ? { ok: true, items: [it('x')] } : undefined);
-  const h2 = E2.mount();
-  await flush();
-  h2.reload();   // 第一筆已結束，這是第二筆（扣住）
-  await flush();
-  const old = E2.pending('mine')[0];
-  E2.localStorage.setItem('g5sync.code', CB);
-  E2.localStorage.setItem('g5sync.code', CA);
-  old.reply({ ok: true, items: [it('q'), it('x')] });
-  await flush();
-  assert.ok(!E2.ids().includes('q'), '舊世代的清單不得採用：' + E2.ids());
-  assert.equal(E2.pending('mine').length, 1, '應改發一筆新世代查詢');
-  assert.equal(E2.pending('mine')[0].body.code, CA);
+  await E.advance(2100);
+  assert.equal(E.tally(CA, n0), '0/1/0'); assert.equal(E.tally(CB, n0), '1/0/0');
+  assert.deepEqual(E.ids(), ['b1']);
+  assert.match(E.text('g5u-out'), /不確定有沒有送到/);
+  assert.equal(E.n()['g5u-note'].value, '草稿');
+  E.holdImg = false; E.imgQ.splice(0).forEach((f) => f()); await flush();
+  assert.equal(E.ops('upload').length, 1);
 });
 
-test('審 117bbb0①：別的分頁 A→B→A（storage 事件帶新舊值，本頁讀到的碼始終是 A）也換世代', () => {
-  assert.equal(U.codeEventChanged({ key: 'g5sync.code', oldValue: CA, newValue: CB }), true);
-  assert.equal(U.codeEventChanged({ key: 'g5sync.code', oldValue: CB, newValue: CA }), true);
-  assert.equal(U.codeEventChanged({ key: 'g5sync.code', oldValue: CA, newValue: CA }), false);
-  assert.equal(U.codeEventChanged({ key: 'g5sync.meta', oldValue: 'a', newValue: 'b' }), false);
-  assert.equal(U.codeEventChanged({ key: null, oldValue: null, newValue: null }), true);   // localStorage.clear()
-  assert.equal(U.codeEventChanged(null), false);
+test('A09 第一張回應遺失（伺服器其實存了）、第二張縮圖時換 B：同 A08，且不得出現「照片沒有送出」', async () => {
+  const E = makeEnv(CA);
+  E.db[CA + '|' + PRE.國語] = [it('a1')]; E.db[CB + '|' + PRE.國語] = [it('b1')];
+  E.mount(); await flush();
+  const n0 = E.reqs.length;
+  E.hold = (b) => b.op === 'upload';
+  await E.send([1, 2], '草稿');
+  E.holdImg = true;
+  const r = E.pending('upload')[0];
+  E.db[CA + '|' + PRE.國語].unshift(it('up1'));   // 伺服器存了
+  r.fail(); await flush();
+  assert.equal(E.imgQ.length, 1);
+  E.localStorage.setItem('g5sync.code', CB);
+  await E.advance(2100);
+  assert.equal(E.tally(CA, n0), '0/1/0'); assert.equal(E.tally(CB, n0), '1/0/0');
+  const out = E.text('g5u-out');
+  assert.match(out, /不確定有沒有送到/, out);
+  assert.ok(!out.includes(D0), out);
+  assert.equal(E.n()['g5u-note'].value, '草稿');
 });
 
-test('審 117bbb0①：同一頁寫入同步碼（setItem／removeItem／clear）每次值變了就換世代，寫同一個值不換', () => {
-  const store = new Map([['g5sync.code', CA]]);
-  const ls = { getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => { store.set(k, String(v)); }, removeItem: (k) => { store.delete(k); }, clear: () => { store.clear(); } };
-  let n = 0;
-  U.watchCode(ls, () => { n += 1; });
-  ls.setItem('g5sync.code', CB); assert.equal(n, 1);
-  ls.setItem('g5sync.code', CA); assert.equal(n, 2, 'A→B→A 是兩次');
-  ls.setItem('g5sync.code', CA); assert.equal(n, 2, '寫同一個值不換');
-  ls.setItem('g5sync.meta', 'x'); assert.equal(n, 2, '別的 key 不換');
-  ls.removeItem('g5sync.code'); assert.equal(n, 3);
-  ls.setItem('g5sync.code', CA); ls.clear(); assert.equal(n, 5);
-  assert.equal(ls.getItem('g5sync.code'), null, '原本的寫入行為不變');
+test('A10 同頁國語＋數學、別頁換 B 一次、兩筆都回成功、之後一律失敗：B:2/0/0、各自是本科的 B、沒有第 3 筆', async () => {
+  const E = makeEnv(CA);
+  E.db[CA + '|' + PRE.國語] = [it('a1')]; E.db[CA + '|' + PRE.數學] = [it('m1', 'new', '數學')];
+  E.db[CB + '|' + PRE.國語] = [it('b1')]; E.db[CB + '|' + PRE.數學] = [it('bm1', 'new', '數學')];
+  E.mount('#box1', '國語'); E.mount('#box2', '數學'); await flush();
+  const n0 = E.reqs.length;
+  E.failFrom = n0 + 2;
+  E.rawSet(CB); E.storageEvent(CA, CB); await flush();
+  await E.advance(2100); await E.advance(2100);
+  assert.equal(E.tally(CB, n0), '2/0/0');
+  assert.equal(E.reqs.length - n0, 2);
+  assert.deepEqual(E.ids('#box1'), ['b1']); assert.deepEqual(E.ids('#box2'), ['bm1']);
 });
 
-test('審 117bbb0②：換家庭時的提示只算「已確認送出」的張數（失敗、還沒回來的不算已送出）', async () => {
-  for (const [first, want, notWant] of [
-    [{ ok: false, err: 'no-family' }, /照片沒有送出/, /已確認送出|已送出|1 張/],
-    [{ ok: true, id: 'u1' }, /已確認送出的 1 張不受影響/, /還沒收到結果/]
-  ]) {
+test('A11 撤回前的查詢扣住 → 撤回回 done → 放行舊查詢 → 新查詢回 done：撤回後新增 mine＝1、做好了、沒有撤回鈕', async () => {
+  const E = makeEnv(CA);
+  E.db[CA + '|' + PRE.國語] = [it('x'), it('w')];
+  const h = E.mount(); await flush();
+  E.hold = (b) => b.op === 'mine';
+  h.reload(); await flush();
+  const old = E.pending('mine')[0];
+  E.hold = () => false;
+  E.db[CA + '|' + PRE.國語][0].status = 'done';
+  const n = E.ops('mine').length;
+  await E.withdraw('x');
+  assert.equal(E.ops('mine').length - n, 1);
+  old.release(); await flush();
+  assert.deepEqual(E.ids(), ['x', 'w']);
+  assert.match(E.card('x'), /做好了/); assert.doesNotMatch(E.card('x'), /data-wd="x"/);
+  assert.match(E.text('g5u-wmsg'), /已經做好了/);
+});
+
+test('A12 撤回 ok、重查扣住時再放行舊查詢：重查回來前清單空白＋「更新中」；舊查詢不採用；最終 [w]', async () => {
+  const E = makeEnv(CA);
+  E.db[CA + '|' + PRE.國語] = [it('x'), it('w')];
+  const h = E.mount(); await flush();
+  E.hold = (b) => b.op === 'mine';
+  h.reload(); await flush();
+  const old = E.pending('mine')[0];
+  await E.withdraw('x');
+  assert.match(E.text('g5u-wmsg'), /撤回了/);
+  assert.deepEqual(E.ids(), []); assert.match(E.html(), /更新中/);
+  old.release(); await flush();
+  assert.deepEqual(E.ids(), []); assert.match(E.html(), /更新中/);
+  const again = E.pending('mine');
+  assert.equal(again.length, 1);
+  again[0].release(); await flush();
+  assert.deepEqual(E.ids(), ['w']);
+});
+
+for (const [end, act, want] of [
+  ['not-found', (r) => r.reply({ ok: false, err: 'not-found' }), /找不到/],
+  ['fail', (r) => r.reply({ ok: false, err: 'server' }), /沒有撤回成功/],
+  ['網路失敗', (r) => r.fail(), /還沒確認/],
+  ['逾 90 秒後成功才到', null, /還沒確認/]
+]) {
+  test(`A13 撤回 ${end}：提示正確、清單先空白再依重查、沒有第二筆撤回、晚到的回應不改畫面`, async () => {
     const E = makeEnv(CA);
-    E.auto = (b) => (b.op === 'mine' ? { ok: true, items: [] } : undefined);
-    const h = E.mount();
-    await flush();
-    E.nodes['g5u-file'].files = [{}, {}];
-    E.nodes['g5u-send'].onclick();
-    await flush();
-    E.holdImg = true;                    // 扣住第二張的縮圖
-    E.pending('upload')[0].reply(first);
-    await flush();
-    assert.equal(E.imgQ.length, 1);
-    E.localStorage.setItem('g5sync.code', CB);
-    h.reload();
-    await flush();
+    E.db[CA + '|' + PRE.國語] = [it('x'), it('w')];
+    E.mount(); await flush();
+    let late = null;
+    if (act) E.once.push([(b) => b.op === 'withdraw', act]);
+    else E.once.push([(b) => b.op === 'withdraw', (r) => { late = r; }]);
+    E.hold = (b) => b.op === 'mine';
+    await E.withdraw('x');
+    if (!act) await E.advance(90500);
+    assert.match(E.text('g5u-wmsg'), want);
+    assert.deepEqual(E.ids(), []); assert.match(E.html(), /更新中/);
+    const q = E.pending('mine');
+    assert.equal(q.length, 1);
+    q[0].release(); await flush();
+    assert.deepEqual(E.ids(), ['x', 'w']);
+    assert.equal(E.ops('withdraw').length, 1);
+    if (late) {
+      const v = E.view();
+      E.db[CA + '|' + PRE.國語][0].status = 'withdrawn';
+      late.reply({ ok: true }); await flush();
+      assert.equal(E.view(), v);
+    }
+  });
+}
+
+test('A14 撤回在途時舊清單抵達＋reload()：撤回鈕全部停用，硬點別題也只有 1 筆撤回 POST', async () => {
+  const E = makeEnv(CA);
+  E.db[CA + '|' + PRE.國語] = [it('x'), it('y')];
+  const h = E.mount(); await flush();
+  E.hold = (b) => b.op === 'mine' || b.op === 'withdraw';
+  h.reload(); await flush();
+  const old = E.pending('mine')[0];
+  await E.withdraw('x');
+  old.release(); await flush();
+  h.reload(); await flush();
+  assert.ok(E.wdBtns().length > 0 && E.wdBtns().every((b) => b.disabled), JSON.stringify(E.wdBtns()));
+  E.wd('y'); E.wd('y'); await flush();
+  assert.equal(E.ops('withdraw').length, 1);
+});
+
+test('A15 撤回後重查失敗：「進度暫時讀不到」，不顯示「還沒有補過題目」', async () => {
+  const E = makeEnv(CA);
+  E.db[CA + '|' + PRE.國語] = [it('x')];
+  E.mount(); await flush();
+  E.once.push([(b) => b.op === 'mine', (r) => r.reply({ ok: false, err: 'server' })]);
+  await E.withdraw('x');
+  assert.match(E.text('g5u-health'), /進度暫時讀不到/);
+  assert.doesNotMatch(E.html(), /還沒有補過題目/);
+  assert.deepEqual(E.ids(), []);
+});
+
+for (const [label, act] of [
+  ['HTTP 500＋ok:true', (r) => r.reply({ ok: true, items: [it('q')] }, 500)],
+  ['非法 JSON', (r) => r.raw('<html>Error</html>')],
+  ['ok:false', (r) => r.reply({ ok: false, err: 'server' })],
+  ['items:null', (r) => r.reply({ ok: true, items: null })]
+]) {
+  test(`A16 mine 回 ${label}：保留原清單、提示讀不到`, async () => {
+    const E = makeEnv(CA);
+    E.db[CA + '|' + PRE.國語] = [it('x'), it('y')];
+    const h = E.mount(); await flush();
+    E.once.push([(b) => b.op === 'mine', act]);
+    h.reload(); await flush();
+    assert.deepEqual(E.ids(), ['x', 'y']);
+    assert.match(E.text('g5u-health'), /讀不到/);
+  });
+}
+
+for (const [label, act] of [['HTTP 500', (r) => r.reply({ ok: true, id: 'z' }, 500)], ['非法 JSON', (r) => r.raw('<html>Error</html>')]]) {
+  test(`A17 upload 回 ${label}：已呼叫 post 就講不確定、不講沒有送出；保留草稿`, async () => {
+    const E = makeEnv(CA);
+    E.mount(); await flush();
+    E.once.push([(b) => b.op === 'upload', act], [(b) => b.op === 'upload', act]);
+    await E.send([1, 2], '草稿');
     const out = E.text('g5u-out');
-    assert.match(out, want, out);
-    assert.doesNotMatch(out, notWant, out);
-  }
-  assert.match(U.switchMessage(0, false), /照片沒有送出/);
-  assert.match(U.switchMessage(2, false), /已確認送出的 2 張不受影響/);
-  assert.match(U.switchMessage(0, true), /還沒收到結果/);
-  assert.doesNotMatch(U.switchMessage(0, true), /已確認送出|已送出/);
-  assert.doesNotMatch(U.switchMessage(1, true), /送出了|取消/);
+    assert.match(out, /不確定有沒有送到/, out);
+    assert.doesNotMatch(out, /沒有送出/, out);
+    assert.equal(E.n()['g5u-note'].value, '草稿');
+  });
+}
+
+test('A18 同容器重掛：舊 handle 的 reload／stop、放行舊縮圖／舊 post／舊撤回 ⇒ 舊實例零請求，新實例畫面、草稿、鎖、提示不變', async () => {
+  const E = makeEnv(CA);
+  E.db[CA + '|' + PRE.國語] = [it('x'), it('y')];
+  const h1 = E.mount('#box', '國語', 'OLD'); await flush();
+  E.hold = (b) => b.op === 'withdraw' || b.op === 'upload';
+  await E.withdraw('x');
+  await E.send([1, 2, 3], '舊草稿');           // 第一張 post 扣住
+  E.hold = () => false;
+  E.mount('#box', '國語', 'NEW'); await flush();
+  E.n()['g5u-note'].value = '新草稿';
+  const v0 = E.view(), oldN = E.reqs.filter((r) => r.url === 'OLD').length;
+  h1.reload(); h1.stop(); h1.reload();
+  E.pending('withdraw').concat(E.pending('upload')).forEach((r) => r.release()); await flush();
+  await E.advance(2100);
+  assert.equal(E.reqs.filter((r) => r.url === 'OLD').length, oldN);
+  assert.equal(E.view(), v0);
 });
 
-test('審 117bbb0③：撤回不論結果（done／not-found／fail／網路失敗）結束都作廢在途舊查詢並重查一次', async () => {
-  for (const end of ['done', 'not-found', 'fail', 'net']) {
-    const E = makeEnv(CA);
-    let fresh = false;
-    E.auto = (b) => {
-      if (b.op !== 'mine') return undefined;
-      if (E.ops('mine').length === 1) return { ok: true, items: [it('x'), it('w')] };
-      return fresh ? { ok: true, items: [it('z'), it('x', end === 'done' ? 'done' : 'new'), it('w')] } : undefined;
-    };
-    const h = E.mount();
-    await flush();
-    h.reload();                            // 撤回前發出的舊查詢（扣住，快照沒有 z）
-    await flush();
-    const old = E.pending('mine')[0];
-    E.wd('x'); E.wd('x');
-    await flush();
-    const w = E.pending('withdraw')[0];
-    fresh = true;
-    const n = E.ops('mine').length;
-    if (end === 'net') w.fail(); else w.reply({ ok: false, err: end === 'fail' ? 'server' : end });
-    await flush();
-    assert.equal(E.ops('mine').length - n, 1, end + '：撤回結束後應重查一次');
-    assert.deepEqual(E.ids(), ['z', 'x', 'w'], end + '：清單照伺服器現況');
-    old.reply({ ok: true, items: [it('x'), it('w')] });
-    await flush();
-    assert.deepEqual(E.ids(), ['z', 'x', 'w'], end + '：舊查詢晚到不採用');
-    if (end === 'done') assert.ok(/做好了/.test(E.card('x')) && !/data-wd="x"/.test(E.card('x')), E.card('x'));
-  }
+test('A19 同頁兩元件：國語撤回，數學閒置 ⇒ 數學零請求、畫面不變', async () => {
+  const E = makeEnv(CA);
+  E.db[CA + '|' + PRE.國語] = [it('x')]; E.db[CA + '|' + PRE.數學] = [it('m1', 'new', '數學')];
+  E.mount('#box1', '國語'); E.mount('#box2', '數學'); await flush();
+  const v2 = E.view('#box2'), n0 = E.reqs.length;
+  await E.withdraw('x', '#box1');
+  await E.advance(2100);
+  assert.equal(E.reqs.slice(n0).filter((r) => r.body.prefix === PRE.數學).length, 0);
+  assert.equal(E.view('#box2'), v2);
+});
+
+test('A20 沒有家庭碼時按送出、重新整理：零請求、提示開啟或加入同步', async () => {
+  const E = makeEnv(null);
+  E.mount(); await flush();
+  await E.send([1], '草稿');
+  E.refreshBtn(); await flush();
+  assert.equal(E.reqs.length, 0);
+  assert.match(E.text('g5u-out'), /開啟或加入同步/);
+  assert.match(E.text('g5u-health'), /開啟或加入同步/);
+});
+
+test('A07 契約：upload.js 聽的事件名＝sync.js 派的事件名（g5sync:codechange，帶 oldValue／newValue）', () => {
+  const sync = fs.readFileSync(path.join(__dirname, '..', 'src', 'sync.js'), 'utf8');
+  assert.equal(U.CODE_EVENT, 'g5sync:codechange');
+  assert.ok(sync.includes("'g5sync:codechange'"));
+  assert.match(sync, /\.oldValue = /); assert.match(sync, /\.newValue = /);
+});
+
+test('上傳被打斷的提示（分派版）：一張都還沒送出去才說「照片沒有送出」；送出去過就說不確定、不提張數、不叫人直接重送', () => {
+  assert.match(U.interruptMessage(0), new RegExp(D0));
+  [1, 3].forEach((d) => {
+    const m = U.interruptMessage(d);
+    assert.ok(!m.includes(D0), m);
+    assert.match(m, /不確定有沒有送到/); assert.match(m, /不要直接重送/);
+    assert.doesNotMatch(m, /\d 張|下面/);
+  });
+});
+
+test('正常送完的訊息：伺服器明確拒絕＝沒有送出；網路／HTTP／解析錯誤＝不確定（不寫成沒有送出）', () => {
+  assert.match(U.sendSummary(2, [true, true]), /2 張都送出了/);
+  const unsure = U.sendSummary(2, [null, null]);
+  assert.match(unsure, /不確定有沒有送到/); assert.doesNotMatch(unsure, /沒有送出|都送出了/);
+  const mix = U.sendSummary(3, [true, false, null]);
+  assert.match(mix, /送出 1 張/); assert.match(mix, /第 2 張沒有送出/); assert.match(mix, /第 3 張不確定有沒有送到/);
+  assert.match(U.sendSummary(2, [false, false]), /沒有送出/);
 });

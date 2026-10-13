@@ -6,27 +6,36 @@
 // 照片只存在家裡自己的試算表，不放公開網頁（著作權法第 51 條家庭非營利重製；公開題庫只放改寫題）。
 // 只有已開啟跨裝置同步的裝置能送（GAS 只收雲端有紀錄的家庭碼）。ES5 寫法（舊 iPad）。tests/upload.test.js、tests/e2e_upload.py
 //
-// 清單、撤回、上傳的生命週期（連 3 輪審查 FAIL 後，依 Codex 設計者結論 docs/upload-list-lifecycle-codex-designer-20261013.md (d) 重做）：
-// - 每個元件同時只有一筆有效的清單查詢；同家庭、同世代再要求刷新（手動或每分鐘自動）就合併等它，不另發。
-// - 換家庭、撤回結束（不論結果）、上傳成功 ⇒ 舊查詢失效（先釋放自己的 slot，再 abort）。回應要同時對得上 owner、家庭版本、查詢世代、期限才採用。
-// - 家庭版本靠單調的家庭世代：同步碼每被改一次就換世代（A→B→A 也是新世代），同頁寫入在 localStorage 寫入端攔、別頁看 storage 事件新舊值（審 117bbb0）。
-// - 撤回、上傳各帶自己的操作身分；換家庭、stop、同容器重掛都讓它們失去資格。舊操作只能結束自己，不碰別人的鎖、草稿、訊息。
-// - familyCheck() 只讀家庭碼、作廢狀態，不發請求；要不要查由 refresh() 這個唯一入口決定。每個操作入口與回應入口都先重讀家庭碼。
-// - AbortController 只是省資源：abort 沒效果時，上面的規則照樣成立。
+// 清單、撤回、上傳的生命週期：4agent 最終方案「(d)-縮」（~/scripts/state/fouragent_20261013_upload/4A_upload_report.md）。
+// 原則：沒有任何跨元件、跨請求的共用狀態；前端不假裝知道它無從得知的事；撤回由伺服器說了算。
+// - 家庭身分＝家庭碼字串。偵測來源三個，每個元件各自比對新值、不累加共用計數：
+//   (a) src/sync.js 寫入／刪除同步碼後在 window 派的 g5sync:codechange（帶 oldValue／newValue）；
+//   (b) 別頁的 storage 事件；(c) 每 2 秒輪詢（只比字串，補救沒有事件的寫入）。
+//   事件帶的新值與本元件目前的家庭碼不同就作廢一切 ⇒ 有事件的 A→B→A 在 B 那一下就作廢。
+//   不變量（A06）：沒有任何事件、也沒被輪詢看到的 A→B→A（例如開發者工具直接改 localStorage）視為同一家庭——
+//   之後送出與顯示的都是 A 的資料，不會送錯家、也不會顯示錯家。
+// - 清單查詢：每個元件同時只有一筆在途；再要求就合併等它，逾 90 秒期限就釋放。採用回應要四項同時成立：
+//   元件仍有效（live）、仍是目前那一筆（ACTIVE === q 且未結束）、發出時的家庭碼＝現在的家庭碼、未逾期限。
+// - 撤回：在途時全部撤回鈕停用；結束時不論結果（成功、done、not-found、失敗、網路、逾時）都作廢在途查詢、
+//   清單清空顯示「更新中…」、照伺服器現況重查一次；不自動重送撤回（後端撤回冪等，家長可自己再按）。
+// - 清單只在這些時候查：掛載、「重新整理」鈕、reload()、上傳結束、撤回結束、換家庭後（沒有自動定時重查）。
+// - 上傳：記「已呼叫 post 的張數」（post 前就加）。被換家庭／停止同步打斷時，一張都還沒送出去才說「照片沒有送出」，
+//   否則說「不確定有沒有送到」。網路、HTTP、解析錯誤一律算沒確認，不寫成沒送出。
+// - 撤回、上傳各帶自己的操作身分；換家庭、stop、同容器重掛都讓它們失去資格。AbortController 只是省資源，正確性不靠它。
 (function (root) {
   "use strict";
   var EP = "https://script.google.com/macros/s/AKfycbxwo08VVT5tSRf-DsQEoo1hMlCm1YytGTzj89BPtJ6YWjPieuKyAPbnWXjUKagBdL6l/exec";
   var SUBJECTS = ["國語", "數學", "自然", "社會"];
   var MAX_NOTE = 500;          // cap-why: gas/inbox.js MAX_NOTE（超過 GAS 回 bad-note）
   var MAX_IMG = 850000;        // cap-why: gas/inbox.js MAX_IMAGE 880000，留 3 萬餘裕（同難題站 shrink 門檻）
-  var DEADLINE_MS = 90000;     // cap-why: 清單查詢與撤回的期限，Codex 設計者 2026-10-13 設計值（未實測 GAS 延遲）：高於審查反例的 65 秒慢回應，也容許一筆查詢跨過一次 60 秒自動重查；涵蓋 fetch、本文與解析，過了就當這次沒有結果
-  var REFRESH_MS = 60000;      // cap-why: 每分鐘自動重查進度（電腦取題不會比這更密；查詢在途時合併、不疊發）
-  var FAMILY_MS = 2000;        // cap-why: 同一頁 G5Sync.stop() 不發 storage 事件，只能輪詢補救；只讀 localStorage 一個 key，成本可忽略；換家庭後清單要在幾秒內清空
+  var DEADLINE_MS = 90000;     // cap-why: 清單查詢與撤回的期限，Codex 設計者 2026-10-13 設計值（未實測 GAS 延遲）：高於審查反例的 65 秒慢回應；涵蓋 fetch、本文與解析，過了就當這次沒有結果
+  var FAMILY_MS = 2000;        // cap-why: 沒有事件的同步碼寫入（例如舊版 sync.js、直接改 localStorage）只能輪詢補救；只讀 localStorage 一個 key、不發請求，成本可忽略；停止同步後清單要在幾秒內清空
   var ARM_MS = 5000;           // cap-why: 撤回兩段式的確認窗（同難題站）：5 秒內沒按「確定撤回？」就收回
   var CODE_KEY = "g5sync.code";
+  var CODE_EVENT = "g5sync:codechange";   // src/sync.js 寫入／刪除同步碼後派的事件（event.oldValue／event.newValue）
   var OWNER = "__g5upload";    // 容器上記著目前擁有它的元件；同容器重掛時先終結前一個
   var UNIT_RE = /^[\w-]{1,30}$/;
-  var NO_SYNC = "這台裝置還沒開啟跨裝置同步，所以還不能補題、也看不到進度。";
+  var NO_SYNC = "這台裝置還沒開啟跨裝置同步，所以還不能補題、也看不到進度；請先在本頁「跨裝置同步」開啟或加入同步。";
 
   function esc(s) { return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
   function prefix(subject, unit) {
@@ -64,12 +73,23 @@
     var re = new RegExp("^https://windsorya\\.github\\.io/" + site.replace(/[^\w-]/g, "") + "/#c/[\\w-]+$");
     return typeof url === "string" && re.test(url) ? url : "";
   }
+  // 正常送完（沒被打斷）的訊息。oks 每張一格：true＝伺服器回 ok:true；false＝沒送出（伺服器明確拒絕、或縮圖就失敗）；
+  // null＝已送出去但沒收到明確回覆（網路、HTTP、解析錯誤）——不確定有沒有送到，不能寫成沒送出
   function sendSummary(n, oks) {
-    var good = oks.filter(Boolean).length, bad = [];
-    oks.forEach(function (ok, i) { if (!ok) bad.push(i + 1); });
-    if (!bad.length) return n > 1 ? n + " 張都送出了！" : "送出了！";
-    if (!good) return "沒有送出，請稍後再試（照片還在，直接再按一次送出）。";
-    return "送出 " + good + " 張；第 " + bad.join("、") + " 張沒有送出，請只選那幾張再送一次。";
+    var good = 0, bad = [], unsure = [];
+    oks.forEach(function (r, i) { if (r === true) good += 1; else if (r === false) bad.push(i + 1); else unsure.push(i + 1); });
+    if (good === n && !bad.length && !unsure.length) return n > 1 ? n + " 張都送出了！" : "送出了！";
+    if (!unsure.length) {
+      if (!good) return "沒有送出，請稍後再試（照片還在，直接再按一次送出）。";
+      return "送出 " + good + " 張；第 " + bad.join("、") + " 張沒有送出，請只選那幾張再送一次。";
+    }
+    return (good ? "送出 " + good + " 張；" : "") + (bad.length ? "第 " + bad.join("、") + " 張沒有送出；" : "") +
+      "第 " + unsure.join("、") + " 張不確定有沒有送到（沒收到伺服器的明確回覆）。請先按「重新整理」看清單，確認後再補送，不要直接重送。";
+  }
+  // 上傳途中被換家庭或停止同步打斷：只看「已呼叫 post 的張數」，不提張數、不指向「下面清單」（換家後下面是別家的）
+  function interruptMessage(dispatched) {
+    if (!dispatched) return "同步設定改了，照片沒有送出；確認後再按一次送出。";
+    return "同步設定改了，後面的照片沒有送出；已經送出去的照片不確定有沒有送到。請切回原來的家庭，看清單確認後再補送，不要直接重送。";
   }
   function hhmm(t) { var d = new Date(t + 8 * 3600000); return (d.getUTCMonth() + 1) + "/" + d.getUTCDate() + " " + ("0" + d.getUTCHours()).slice(-2) + ":" + ("0" + d.getUTCMinutes()).slice(-2); }
   function isArray(x) { return Object.prototype.toString.call(x) === "[object Array]"; }
@@ -99,10 +119,6 @@
     // net／timeout／unknown：請求可能已經到了伺服器，不能說撤回了，也不能說沒撤回；不自動重送
     return "撤回結果還沒確認（可能沒有網路）。清單重新整理後，這題如果還在，可以再撤回一次。";
   }
-  // 已確認撤回的題目：之後任何清單回應都濾掉（撤回前發出的查詢晚到、伺服器慢一步，都不讓它回來）
-  function dropWithdrawn(items, gone) {
-    return (items || []).filter(function (it) { return !(it && (gone || []).indexOf(cleanId(it.id)) >= 0); });
-  }
 
   function shrink(file) {
     return new Promise(function (ok, no) {
@@ -130,37 +146,6 @@
   }
   function myCode() { var c = null; try { c = localStorage.getItem(CODE_KEY); } catch (e) {} return familyOf(c); }
 
-  // 家庭世代（Codex 審 117bbb0①）：同步碼每被改一次就 +1，換回原碼（A→B→A）也是新世代；元件與在途操作只認自己看到的世代。
-  // 2 秒輪詢只讀得到「現在的碼」，兩次輪詢之間的 A→B→A 看不出來（設計者 (c)）。所以在寫入端攔：
-  // 同一頁的寫入（sync.js 走 localStorage.setItem／removeItem）包一層，值真的變了才 +1；別的分頁的寫入看 storage 事件的新舊值。
-  // 包裝只多讀一次舊值、不改寫入行為（寫入丟錯照樣丟出）；sessionStorage 等其他 Storage 不受影響。
-  var CODE_GEN = 0, WATCHED = false;
-  function bumpGen() { CODE_GEN += 1; }
-  function peekCode(s) { try { return s.getItem(CODE_KEY); } catch (e) { return null; } }
-  function watchCode(store, onChange) {
-    if (!store) return false;
-    var host = typeof Storage === "function" && store instanceof Storage ? Storage.prototype : store, hooked = false;
-    ["setItem", "removeItem", "clear"].forEach(function (name) {
-      var orig = host[name];
-      if (typeof orig !== "function") return;
-      host[name] = function () {
-        var mine = this === store, before = mine ? peekCode(this) : null;
-        try { return orig.apply(this, arguments); } finally { if (mine && peekCode(this) !== before) onChange(); }
-      };
-      hooked = true;
-    });
-    return hooked;
-  }
-  // storage 事件：同步碼的新舊值不同（含別的分頁 A→B、B→A 各一次），或整個 localStorage 被清掉（key 為 null）
-  function codeEventChanged(e) { return !!e && (e.key === null || (e.key === CODE_KEY && e.oldValue !== e.newValue)); }
-  // 上傳途中換家庭的提示：只算伺服器回 ok 的張數（審 117bbb0②）；送出去還沒回來的那張，不說送到、也不說沒送到
-  function switchMessage(ok, unsure) {
-    var head = "同步設定改了（停止同步或換了家庭），";
-    if (!ok && !unsure) return head + "照片沒有送出；確認後再按一次送出。";
-    return head + "後面的照片沒有送出" + (ok ? "；已確認送出的 " + ok + " 張不受影響" : "") +
-      (unsure ? "；正在送的那張還沒收到結果，不確定有沒有送到" : "") + "。";
-  }
-
   var CSS = ".g5u{display:grid;gap:10px}.g5u label{display:grid;gap:4px;font-weight:600}" +
     ".g5u select,.g5u textarea,.g5u input[type=file]{font-size:16px;min-height:44px;padding:6px 10px;border:2px solid #cbd5e1;border-radius:12px;background:inherit;color:inherit}" +
     ".g5u textarea{min-height:72px}.g5u .g5u-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}" +
@@ -186,7 +171,8 @@
       '<label>照片（可以一次選好幾張）<input type="file" class="g5u-file" accept="image/*" multiple></label>' +
       '<label>想練什麼（可不填）<textarea class="g5u-note" maxlength="400" placeholder="例：第 3 課的生字和注音；習作第 12 頁第 2 大題"></textarea></label>' +
       '<div class="g5u-row"><button type="button" class="g5u-send">送出</button><span class="g5u-msg g5u-out" aria-live="polite"></span></div>' +
-      '<div class="g5u-list"><b>你補的題目</b><span class="g5u-meta g5u-health"></span><span class="g5u-msg g5u-wmsg" aria-live="polite"></span><div class="g5u-items"></div></div></div>';
+      '<div class="g5u-list"><div class="g5u-row"><b>你補的題目</b><button type="button" class="g5u-ghost g5u-refresh">重新整理</button></div>' +
+      '<span class="g5u-meta g5u-health"></span><span class="g5u-msg g5u-wmsg" aria-live="polite"></span><div class="g5u-items"></div></div></div>';
     var el = box.firstChild;   // 只從自己的根節點找元素：重掛後，舊元件的閉包碰不到新元件的節點
     var $ = function (c) { return el.querySelector(c); };
     var alive = true, handle = { reload: reload, stop: stop };
@@ -195,55 +181,66 @@
     function msg(node, t, bad) { node.textContent = t; node.classList.toggle("g5u-bad", !!bad); node.classList.toggle("g5u-good", !bad && !!t); }
     function health(t) { $(".g5u-health").textContent = t; }
 
-    if (!WATCHED) { WATCHED = true; try { watchCode(localStorage, bumpGen); } catch (e) {} }
-    var FAMILY = myCode(), SEEN = CODE_GEN, FREV = 0;   // 目前的家庭碼、看過的家庭世代、元件自己的家庭版本（每認出一次換家庭就 +1）
-    var GEN = 0, ACTIVE = null;        // 查詢世代、目前唯一有效的在途查詢
-    var LAST = null, GONE = [];        // 最後一份有效清單、本家庭已確認撤回的題目 id
+    var FAMILY = myCode();             // 本元件目前的家庭碼（家庭身分＝這個字串）
+    var ACTIVE = null;                 // 目前唯一有效的在途清單查詢
+    var LAST = null, UPDATING = false; // 最後一份有效清單；撤回後清單作廢、等重查時顯示「更新中…」
     var ARMED = null, WD_OP = null, UP_OP = null;   // 撤回確認、撤回中、上傳中：各是一個操作身分
 
     function endOp(op) { op.done = true; if (op.timer) { clearTimeout(op.timer); op.timer = null; } }
     function abortQ(q) { if (q.ctl) { try { q.ctl.abort(); } catch (e) {} } }
     function disarm() { if (ARMED) { clearTimeout(ARMED.timer); ARMED = null; } }
-    // 舊查詢失效：世代 +1，先釋放自己的 slot，再 abort（abort 沒效果也不影響正確性）
+    // 舊查詢失效：把目前那一筆標成結束、釋放 slot，再 abort（abort 沒效果也不影響正確性）
     function dropQuery() {
-      GEN += 1;
       var q = ACTIVE;
       ACTIVE = null;
       if (q) { endOp(q); abortQ(q); }
     }
     function lock(on) { [".g5u-send", ".g5u-file", ".g5u-note", ".g5u-unit"].forEach(function (c) { $(c).disabled = on; }); }
 
-    // 家庭碼變了（同一頁停止同步、換家庭、別的分頁改了）：清單清空、在途查詢／撤回確認／撤回／上傳全部作廢，舊操作的鎖由這裡解開。
-    // 只讀、只作廢，不發請求（要不要查由 refresh() 決定）。回傳是否換了家庭。
-    function familyCheck() {
-      if (!live()) return false;
-      var c = myCode();
-      if (c === FAMILY && SEEN === CODE_GEN) return false;   // 碼一樣、而且中間沒被改過（A→B→A 世代已變，照樣算換家庭）
-      FAMILY = c; SEEN = CODE_GEN; FREV += 1;
-      dropQuery(); LAST = null; GONE = [];
+    // 換家庭（含停止同步）：在途查詢／撤回確認／撤回／上傳全部作廢、清單清空，舊操作的鎖由這裡解開。不發請求（由呼叫端 refresh）。
+    function switchFamily() {
+      FAMILY = myCode();
+      dropQuery(); LAST = null; UPDATING = false;
       disarm();
       if (WD_OP) { endOp(WD_OP); WD_OP = null; msg($(".g5u-wmsg"), ""); }
       if (UP_OP) {
         var u = UP_OP;
         UP_OP = null; endOp(u); lock(false);
-        msg($(".g5u-out"), switchMessage(u.ok, u.unsure), true);
+        msg($(".g5u-out"), interruptMessage(u.dispatched), true);
       }
       health(FAMILY ? "" : NO_SYNC);
       render();
+    }
+    // 來源 (c) 與每個操作／回應入口：重讀家庭碼，只比字串。回傳是否換了家庭。
+    function familyCheck() {
+      if (!live() || myCode() === FAMILY) return false;
+      switchFamily();
       return true;
     }
+    // 來源 (a)(b)：事件帶的新值與本元件目前的家庭碼不同就作廢（A→B→A 在 B 那一下作廢）；之後一律以現在讀到的碼為準
+    function onFamilyEvent(newValue) {
+      if (!live()) return;
+      if (familyOf(newValue) === FAMILY && myCode() === FAMILY) return;
+      switchFamily();
+      refresh();
+    }
+    function onCodeChange(e) { onFamilyEvent(e && typeof e.newValue !== "undefined" ? e.newValue : myCode()); }
+    function onStorage(e) {
+      if (e && e.key === CODE_KEY) { onFamilyEvent(e.newValue); return; }
+      if (!e || e.key === null || typeof e.key === "undefined") { if (familyCheck()) refresh(); }   // 整個清掉或不明事件：照輪詢比
+    }
 
-    // 唯一的清單查詢入口：手動 reload()、每分鐘自動、換家庭／撤回／上傳之後都走這裡
+    // 唯一的清單查詢入口：掛載、重新整理鈕、reload()、上傳結束、撤回結束、換家庭後都走這裡
     function refresh() {
       if (!live()) return;
       familyCheck();
       if (!FAMILY) { health(NO_SYNC); return; }
       if (ACTIVE) {
-        if (Date.now() < ACTIVE.deadline) return;   // 同家庭、同世代已有查詢在途：合併等它，不另發
+        if (Date.now() < ACTIVE.deadline) return;   // 已有查詢在途：合併等它，不另發
         endQuery(ACTIVE, "timeout");                // 期限已過、計時器卻被延後（背景分頁、睡眠）：照期限釋放
         if (!live() || ACTIVE) return;
       }
-      var q = { family: FAMILY, frev: FREV, gen: GEN, deadline: Date.now() + DEADLINE_MS, done: false, ctl: null, timer: null };
+      var q = { family: FAMILY, deadline: Date.now() + DEADLINE_MS, done: false, ctl: null, timer: null };
       if (typeof AbortController === "function") { try { q.ctl = new AbortController(); } catch (e) { q.ctl = null; } }
       ACTIVE = q;
       q.timer = setTimeout(function () { endQuery(q, "timeout"); }, DEADLINE_MS);
@@ -253,19 +250,22 @@
         endQuery(q, items ? "ok" : "bad", items);
       }, function (e) { endQuery(q, e && e.net ? "net" : "bad"); });
     }
-    // 每筆查詢都從這裡結束（成功、回應不對、網路失敗、逾時、遲到）。要同時對得上 owner、家庭版本、世代、期限才採用。
+    // 每筆查詢都從這裡結束（成功、回應不對、網路失敗、逾時、遲到）
     function endQuery(q, outcome, items) {
       if (q.done) return;
-      if (familyCheck()) { refresh(); return; }   // 回應入口重讀家庭碼：換了家庭，這筆已在 familyCheck 裡作廢
+      if (familyCheck()) { refresh(); return; }   // 回應入口重讀家庭碼：換了家庭，這筆已在 switchFamily 裡作廢
       if (q.done) return;
       if (Date.now() >= q.deadline) outcome = "timeout";   // 過了期限才到：不採用
       var mine = ACTIVE === q;
       endOp(q);
       if (mine) ACTIVE = null;                     // 只清自己的 slot
       if (outcome === "timeout") abortQ(q);        // 先邏輯結束，再 abort
-      if (!live() || !mine || q.frev !== FREV || q.gen !== GEN) return;
-      if (outcome === "ok") { LAST = { items: dropWithdrawn(items, GONE) }; health(""); render(); return; }
-      health(outcome === "net" ? "進度暫時讀不到（可能沒有網路），稍後再看。" : "進度暫時讀不到，稍後再看。");
+      // 採用四條件：元件仍有效、仍是目前那一筆、發出時的家庭碼＝現在的家庭碼、未逾期限（上一行已把逾期改成 timeout）
+      if (!live() || !mine || q.family !== myCode()) return;
+      UPDATING = false;
+      if (outcome === "ok") { LAST = { items: items }; health(""); render(); return; }
+      health(outcome === "net" ? "進度暫時讀不到（可能沒有網路），稍後再按「重新整理」。" : "進度暫時讀不到，稍後再按「重新整理」。");
+      render();
     }
 
     // 撤回鈕（兩段式）：第一下只變「確定撤回？」，5 秒內第二下才送
@@ -273,21 +273,21 @@
       if (!live()) return;
       if (familyCheck()) { refresh(); return; }   // 換了家庭：舊清單、舊確認都已作廢，這一下不算數（不拿新碼撤舊家的題）
       if (WD_OP || !FAMILY) return;              // 撤回中：其他按鈕就算被點到也不送（不只靠 disabled）
-      if (ARMED && ARMED.id === id && ARMED.frev === FREV) { sendWithdraw(id); return; }
+      if (ARMED && ARMED.id === id && ARMED.family === FAMILY) { sendWithdraw(id); return; }
       disarm();
-      var a = { id: id, frev: FREV, timer: null };
+      var a = { id: id, family: FAMILY, timer: null };
       a.timer = setTimeout(function () { if (ARMED === a) { ARMED = null; render(); } }, ARM_MS);
       ARMED = a; render();
     }
     function sendWithdraw(id) {
       disarm();
-      var op = { id: id, family: FAMILY, frev: FREV, deadline: Date.now() + DEADLINE_MS, done: false, timer: null };
+      var op = { id: id, family: FAMILY, deadline: Date.now() + DEADLINE_MS, done: false, timer: null };
       WD_OP = op;
       msg($(".g5u-wmsg"), "撤回中…"); render();
       op.timer = setTimeout(function () { endWithdraw(op, "timeout"); }, DEADLINE_MS);
       post(ep, { op: "withdraw", code: op.family, id: id }).then(function (r) { endWithdraw(op, withdrawOutcome(r)); }, function () { endWithdraw(op, "net"); });
     }
-    // 撤回結束：只認自己這筆（操作身分＋家庭版本＋期限）。舊的、過期的、別家的回應不碰畫面，也不解開別人的鎖。
+    // 撤回結束：只認自己這筆（操作身分＋家庭碼＋期限）。舊的、過期的、別家的回應不碰畫面，也不解開別人的鎖。
     function endWithdraw(op, outcome) {
       if (op.done) return;
       if (familyCheck()) { refresh(); return; }
@@ -296,19 +296,19 @@
       var mine = WD_OP === op;
       endOp(op);
       if (mine) WD_OP = null;
-      if (!live() || !mine || op.frev !== FREV) return;
-      if (outcome === "ok") GONE.push(op.id);   // 本機立刻移除，之後任何回應都濾掉
-      dropQuery();          // 撤回不論結果（成功、done、not-found、失敗、還沒確認）：撤回前發出的查詢都失效（審 117bbb0③）
+      if (!live() || !mine || op.family !== myCode()) return;
+      // 不論結果：在途查詢作廢、清單作廢顯示「更新中…」、照伺服器現況重查一次（伺服器說了算）；不重送撤回
+      dropQuery(); LAST = null; UPDATING = true;
       msg($(".g5u-wmsg"), withdrawMessage(outcome), outcome !== "ok");
       render();
-      refresh();            // 照伺服器現況重查一次（新世代，不與舊查詢合併）；不重送撤回
+      refresh();
     }
 
     function render() {
       if (!live()) return;
       var list = $(".g5u-items");
-      if (!LAST) { list.innerHTML = ""; return; }
-      var items = dropWithdrawn(mineFor(LAST.items, cfg.subject), GONE), off = WD_OP ? " disabled" : "";
+      if (!LAST) { list.innerHTML = UPDATING && FAMILY ? '<span class="g5u-meta g5u-updating">更新中…</span>' : ""; return; }
+      var items = mineFor(LAST.items, cfg.subject), off = WD_OP ? " disabled" : "";
       list.innerHTML = items.length ? items.map(function (it) {
         var p = parseNote(it.note), id = cleanId(it.id), url = it.status === "done" ? safeDoneUrl(it.url, cfg.site) : "";
         var st = it.status === "done" ? (url ? '<a href="' + url + '">做好了，點這裡練習</a>' : "做好了") : it.status === "fetched" ? "電腦收到了，題目製作中" : "已送出，等電腦取回";
@@ -326,6 +326,7 @@
       });
     }
 
+    $(".g5u-refresh").onclick = function () { if (live()) reload(); };
     $(".g5u-send").onclick = function () {
       if (!live() || UP_OP) return;
       var out = $(".g5u-out");
@@ -336,9 +337,9 @@
       if (!FAMILY) return msg(out, "請先在本頁「跨裝置同步」開啟或加入同步，這台裝置才能補題。", true);
       var files = Array.prototype.slice.call($(".g5u-file").files || []);
       if (!files.length) return msg(out, "請先選照片。", true);
-      var unit = $(".g5u-unit").value, text = $(".g5u-note").value, oks = [], SKIP = {};
-      // ok：伺服器回 ok 的張數（已確認送出）；unsure：有一張已送出去、還沒收到回應（換家庭的提示只用這兩個，不用嘗試數）
-      var op = { family: FAMILY, frev: FREV, done: false, ok: 0, unsure: false, noFamily: false, timer: null };
+      var unit = $(".g5u-unit").value, text = $(".g5u-note").value, oks = [];
+      // dispatched：已經呼叫 post 的張數（post 前就加）；被打斷時只看它決定提示，不假裝知道哪幾張送到了
+      var op = { family: FAMILY, done: false, dispatched: 0, noFamily: false, timer: null };
       UP_OP = op;
       // 送出途中照片、說明、單元、送出鈕都鎖住：途中改的內容不會在送完時被清掉（Codex 審 8601526）
       lock(true);
@@ -346,35 +347,32 @@
       function still() {
         if (op.done) return false;
         if (familyCheck()) refresh();
-        return live() && !op.done && UP_OP === op && op.frev === FREV;
+        return live() && !op.done && UP_OP === op && op.family === FAMILY;
       }
-      // 一張一張送（每張一次 op:"upload"）；前一張失敗不擋後面的，最後講清楚哪幾張沒送到
+      // 一張一張送（每張一次 op:"upload"）；前一張失敗不擋後面的，最後講清楚哪幾張沒送到、哪幾張不確定
       var chain = Promise.resolve();
       files.forEach(function (f, i) {
         chain = chain.then(function () {
           if (!still()) return;
           msg(out, "送出第 " + (i + 1) + "/" + files.length + " 張…");
           return shrink(f).then(function (img) {
-            if (!still()) return SKIP;
-            op.unsure = true;
-            return post(ep, { op: "upload", code: op.family, subject: cfg.subject, note: makeNote(cfg.subject, unit, text, i + 1, files.length), image: img });
-          }).then(function (r) {
-            if (r === SKIP) return;
-            op.unsure = false;
-            if (r && r.ok === true) op.ok += 1;   // 先記確認數，再核對身分：這張若剛好碰上換家庭，提示也算得到它
             if (!still()) return;
-            oks.push(!!(r && r.ok === true));
-            if (r && r.err === "no-family") op.noFamily = true;
-          }, function () { op.unsure = false; if (still()) oks.push(false); });
+            op.dispatched += 1;
+            return post(ep, { op: "upload", code: op.family, subject: cfg.subject, note: makeNote(cfg.subject, unit, text, i + 1, files.length), image: img }).then(function (r) {
+              if (!still()) return;
+              oks.push(r.ok === true ? true : r.ok === false ? false : null);
+              if (r.err === "no-family") op.noFamily = true;
+            }, function () { if (still()) oks.push(null); });   // 網路、HTTP、解析錯誤：沒確認，不算沒送出
+          }, function () { if (still()) oks.push(false); });    // 縮圖失敗：這張沒送出去
         });
       });
       chain.then(function () {
         if (!still()) return;   // 已被換家庭、stop、重掛終結：不解別人的鎖、不清草稿、不改訊息
         endOp(op); UP_OP = null; lock(false);
-        var all = oks.every(Boolean);
+        var all = oks.length === files.length && oks.every(function (x) { return x === true; });
         msg(out, op.noFamily ? "這台裝置的同步碼在雲端找不到紀錄：請先在「跨裝置同步」按一次同步再送。" : sendSummary(files.length, oks), !all);
         if (all) { $(".g5u-file").value = ""; $(".g5u-note").value = ""; }
-        if (oks.some(Boolean)) dropQuery();   // 上傳成功：舊查詢失效，重查才看得到新題
+        if (op.dispatched) dropQuery();   // 送過照片：送出前發的查詢看不到新題，作廢重查
         refresh();
       });
     };
@@ -385,27 +383,23 @@
       if (ACTIVE && now >= ACTIVE.deadline) endQuery(ACTIVE, "timeout");
       if (WD_OP && now >= WD_OP.deadline) endWithdraw(WD_OP, "timeout");
     }
-    // 別的分頁改了同步碼：用事件的新舊值換世代（本頁讀到的碼可能前後一樣，例如那邊 A→B→A）
-    function onStorage(e) { if (codeEventChanged(e)) bumpGen(); if (!e || !e.key || e.key === CODE_KEY) { if (familyCheck()) refresh(); } }
     // 回到前景（切回分頁、從上一頁回來）：計時器可能被延後，先照期限收掉過期的，再看家庭碼
     function onShow() { if (!live() || document.visibilityState === "hidden") return; checkDeadlines(); if (familyCheck()) refresh(); }
     var familyTimer = setInterval(function () { if (familyCheck()) refresh(); }, FAMILY_MS);
-    var refreshTimer = setInterval(function () {
-      if (!live() || document.visibilityState === "hidden" || ARMED || WD_OP) return;   // 撤回確認中、撤回中不自動重畫
-      refresh();
-    }, REFRESH_MS);
+    window.addEventListener(CODE_EVENT, onCodeChange);
     window.addEventListener("storage", onStorage);
     document.addEventListener("visibilitychange", onShow);
     window.addEventListener("pageshow", onShow);
 
-    // 重抓：與在途查詢合併（reload 定位為「打開時重抓」，不另開同世代的第二筆）；參數 auto 保留相容，行為相同
+    // 重抓：與在途查詢合併（reload 定位為「打開時重抓」，不另開第二筆）；參數 auto 保留相容，行為相同
     function reload() { if (!live()) return; checkDeadlines(); refresh(); }
     // 終結這個元件：計時器、監聽、在途查詢、撤回、上傳、撤回確認全部失去資格；可重複呼叫
     function stop() {
       if (!alive) return;
       alive = false;
       if (box[OWNER] === handle) box[OWNER] = null;
-      clearInterval(familyTimer); clearInterval(refreshTimer);
+      clearInterval(familyTimer);
+      window.removeEventListener(CODE_EVENT, onCodeChange);
       window.removeEventListener("storage", onStorage);
       document.removeEventListener("visibilitychange", onShow);
       window.removeEventListener("pageshow", onShow);
@@ -421,7 +415,7 @@
   }
 
   var api = { mount: mount, minePrefix: minePrefix, makeNote: makeNote, parseNote: parseNote, mineFor: mineFor, unitName: unitName, safeDoneUrl: safeDoneUrl, sendSummary: sendSummary, esc: esc, SUBJECTS: SUBJECTS,
-    familyOf: familyOf, parseReply: parseReply, mineItems: mineItems, withdrawOutcome: withdrawOutcome, withdrawMessage: withdrawMessage, dropWithdrawn: dropWithdrawn, DEADLINE_MS: DEADLINE_MS,
-    watchCode: watchCode, codeEventChanged: codeEventChanged, switchMessage: switchMessage };
+    familyOf: familyOf, parseReply: parseReply, mineItems: mineItems, withdrawOutcome: withdrawOutcome, withdrawMessage: withdrawMessage, interruptMessage: interruptMessage,
+    DEADLINE_MS: DEADLINE_MS, CODE_EVENT: CODE_EVENT };
   if (typeof module !== "undefined" && module.exports) module.exports = api; else root.G5Upload = api;
 })(typeof window !== "undefined" ? window : this);

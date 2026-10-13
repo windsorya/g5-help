@@ -558,6 +558,42 @@ test('S40 有 accept 的頁面：雲端是別台裝置的內容（不是自己�
   assert.equal(b2.storage.getItem(KEY), data(60), '這台的也不能被蓋掉');
 });
 
+// 補題區（upload.js）靠這個事件認出同一頁換家庭（4agent 最終方案 (d)-縮 1a，報告 ~/scripts/state/fouragent_20261013_upload/4A_upload_report.md）
+function capture(d, mode) {
+  const got = [];
+  d.doc.createEvent = kind => { if (mode === 'createEvent') throw new Error('boom'); return {kind, initEvent(type, bubbles, cancelable) { Object.assign(this, {type, bubbles, cancelable}); }}; };
+  d.window.dispatchEvent = ev => { if (mode === 'dispatch') throw new Error('boom'); got.push({type: ev.type, oldValue: ev.oldValue, newValue: ev.newValue}); return true; };
+  return got;
+}
+test('S43 寫入或刪除同步碼後，在 window 派 g5sync:codechange（帶新舊值）；加入、建立、停止都派', async t => {
+  const clock = new Clock(), backend = server(clock);
+  const d = device(backend); t.after(() => d.api.destroy()); await d.api.ready;
+  const got = capture(d);
+  await d.api.join(CODE);
+  assert.deepEqual(got, [{type: 'g5sync:codechange', oldValue: null, newValue: CODE}]);
+  assert.equal(d.api.stop(), true);
+  assert.deepEqual(got[1], {type: 'g5sync:codechange', oldValue: CODE, newValue: null});
+  await d.api.enable();
+  const code = d.storage.getItem('g5sync.code');
+  assert.match(code, /^[A-Z2-9]{12}$/);
+  assert.deepEqual(got[2], {type: 'g5sync:codechange', oldValue: null, newValue: code});
+  assert.equal(got.length, 3);
+});
+
+test('A21 派事件丟錯（dispatchEvent／createEvent 會 throw）：同步碼照樣寫入、刪除，流程不變', async t => {
+  for (const mode of ['dispatch', 'createEvent']) {
+    const clock = new Clock(), backend = server(clock);
+    const d = device(backend); t.after(() => d.api.destroy()); await d.api.ready;
+    capture(d, mode);
+    await d.api.join(CODE);
+    assert.equal(d.storage.getItem('g5sync.code'), CODE, mode);
+    assert.equal(d.api.getState().code, CODE, mode);
+    assert.equal(d.api.stop(), true, mode);
+    assert.equal(d.storage.getItem('g5sync.code'), null, mode);
+    assert.match(d.api.getState().status, /停止同步/, mode);
+  }
+});
+
 test('S42 錯題複習站的 key（g5wrong.v1）可以初始化（2026-10-13 律師交辦錯題複習）', async () => {
   const doc = new Document(), storage = new Storage();
   const api = G5Sync.init({container: doc.container, storage, fetch: async () => { throw Error('must not fetch'); }, endpoint: 'unused', keys: ['g5wrong.v1']});

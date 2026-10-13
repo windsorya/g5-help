@@ -70,7 +70,7 @@ INSTRUMENT = r"""(function () {
     };
   });
   // 只數頁面生命週期／跨分頁類的監聽：Playwright 點擊前的可點性檢查會在 window 掛 mouse／pointer／touch 監聽，那不是元件的
-  var KINDS = ["storage", "visibilitychange", "pageshow", "pagehide", "online", "offline", "focus", "blur", "hashchange", "popstate", "message", "resize"];
+  var KINDS = ["g5sync:codechange", "storage", "visibilitychange", "pageshow", "pagehide", "online", "offline", "focus", "blur", "hashchange", "popstate", "message", "resize"];
   window.__count = function () {
     return { timers: Object.keys(timers).sort(),
              listeners: ls.filter(function (x) { return KINDS.indexOf(x[1]) >= 0; }).map(function (x) { return x[0] + ":" + x[1]; }) };
@@ -340,6 +340,17 @@ class Row:
         else:
             self.pg.evaluate("(c) => localStorage.setItem('g5sync.code', c)", code)
 
+    def flip(self, *codes, event=True):
+        """依序寫入同步碼（None＝刪除），同一次執行、不推進時鐘；event=True 時每次寫入後照 src/sync.js 的方式在 window 派 g5sync:codechange。"""
+        self.pg.evaluate("""([codes, ev]) => { for (const c of codes) {
+            const o = localStorage.getItem('g5sync.code');
+            if (c === null) localStorage.removeItem('g5sync.code'); else localStorage.setItem('g5sync.code', c);
+            if (ev) { const e = document.createEvent('Event'); e.initEvent('g5sync:codechange', false, false);
+                      e.oldValue = o; e.newValue = localStorage.getItem('g5sync.code'); window.dispatchEvent(e); } } }""", [list(codes), event])
+
+    def click_refresh(self, box="#box"):
+        self.pg.click(f"{box} .g5u-refresh")
+
     def reload(self, var="__h", auto=False):
         self.pg.evaluate(f"window.{var}.reload({'true' if auto else ''})")
 
@@ -503,8 +514,8 @@ def u2(b):
         check("U2[A 在途時換 B、A 先回來] A 的回應不採用（沒有 a2）、清單改查 B", "a2" not in R.ids() and R.until(lambda: R.ids() == ["b1"]), R.ids())
     finally:
         R.close()
-    # Codex 審 117bbb0①：兩次 2 秒輪詢之間 A→B→A（輪詢讀到的碼前後都是 A）：舊世代的查詢回來也不採用，改發新世代查詢
-    R = Row(b, "U2[兩次輪詢之間 A→B→A、舊查詢回來]", data)
+    # A07（4agent (d)-縮）：有事件的 A→B→A（sync.js 每次寫入都派 g5sync:codechange）：在 B 那一下就作廢，舊查詢回來不採用，最後查 A
+    R = Row(b, "U2[有事件的 A→B→A、舊查詢回來]", data)
     try:
         R.wait_ids(["a1"])
         R.gas.hold = hold_first(lambda q: q["op"] == "mine")
@@ -513,12 +524,13 @@ def u2(b):
         old = R.pending()[0]
         old.snap = {"ok": True, "items": [item("a9"), item("a1")], "lastFetch": 0}   # 舊快照含 a9（伺服器現況沒有）
         n = len(R.gas.log)
-        R.pg.evaluate(f"localStorage.setItem('g5sync.code', '{B}'); localStorage.setItem('g5sync.code', '{A}')")   # 不推進時鐘
+        R.flip(B, A)   # 不推進時鐘
         old.release()
         R.pump()
         got = R.until(lambda: R.ids() == ["a1"] and R.mine(n))
-        check("U2[兩次輪詢之間 A→B→A、舊查詢回來] 舊世代的清單不採用（沒有 a9）、改發一筆帶 A 的新查詢",
-              got and "a9" not in R.ids() and [r["code"] for r in R.mine(n)] == [A], (R.ids(), [r["code"] for r in R.mine(n)]))
+        ms = [r["code"] for r in R.mine(n)]
+        check("U2[有事件的 A→B→A、舊查詢回來] 舊查詢不採用（沒有 a9）、最後一筆查詢帶 A 的碼",
+              got and "a9" not in R.ids() and ms and ms[-1] == A, (R.ids(), ms))
     finally:
         R.close()
     for label, js in (("null", "localStorage.removeItem('g5sync.code')"), ('""', "localStorage.setItem('g5sync.code', '')")):
@@ -591,7 +603,9 @@ def u3(b):
         R.tick(6000)   # 舊的 5 秒撤回確認計時器若沒清，這時會跑
         check("U3[不 stop 直接重掛] 舊確認計時器的時間過了：數學畫面不變", R.view() == v0, (v0, R.view()))
         R.tick(61000)
-        check("U3[不 stop 直接重掛] 60 秒後只有數學在發請求（舊計時器都不發）",
+        R.reload("__h2")   # 沒有自動定時重查了（A04）：61 秒內舊計時器都不能發；再請新元件重抓一次
+        R.until(lambda: R.gas.log[n:])
+        check("U3[不 stop 直接重掛] 61 秒＋新元件重抓：只有數學在發請求（舊計時器都不發）",
               R.gas.log[n:] and all(r.get("prefix") == P["數學"] for r in R.gas.log[n:]), [(r["op"], r.get("prefix")) for r in R.gas.log[n:]])
     finally:
         R.close()
@@ -656,30 +670,33 @@ def u5(b):
 
 
 def u6(b):
-    """扣住含 x 的舊 A → 撤回 x 成功（刷新 B 也扣著）→ 先斷言 x 已消失 → 才放行 A；再測 B 失敗、B 仍含 x。"""
-    for variant in ("B失敗", "B仍含x"):
-        R = Row(b, f"U6[{variant}]", {(A, P["國語"]): [item("x"), item("y")]})
+    """（4agent (d)-縮 改期望：拿掉 GONE）撤回成功 ⇒ 清單作廢顯示「更新中…」、撤回前的舊查詢不採用、照重查結果；重查失敗不顯示「還沒有補過題目」。"""
+    for variant in ("重查成功", "重查失敗"):
+        R = Row(b, f"U6[撤回成功・{variant}]", {(A, P["國語"]): [item("x"), item("y")]})
         try:
             R.wait_ids(["x", "y"])
             R.gas.hold = lambda q: q["op"] == "mine"
             R.reload()
             R.until(lambda: R.pending())
-            ha = R.pending()[0]
+            ha = R.pending()[0]   # 撤回前的舊查詢：快照 x、y
             R.withdraw("x")
             R.until(lambda: len(R.pending()) == 2)
-            check(f"U6[{variant}] 撤回成功當下 x 就消失（舊 A、刷新 B 都還扣著）", len(R.pending()) == 2 and R.ids() == ["y"], (len(R.pending()), R.ids()))
+            check(f"U6[撤回成功・{variant}] 撤回成功當下：清單作廢（空白＋更新中）、舊 A 與重查 B 都還扣著",
+                  len(R.pending()) == 2 and R.ids() == [] and "更新中" in R.txt(".g5u-items"), (len(R.pending()), R.ids(), R.txt(".g5u-items")))
             ha.release()
             R.pump()
-            check(f"U6[{variant}] 放行舊 A（快照含 x）：x 不回來", R.ids() == ["y"], R.ids())
+            check(f"U6[撤回成功・{variant}] 放行舊 A（快照含 x）：不採用（仍空白＋更新中）", R.ids() == [] and "更新中" in R.txt(".g5u-items"), (R.ids(), R.txt(".g5u-items")))
             hb = R.pending()[0] if R.pending() else None
-            if variant == "B失敗":
+            if variant == "重查成功":
+                hb and hb.release()
+                got = R.wait_ids(["y"])
+                check("U6[撤回成功・重查成功] 照伺服器現況：只剩 y", got == ["y"] and R.health() == "", (got, R.health()))
+            else:
                 hb and hb.release({"json": {"ok": False, "err": "server"}})
                 R.pump()
-                check("U6[B失敗] 刷新 B 失敗：x 仍不在、提示讀不到", R.ids() == ["y"] and CANT_READ in R.health(), (R.ids(), R.health()))
-            else:
-                hb and hb.release({"json": {"ok": True, "items": [item("x"), item("y", status="fetched")], "lastFetch": 0}})
-                R.pump()
-                check("U6[B仍含x] 刷新 B 成功但仍含 x（伺服器慢一步）：x 不回來、y 照樣更新", R.ids() == ["y"] and "製作中" in (R.card("y") or ""), (R.ids(), R.card("y")))
+                check("U6[撤回成功・重查失敗] 提示讀不到、不顯示「還沒有補過題目」、不畫回舊清單",
+                      R.ids() == [] and CANT_READ in R.health() and "還沒有補過題目" not in R.txt(".g5u-items") and "更新中" not in R.txt(".g5u-items"),
+                      (R.ids(), R.health(), R.txt(".g5u-items")))
         finally:
             R.close()
 
@@ -780,8 +797,9 @@ def u8(b):
     finally:
         R.close()
 
-    # 設計者 (c)：期限在回應、發送、回前景時都要核對（背景分頁、睡眠時計時器會被延後）
-    R = Row(b, "U8[發送前核對期限]", data)
+    # 設計者 (c)：期限在回應、發送、回前景時都要核對（背景分頁、睡眠時計時器會被延後）。
+    # 4agent (d)-縮 拿掉 60 秒自動重查，發送前的核對改走「重新整理」鈕這條路
+    R = Row(b, "U8[重新整理鈕核對期限]", data)
     try:
         R.wait_ids(["x", "y"])
         R.gas.hold = lambda q: q["op"] == "mine"
@@ -789,9 +807,9 @@ def u8(b):
         R.reload()
         R.until(lambda: R.pending())
         R.pg.clock.set_system_time(T0 + 1 + 91)   # 期限已過、A 的期限計時器還沒跑、A 也還沒回來（背景分頁計時器被延後）
-        R.tick(60500)   # 只讓 60 秒自動重查先跑（A 的期限計時器排在 90 秒，不會跑）：這條路不經 reload() 的期限核對
+        R.click_refresh()
         R.until(lambda: len(R.pending()) == 2)
-        check("U8 發送前核對期限：A 已過期但期限計時器還沒跑，60 秒自動重查照樣發新查詢", len(R.mine(n)) == 2, len(R.mine(n)))
+        check("U8 重新整理鈕核對期限：A 已過期但期限計時器還沒跑，按重新整理照樣發新查詢", len(R.mine(n)) == 2, len(R.mine(n)))
     finally:
         R.close()
 
@@ -889,10 +907,12 @@ def u9(b):
             v2 = R.view()
             check(f"U9[{kind}] 舊確認計時器的時間過了：新畫面與草稿不變", v2 == v0, (v0, v2))
             n_new = len(R.mine(ep="NEW"))
-            R.tick(61000)  # 舊的 2 秒家庭碼檢查、60 秒自動重查若沒清，這時會發請求
+            R.tick(61000)  # 舊的 2 秒家庭碼檢查等計時器若沒清，這時會發請求
             old_now = [(r["op"], r.get("id")) for r in R.gas.log if r["_ep"] == "OLD"]
-            check(f"U9[{kind}] 舊元件零新增請求（放行舊操作後、含 60 秒自動重查與 2 秒家庭碼檢查）", old_now == old_at_stop, (old_at_stop, old_now))
-            check(f"U9[{kind}] 新草稿不變、新元件照常運作（60 秒自動重查打新 endpoint）", R.view()["draft"] == v0["draft"] and len(R.mine(ep="NEW")) > n_new, (R.view()["draft"], n_new, len(R.mine(ep="NEW"))))
+            check(f"U9[{kind}] 舊元件零新增請求（放行舊操作後、含 61 秒內的計時器）", old_now == old_at_stop, (old_at_stop, old_now))
+            R.click_refresh()
+            R.until(lambda: len(R.mine(ep="NEW")) > n_new)
+            check(f"U9[{kind}] 新草稿不變、新元件照常運作（重新整理打新 endpoint）", R.view()["draft"] == v0["draft"] and len(R.mine(ep="NEW")) > n_new, (R.view()["draft"], n_new, len(R.mine(ep="NEW"))))
         finally:
             R.close()
 
@@ -944,30 +964,46 @@ def u10(b):
     finally:
         R.close()
 
-    # Codex 審 117bbb0①：兩次 2 秒輪詢之間 A→B→A（輪詢讀到的碼前後都是 A）：家庭世代仍要換，舊撤回的成功不沿用。
-    # 放行分兩種時機：下一次輪詢之前（回應入口要擋）、下一次輪詢之後（輪詢本身要認出世代換了）
+    # A06（4agent (d)-縮 的不變量）：沒有任何事件、也沒被輪詢看到的 A→B→A ⇒ 視為同一家庭（之後送出、顯示的都是 A 的資料）。
+    # 舊撤回的結果照常採用，請求一律帶 A 的碼，B 零請求
+    R = Row(b, "U10[沒有事件的 A→B→A（A06）]", data)
+    try:
+        R.wait_ids(["x", "w"])
+        R.gas.hold = lambda q: q["op"] == "withdraw"
+        R.withdraw("x")
+        R.until(lambda: R.pending())
+        n = len(R.gas.log)
+        R.flip(B, A, event=False)   # 例如開發者工具直接改：沒有事件，也不推進時鐘
+        R.gas.hold = None
+        R.pending()[0].release()
+        got = R.until(lambda: "撤回了" in R.wmsg() and R.ids() == ["w"])
+        check("U10[沒有事件的 A→B→A（A06）] 同一家庭：撤回結果照常採用、重查後只剩 w、請求全帶 A 的碼",
+              got and all(r.get("code") == A for r in R.gas.log[n:]), (R.wmsg(), R.ids(), [(r["op"], r.get("code")) for r in R.gas.log[n:]]))
+    finally:
+        R.close()
+
+    # A07：有事件的 A→B→A（sync.js 每次寫入都派 g5sync:codechange）：在 B 那一下就作廢，舊撤回的成功不沿用。
+    # 放行分兩種時機：下一次輪詢之前、之後（輪詢只比字串，A 與 A 相同不再作廢）
     for when in ("輪詢前放行", "輪詢後放行"):
-        R = Row(b, f"U10[兩次輪詢之間 A→B→A・{when}]", data)
+        R = Row(b, f"U10[有事件的 A→B→A（A07）・{when}]", data)
         try:
             R.wait_ids(["x", "w"])
             R.gas.hold = lambda q: q["op"] == "withdraw"
             R.withdraw("x")
             R.until(lambda: R.pending())
             n = len(R.gas.log)
-            R.pg.evaluate(f"localStorage.setItem('g5sync.code', '{B}'); localStorage.setItem('g5sync.code', '{A}')")   # 不推進時鐘
+            R.flip(B, A)   # 不推進時鐘
+            check(f"U10[有事件的 A→B→A（A07）・{when}] 事件當下就作廢：撤回中提示收掉、撤回鈕恢復",
+                  "撤回中" not in R.wmsg() and R.until(R.wd_enabled), (R.wmsg(), R.wd_states()))
             if when == "輪詢後放行":
                 R.tick(2100)
-                check(f"U10[兩次輪詢之間 A→B→A・{when}] 輪詢認出換了世代：撤回中提示收掉、撤回鈕恢復", "撤回中" not in R.wmsg() and R.until(R.wd_enabled), (R.wmsg(), R.wd_states()))
             R.gas.hold = None
             R.pending()[0].release()   # 伺服器此刻才處理：x 撤回、回 ok
             R.pump()
-            # 輪詢前放行：回應入口認出換世代 ⇒ 不採用、改重查（伺服器已撤回 x ⇒ 只剩 w）
-            # 輪詢後放行：輪詢當下已作廢並重查（那時伺服器還沒撤回 ⇒ x、w）；舊撤回晚到不採用，x 不被本機移除
-            want = ["w"] if when == "輪詢前放行" else ["x", "w"]
-            got = R.until(lambda: R.ids() == want)
-            check(f"U10[兩次輪詢之間 A→B→A・{when}] 舊撤回的成功晚到：不沿用（不顯示撤回了、撤回鈕可按）",
-                  "撤回了" not in R.wmsg() and R.wd_enabled(), (R.wmsg(), R.ids(), R.wd_states()))
-            check(f"U10[兩次輪詢之間 A→B→A・{when}] 換世代後清單照伺服器現況重查一次（帶 A 的碼）", got and [r["code"] for r in R.mine(n)] == [A], (R.ids(), [r["code"] for r in R.mine(n)]))
+            ms = [r["code"] for r in R.mine(n)]
+            check(f"U10[有事件的 A→B→A（A07）・{when}] 舊撤回的成功晚到：不沿用（不顯示撤回了、x 不被本機移除、撤回鈕可按）",
+                  "撤回了" not in R.wmsg() and R.ids() == ["x", "w"] and R.wd_enabled(), (R.wmsg(), R.ids(), R.wd_states()))
+            check(f"U10[有事件的 A→B→A（A07）・{when}] 最後一筆清單查詢帶 A 的碼、沒有撤回重送", ms and ms[-1] == A and len(R.wd()) == 1, (ms, R.wd()))
         finally:
             R.close()
 
@@ -1043,9 +1079,9 @@ def u11(b):
         check("U11[upload 扣住] B 的草稿沒被清掉", R.pg.input_value("#box .g5u-note") == "B 的草稿" and R.files() == 2, (R.pg.input_value("#box .g5u-note"), R.files()))
         out = R.out()
         check("U11[upload 扣住] 提示後面沒送出、不宣稱取消成功或全部送出", "沒有送出" in out and "取消" not in out and "送出了" not in out, out)
-        # 審 117bbb0②：第一張已送出去、還沒回來 ⇒ 不能說成已送出，也不能說「照片沒有送出」（伺服器可能已收到）
-        check("U11[upload 扣住] 在途那張講還沒收到結果，不說已確認送出、也不說照片全部沒送出（不叫家長整批重送）",
-              "還沒收到結果" in out and "已確認送出" not in out and "確認後再按一次送出" not in out, out)
+        # 分派版（4agent (d)-縮 5）：已呼叫 post 1 張 ⇒ 說不確定有沒有送到、不提張數、不叫人直接重送；不能說成一張都沒送出
+        check("U11[upload 扣住] 已送出去 1 張：提示不確定有沒有送到、不要直接重送，不說一張都沒送出",
+              "不確定有沒有送到" in out and "不要直接重送" in out and "確認後再按一次送出" not in out and "張不受影響" not in out, out)
     finally:
         R.close()
 
@@ -1070,8 +1106,8 @@ def u11(b):
     finally:
         R.close()
 
-    # Codex 審 117bbb0①：扣住第一張上傳，兩次輪詢之間 A→B→A 再放行 ⇒ 第二張不送、不清草稿（舊碼：第二張照送、最後清空草稿）
-    R = Row(b, "U11[兩次輪詢之間 A→B→A]", data)
+    # A06：沒有任何事件、也沒被輪詢看到的 A→B→A（期間上傳）⇒ 視為同一家庭：第二張照送 A、B 零請求
+    R = Row(b, "U11[沒有事件的 A→B→A（A06）]", data)
     try:
         R.wait_ids(["x"])
         R.gas.hold = hold_first(lambda q: q["op"] == "upload")
@@ -1079,41 +1115,64 @@ def u11(b):
         R.pg.fill("#box .g5u-note", "A 的說明")
         R.pg.click("#box .g5u-send")
         R.until(lambda: R.pending())
-        R.pg.evaluate(f"localStorage.setItem('g5sync.code', '{B}'); localStorage.setItem('g5sync.code', '{A}')")   # 不推進時鐘
+        n = len(R.gas.log)
+        R.flip(B, A, event=False)   # 不推進時鐘、沒有事件
+        R.pending()[0].release()
+        R.pg.wait_for_function("document.querySelector('#box .g5u-out').textContent.indexOf('都送出了') >= 0", timeout=10000)
+        ups = R.up()
+        check("U11[沒有事件的 A→B→A（A06）] 兩張都送 A、B 零請求", [u["code"] for u in ups] == [A, A] and not [r for r in R.gas.log[n:] if r.get("code") == B],
+              ([(u["code"], u["note"]) for u in ups], [(r["op"], r.get("code")) for r in R.gas.log[n:]]))
+    finally:
+        R.close()
+
+    # A07：有事件的 A→B→A（同頁 sync.js 自訂事件）：在 B 那一下就作廢 ⇒ 第二張不送、草稿保留、提示不確定有沒有送到
+    R = Row(b, "U11[有事件的 A→B→A（A07）]", data)
+    try:
+        R.wait_ids(["x"])
+        R.gas.hold = hold_first(lambda q: q["op"] == "upload")
+        R.pg.set_input_files("#box .g5u-file", PICS[:2])
+        R.pg.fill("#box .g5u-note", "A 的說明")
+        R.pg.click("#box .g5u-send")
+        R.until(lambda: R.pending())
+        R.flip(B, A)   # 不推進時鐘
         R.pending()[0].release()
         R.pump(800)
         ups = R.up()
-        check("U11[兩次輪詢之間 A→B→A] 第二張不送（全程只有第一張）", len(ups) == 1, [(u["code"], u["note"]) for u in ups])
-        check("U11[兩次輪詢之間 A→B→A] 草稿沒被清掉、輸入解鎖、提示後面沒送出",
-              R.pg.input_value("#box .g5u-note") == "A 的說明" and R.files() == 2 and not any(R.locked()) and "沒有送出" in R.out() and "送出了" not in R.out(),
+        check("U11[有事件的 A→B→A（A07）] 第二張不送（全程只有第一張）", len(ups) == 1, [(u["code"], u["note"]) for u in ups])
+        check("U11[有事件的 A→B→A（A07）] 草稿沒被清掉、輸入解鎖、提示不確定有沒有送到",
+              R.pg.input_value("#box .g5u-note") == "A 的說明" and R.files() == 2 and not any(R.locked()) and "不確定有沒有送到" in R.out() and "送出了" not in R.out(),
               (R.pg.input_value("#box .g5u-note"), R.files(), R.locked(), R.out()))
     finally:
         R.close()
 
-    # Codex 審 117bbb0②：換家庭時的提示只算「已確認送出」的張數。第一張回 no-family（或成功），扣住第二張縮圖，換家庭＋reload()
-    for first, label in (({"json": {"ok": False, "err": "no-family"}}, "第一張失敗"), (None, "第一張成功")):
-        R = Row(b, f"U11[{label}、第二張縮圖時換家庭]", data)
+    # A08／A09（分派版）：第一張回 no-family、或回應遺失（伺服器其實存了），扣住第二張縮圖，換 B
+    # ⇒ A:0 mine／1 upload、B:1 mine；B 的清單；提示不確定（已呼叫 post 1 張）、不得說一張都沒送出；草稿保留；第二張不送
+    for first, label in (({"json": {"ok": False, "err": "no-family"}}, "A08 第一張回 no-family"), ("abort", "A09 第一張回應遺失")):
+        R = Row(b, f"U11[{label}、第二張縮圖時換 B]", data)
         try:
             R.wait_ids(["x"])
             R.gas.hold = hold_first(lambda q: q["op"] == "upload")
             R.pg.set_input_files("#box .g5u-file", PICS[:2])
+            R.pg.fill("#box .g5u-note", "A 的說明")
             R.pg.click("#box .g5u-send")
             R.until(lambda: R.pending())
+            n = len(R.gas.log) - 1   # 從第一張 upload 起算
             R.pg.evaluate("window.__imgHold = true")   # 第二張的縮圖扣住
+            if first == "abort":
+                R.gas.data[(A, P["國語"])].insert(0, item("up-lost"))   # 伺服器其實存了，回應卻沒回來
             R.pending()[0].release(first)
             R.until(lambda: R.pg.evaluate("window.__imgQueue.length") >= 1)
-            R.pg.evaluate(f"localStorage.setItem('g5sync.code', '{B}'); window.__h.reload()")
-            R.pump()
+            R.set_code(B)
+            R.tick(2100)
+            got = R.wait_ids(["y"])
             out = R.out()
-            if label == "第一張失敗":
-                check(f"U11[{label}、第二張縮圖時換家庭] 成功 0 張：不說已送出、不說 1 張，提示照片沒有送出",
-                      "已送出" not in out and "已確認送出" not in out and "1 張" not in out and "沒有送出" in out, out)
-            else:
-                check(f"U11[{label}、第二張縮圖時換家庭] 成功 1 張：提示已確認送出的 1 張不受影響、後面沒有送出",
-                      "已確認送出的 1 張" in out and "沒有送出" in out, out)
+            tally = lambda c: "/".join(str(len([r for r in R.gas.log[n:] if r.get("code") == c and r["op"] == o])) for o in ("mine", "upload", "withdraw"))
+            check(f"U11[{label}、第二張縮圖時換 B] 請求 A:0/1/0、B:1/0/0；清單換成 B", (tally(A), tally(B), got) == ("0/1/0", "1/0/0", ["y"]), (tally(A), tally(B), got))
+            check(f"U11[{label}、第二張縮圖時換 B] 提示不確定有沒有送到、不說照片沒有送出、草稿保留",
+                  "不確定有沒有送到" in out and "照片沒有送出；確認後再按一次送出" not in out and R.pg.input_value("#box .g5u-note") == "A 的說明", (out, R.pg.input_value("#box .g5u-note")))
             R.pg.evaluate("window.__imgHold = false; window.__imgRelease()")
             R.pump()
-            check(f"U11[{label}、第二張縮圖時換家庭] 第二張不送（全程只有第一張）", len(R.up()) == 1, len(R.up()))
+            check(f"U11[{label}、第二張縮圖時換 B] 第二張不送（全程只有第一張）", len(R.up()) == 1, len(R.up()))
         finally:
             R.close()
 
@@ -1183,9 +1242,11 @@ def u12(b):
         check("U12[同科雙容器] 放行已停止那個的舊查詢：兩個容器都不被改", (R.view("#box1"), R.view("#box2")) == (v1, v2), (v1, R.view("#box1"), v2, R.view("#box2")))
         R.gas.data[(A, P["國語"])].insert(0, item("c4"))
         n = len(R.gas.log)
-        R.tick(61000)
+        R.tick(61000)   # 沒有自動定時重查（A04）：61 秒內兩個容器都不發
+        quiet = len(R.mine(n)) == 0
+        R.click_refresh("#box2")
         got = R.wait_ids(["c4", "c3", "c1", "c2"], "#box2")
-        check("U12[同科雙容器] 60 秒自動重查：只有沒停的那個發、而且照常更新", got == ["c4", "c3", "c1", "c2"] and len(R.mine(n)) == 1, (got, len(R.mine(n))))
+        check("U12[同科雙容器] 61 秒內都不發；按沒停的那個的重新整理：只有它發、而且照常更新", quiet and got == ["c4", "c3", "c1", "c2"] and len(R.mine(n)) == 1, (quiet, got, len(R.mine(n))))
     finally:
         R.close()
 
@@ -1242,22 +1303,22 @@ def u14(b):
         R.pg.evaluate("""() => { for (let k = 0; k < 2; k += 1) { const btn = document.querySelector('#box .g5u-card[data-id="y"] button[data-wd]'); if (btn) { btn.disabled = false; btn.click(); } } }""")
         R.pump()
         check("U14 x 還沒回來就硬點 y 兩次（繞過 disabled）：零第二筆撤回 POST", len(R.wd()) == 1, [(w["code"], w["id"]) for w in R.wd()])
+        # 4agent (d)-縮：連續撤回改成依重查結果（撤回結束清單作廢、照伺服器現況重查）
         R.gas.hold = lambda q: q["op"] == "mine"
         hx.release()
         R.until(lambda: "撤回了" in R.wmsg() and R.pending())
         hb = R.pending()[0] if R.pending() else None
-        check("U14 x 成功：x 消失（刷新 B 扣著，快照含 y）", R.ids() == ["y", "z"] and hb is not None, (R.ids(), hb))
-        R.gas.hold = lambda q: q["op"] == "mine"
-        R.withdraw("y")
-        R.until(lambda: len(R.pending()) == 2)
-        hc = [h for h in R.pending() if h is not hb][0] if len(R.pending()) == 2 else None
-        check("U14 y 成功：y 消失", R.ids() == ["z"] and [(w["code"], w["id"]) for w in R.wd()] == [(A, "x"), (A, "y")], (R.ids(), R.wd()))
+        check("U14 x 成功：清單作廢（空白＋更新中），重查 B 扣著", R.ids() == [] and "更新中" in R.txt(".g5u-items") and hb is not None, (R.ids(), R.txt(".g5u-items"), hb))
         hb and hb.release()
-        R.pump()
-        check("U14 放行含 y 的舊刷新 B：x、y 都不重現", R.ids() == ["z"], R.ids())
+        got = R.wait_ids(["y", "z"])
+        check("U14 重查 B 回來：照伺服器現況 y、z", got == ["y", "z"], got)
+        R.withdraw("y")
+        R.until(lambda: R.pending())
+        hc = R.pending()[0] if R.pending() else None
+        check("U14 y 成功：清單作廢、兩筆撤回各 1 次", R.ids() == [] and [(w["code"], w["id"]) for w in R.wd()] == [(A, "x"), (A, "y")], (R.ids(), R.wd()))
         hc and hc.release()
-        R.pump()
-        check("U14 最新刷新完成：只剩 z", R.ids() == ["z"] and R.health() == "", (R.ids(), R.health()))
+        got = R.wait_ids(["z"])
+        check("U14 最新重查完成：只剩 z", got == ["z"] and R.health() == "", (got, R.health()))
     finally:
         R.close()
 
@@ -1293,8 +1354,139 @@ def u15(b):
         R.close()
 
 
+def arows(b):
+    """4agent 最終方案 (d)-縮 的驗收列（瀏覽器版）。其餘 A 列對應的瀏覽器測試：A01／A03 既有、A06／A07 U10＋U11＋U2、
+    A08／A09 U11、A11 U6[撤回done]、A12 U6[撤回成功・…]、A14 U14、A16 U15、A18 U3＋U9、A19 U12；A21 在 tests/sync.test.js。"""
+    R = Row(b, "A02", {(A, P["國語"]): [item("a1")]})
+    try:
+        R.wait_ids(["a1"])
+        R.gas.data[(A, P["國語"])].insert(0, item("a2"))
+        R.gas.hold = lambda q: q["op"] == "mine"
+        n = len(R.gas.log)
+        for _ in range(3):
+            R.click_refresh()
+        R.pump()
+        check("A02 連按重新整理三次、回應扣住：只發 1 筆（帶 A 的碼）", [(r["op"], r.get("code")) for r in R.gas.log[n:]] == [("mine", A)], [(r["op"], r.get("code")) for r in R.gas.log[n:]])
+        R.gas.hold = None
+        for h in R.pending():
+            h.release()
+        got = R.wait_ids(["a2", "a1"])
+        check("A02 放行後清單更新", got == ["a2", "a1"], got)
+    finally:
+        R.close()
+
+    R = Row(b, "A04", {(A, P["國語"]): [item("a1")]})
+    try:
+        R.wait_ids(["a1"])
+        n = len(R.gas.log)
+        R.tick(65000)
+        check("A04 閒置 65 秒：零請求（沒有自動定時重查）", R.gas.log[n:] == [], [(r["op"], r.get("code")) for r in R.gas.log[n:]])
+    finally:
+        R.close()
+
+    R = Row(b, "A05", {(A, P["國語"]): [item("a1")]})
+    try:
+        R.wait_ids(["a1"])
+        n = len(R.gas.log)
+        R.flip(None, event=False)   # 同頁刪碼、不派任何事件
+        R.tick(2100)
+        check("A05 同頁刪碼、推進 2.1 秒：零請求、清單空白、提示沒開同步、沒有撤回鈕",
+              R.gas.log[n:] == [] and R.ids() == [] and NO_SYNC in R.health() and R.wd_states() == [], (R.gas.log[n:], R.ids(), R.health(), R.wd_states()))
+    finally:
+        R.close()
+
+    body = '<div id="box1"></div><div id="box2"></div>'
+    data = {(A, P["國語"]): [item("a1")], (A, P["數學"]): [item("m1", "數學", "u1")], (B, P["國語"]): [item("b1")], (B, P["數學"]): [item("bm1", "數學", "u1")]}
+    R = Row(b, "A10", data, body=body, mount=mount_js("__h1", "#box1", "國語") + mount_js("__h2", "#box2", "數學"))
+    try:
+        R.wait_ids(["a1"], "#box1")
+        R.wait_ids(["m1"], "#box2")
+        n = len(R.gas.log)
+        R.gas.always.append((lambda q: len(R.gas.log) > n + 2, {"json": {"ok": False, "err": "server"}}))   # 兩筆之後一律失敗
+        R.pg.evaluate(f"""() => {{ localStorage.setItem('g5sync.code', '{B}');
+          window.dispatchEvent(new StorageEvent('storage', {{ key: 'g5sync.code', oldValue: '{A}', newValue: '{B}' }})); }}""")   # 別頁換 B 一次
+        R.wait_ids(["b1"], "#box1")
+        R.wait_ids(["bm1"], "#box2")
+        R.tick(2100)
+        R.tick(2100)
+        reqs = [(r["op"], r.get("code"), r.get("prefix")) for r in R.gas.log[n:]]
+        check("A10 同頁國語＋數學、別頁換 B 一次：B 共 2 筆清單查詢（各一）、沒有第 3 筆",
+              sorted(reqs) == sorted([("mine", B, P["國語"]), ("mine", B, P["數學"])]), reqs)
+        check("A10 兩份清單各自是本科的 B", (R.ids("#box1"), R.ids("#box2")) == (["b1"], ["bm1"]), (R.ids("#box1"), R.ids("#box2")))
+    finally:
+        R.close()
+
+    for end, spec, want in (("not-found", {"json": {"ok": False, "err": "not-found"}}, "找不到"), ("fail", {"json": {"ok": False, "err": "server"}}, "沒有撤回成功"),
+                            ("網路失敗", "abort", UNSURE), ("逾 90 秒後成功才到", None, UNSURE)):
+        R = Row(b, f"A13[{end}]", {(A, P["國語"]): [item("x"), item("w")]})
+        try:
+            R.wait_ids(["x", "w"])
+            if spec is None:
+                R.gas.hold = lambda q: q["op"] in ("withdraw", "mine")
+            else:
+                R.gas.once.append((lambda q: q["op"] == "withdraw", spec))
+                R.gas.hold = lambda q: q["op"] == "mine"
+            R.withdraw("x")
+            if spec is None:
+                R.until(lambda: R.pending())
+                hw = R.pending()[0]
+                R.tick(90500)
+            R.until(lambda: want in R.wmsg())
+            hq = [h for h in R.pending() if h.req["op"] == "mine"]
+            check(f"A13[{end}] 提示正確；清單作廢（空白＋更新中）、重查一筆扣著",
+                  want in R.wmsg() and R.ids() == [] and "更新中" in R.txt(".g5u-items") and len(hq) == 1, (R.wmsg(), R.ids(), R.txt(".g5u-items"), len(hq)))
+            R.gas.hold = None
+            hq and hq[0].release()
+            got = R.wait_ids(["x", "w"])
+            check(f"A13[{end}] 重查後照伺服器現況（x 還在）、撤回 POST 只有 1 筆", got == ["x", "w"] and len(R.wd()) == 1, (got, R.wd()))
+            if spec is None:
+                v0 = R.view()
+                hw.release()   # 伺服器此刻才處理：x 撤回、回 ok（已逾期限）
+                R.pump()
+                check(f"A13[{end}] 晚到的成功不改畫面", R.view() == v0, (v0, R.view()))
+        finally:
+            R.close()
+
+    R = Row(b, "A15", {(A, P["國語"]): [item("x")]})
+    try:
+        R.wait_ids(["x"])
+        R.gas.once.append((lambda q: q["op"] == "mine", {"json": {"ok": False, "err": "server"}}))
+        R.withdraw("x")
+        R.until(lambda: CANT_READ in R.health())
+        check("A15 撤回後重查失敗：「進度暫時讀不到」、不顯示「還沒有補過題目」", CANT_READ in R.health() and "還沒有補過題目" not in R.txt(".g5u-items") and R.ids() == [],
+              (R.health(), R.txt(".g5u-items"), R.ids()))
+    finally:
+        R.close()
+
+    for label, spec in (("HTTP 500", {"status": 500, "json": {"ok": True, "id": "z"}}), ("非法 JSON", {"body": "<html>Error</html>"})):
+        R = Row(b, f"A17[{label}]", {(A, P["國語"]): [item("x")]})
+        try:
+            R.wait_ids(["x"])
+            R.gas.always.append((lambda q: q["op"] == "upload", spec))
+            R.pg.set_input_files("#box .g5u-file", PICS[:2])
+            R.pg.fill("#box .g5u-note", "草稿")
+            R.pg.click("#box .g5u-send")
+            R.pg.wait_for_function("document.querySelector('#box .g5u-out').textContent.indexOf('不確定') >= 0", timeout=10000)
+            out = R.out()
+            check(f"A17[{label}] upload 回應不明：提示不確定有沒有送到、不說沒有送出、保留草稿",
+                  "不確定有沒有送到" in out and "沒有送出" not in out and R.pg.input_value("#box .g5u-note") == "草稿" and len(R.up()) == 2, (out, R.pg.input_value("#box .g5u-note"), len(R.up())))
+        finally:
+            R.close()
+
+    R = Row(b, "A20", data={}, code=None)
+    try:
+        R.pg.set_input_files("#box .g5u-file", PICS[:1])
+        R.pg.click("#box .g5u-send")
+        R.click_refresh()
+        R.pump()
+        check("A20 沒有家庭碼時按送出、重新整理：零請求、提示開啟或加入同步",
+              R.gas.log == [] and "開啟或加入同步" in R.out() and "開啟或加入同步" in R.health(), (R.gas.log, R.out(), R.health()))
+    finally:
+        R.close()
+
+
 ROWS = [("既有", legacy), ("U1", u1), ("U2", u2), ("U3", u3), ("U4", u4), ("U5", u5), ("U6", u6), ("U7", u7), ("U8", u8),
-        ("U9", u9), ("U10", u10), ("U11", u11), ("U12", u12), ("U13", u13), ("U14", u14), ("U15", u15)]
+        ("U9", u9), ("U10", u10), ("U11", u11), ("U12", u12), ("U13", u13), ("U14", u14), ("U15", u15), ("A", arows)]
 
 
 def main():
