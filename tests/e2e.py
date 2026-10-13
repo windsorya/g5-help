@@ -983,6 +983,23 @@ def flow_withdraw(browser):
         r0.fulfill(status=200, content_type="application/json", headers={"Access-Control-Allow-Origin": "*"}, body=json.dumps({"ok": True, "lastFetch": 0, "items": snap}))
     pg.wait_for_timeout(500)
     check("撤回W9 撤回前送出的舊查詢晚到：已撤回的題目不會重新出現", len(held) == 1 and "第 2 題" not in pg.locator("#upList").inner_text(), (len(held), pg.locator("#upList").inner_text()[:200]))
+    # W10（Codex 審 4317a96）：網路慢、兩次查詢都還在路上時，先回來的舊查詢（沒有撤回夾在中間）照樣要更新畫面，不能因為又發了一次就整個丟掉
+    held.clear(); items[0]["status"] = "new"
+    items.append({"id": "u4-4", "time": 1791868800000, "subject": "國語", "note": "第 9 題", "status": "new", "url": "", "doneAt": 0})
+    mode["hold"] = True
+    pg.locator("#upBox summary").click(); pg.locator("#upBox summary").click(); pg.wait_for_timeout(300)   # A 卡住
+    pg.locator("#upBox summary").click(); pg.locator("#upBox summary").click(); pg.wait_for_timeout(300)   # B 也卡住
+    mode["hold"] = False
+    snap_done = [dict(x) for x in items if x["status"] != "withdrawn"]
+    for x in snap_done:
+        if x["id"] == "u4-4": x.update(status="done", url="https://windsorya.github.io/g5-help/#h/p38-6-2")
+    if held:
+        held[0][0].fulfill(status=200, content_type="application/json", headers={"Access-Control-Allow-Origin": "*"}, body=json.dumps({"ok": True, "lastFetch": 0, "items": snap_done}))
+    pg.wait_for_timeout(500)
+    a_applied = "第 9 題" in pg.locator("#upList").inner_text() and "做好了" in pg.locator("#upList").inner_text()
+    for r0, snap in held[1:]:
+        r0.fulfill(status=200, content_type="application/json", headers={"Access-Control-Allow-Origin": "*"}, body=json.dumps({"ok": True, "lastFetch": 0, "items": snap_done}))
+    check("撤回W10 慢網路：先回來的查詢照樣更新畫面（沒有撤回夾在中間）", len(held) >= 1 and a_applied, (len(held), pg.locator("#upList").inner_text()[:200]))
     news = [pg.locator("#upWMsg").inner_text(), "確定撤回？", "這題已經做好了，不能撤回。", "沒有撤回成功（可能沒有網路），請稍後再試。"]
     check("撤回W8 新字每句不超過 40 字", not sentences_over("\n".join(news)), sentences_over("\n".join(news)))
     check("撤回 沒有 JS 錯誤", not errors, errors)

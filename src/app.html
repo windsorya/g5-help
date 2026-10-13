@@ -810,7 +810,7 @@ $("#backHome").onclick = function(ev){ ev.preventDefault(); location.hash = ""; 
 window.addEventListener("hashchange", route);
 // 同一時間只讓一個分頁練習與寫入（Web Locks；Codex 2026-10-13 設計者方案 B）。
 // 拿不到鎖＝另一個分頁在練：這頁唯讀；等那頁關掉、鎖釋放後自動重新載入接手（重讀最新紀錄）。
-var READONLY_MSG = "這個網站已經在另一個分頁（或視窗）開著了，請回到那個分頁練習；那邊關掉後，這一頁會自動接手。";
+var READONLY_MSG = "這個網站已經在另一個分頁或視窗開著了，請回到那邊練習。那邊關掉後，這一頁會自動接手。";   // 每句 ≤40 字（第 8 輪 B18：原本一句 45 字）
 function start(){ countdown(); route(); window.dispatchEvent(new Event("g5help-ready")); }
 if (navigator.locks && navigator.locks.request) {
   var lockFail = function(){ WRITER = false; READONLY_MSG = "這一頁拿不到存檔的權限（瀏覽器拒絕），只能看不能練；請重新整理或換瀏覽器。"; start(); };
@@ -884,7 +884,7 @@ window.G5HelpPage = {state:function(id){ return JSON.parse(JSON.stringify(DB.ent
     btn.disabled = true; wmsg("撤回中…");
     fetch(EP, {method:"POST", headers:{"Content-Type":"text/plain"}, credentials:"omit", body:JSON.stringify({op:"withdraw", code:code, id:id})}).then(function(r){ return r.json(); }).then(function(r){
       WD = null;
-      if (r && r.ok) { wmsg("撤回了，電腦不會再做這一題。"); loadMine(); return; }
+      if (r && r.ok) { MINE_EPOCH += 1; wmsg("撤回了，電腦不會再做這一題。"); loadMine(); return; }
       wmsg(r && r.err === "done" ? "這題已經做好了，不能撤回。" : r && r.err === "not-found" ? "找不到這一題，可能已經撤回了。" : "沒有撤回成功，請稍後再試。", true);
       render(LAST);
     }).catch(function(){ WD = null; wmsg("沒有撤回成功（可能沒有網路），請稍後再試。", true); render(LAST); });
@@ -908,22 +908,32 @@ window.G5HelpPage = {state:function(id){ return JSON.parse(JSON.stringify(DB.ent
     }; });
     Array.prototype.forEach.call($("#upList").querySelectorAll("button[data-wd-no]"), function(b){ b.onclick = function(){ wdArm(null); }; });
   }
-  // 查詢流水號：只採用最新一次查詢的回應，較舊的晚到就丟掉（Codex 審 81963cee：撤回後舊回應晚到，已撤回的題目又冒出來）
-  var MINE_SEQ = 0;
-  function loadMine(){
-    var code = myCode(), mySeq = ++MINE_SEQ;
+  // 清單查詢的三條規則（Codex 審 81963cee、4317a96）：
+  //   ①撤回成功就換「世代」，撤回前發出的查詢晚到一律不採用（否則已撤回的題又冒出來）；
+  //   ②同一世代內，比上次套用的新才採用（舊的晚到不倒退），但不是「只收最後發的那次」——慢網路下自動重查會讓每次回應都被丟掉；
+  //   ③已有查詢在路上時，每分鐘的自動重查不再疊發（使用者打開清單、撤回後的重查照發）。
+  var MINE_SEQ = 0, MINE_APPLIED = 0, MINE_EPOCH = 0, MINE_INFLIGHT = 0;
+  function loadMine(auto){
+    var code = myCode();
     if (!code) { $("#upHealth").textContent = "這台裝置還沒開啟跨裝置同步，所以看不到進度。"; return; }
+    if (auto && MINE_INFLIGHT > 0) return;
+    var mySeq = ++MINE_SEQ, myEpoch = MINE_EPOCH;
+    MINE_INFLIGHT += 1;
+    var landed = false, fin = function(){ if (!landed) { landed = true; MINE_INFLIGHT -= 1; } };   // 在途計數只扣一次
+    var stale = function(){ return myEpoch !== MINE_EPOCH || mySeq < MINE_APPLIED; };
     fetch(EP, {method:"POST", headers:{"Content-Type":"text/plain"}, credentials:"omit", body:JSON.stringify({op:"mine", code:code})}).then(function(r){ return r.json(); }).then(function(r){
-      if (mySeq !== MINE_SEQ) return;
+      fin();
+      if (stale()) return;
+      MINE_APPLIED = mySeq;
       if (!r || !r.ok) { $("#upHealth").textContent = "進度暫時讀不到，稍後再看。"; return; }
       var ago = r.lastFetch ? Math.round((Date.now() - r.lastFetch) / 60000) : null;
       $("#upHealth").innerHTML = ago === null ? "電腦還沒取過題目。" : ago <= 20 ? "電腦運作正常（上次取題 " + hhmm(r.lastFetch) + "，每 10 分鐘取一次）。"
         : '<span style="color:var(--bad)">電腦已經 ' + ago + ' 分鐘沒取題（上次 ' + hhmm(r.lastFetch) + '）：可能關機、睡眠或故障，題目會等電腦開機後再處理。</span>';
       LAST = r; render(r);
-    }).catch(function(){ if (mySeq === MINE_SEQ) $("#upHealth").textContent = "進度暫時讀不到（可能沒有網路），稍後再看。"; });
+    }).catch(function(){ fin(); if (!stale()) $("#upHealth").textContent = "進度暫時讀不到（可能沒有網路），稍後再看。"; });
   }
   $("#upBox").addEventListener("toggle", function(){ if ($("#upBox").open) loadMine(); });
-  setInterval(function(){ if ($("#upBox").open && !WD) loadMine(); }, 60000);   // 正在確認撤回時不重畫（不吃掉「確定撤回？」）
+  setInterval(function(){ if ($("#upBox").open && !WD) loadMine(true); }, 60000);   // 正在確認撤回時不重畫（不吃掉「確定撤回？」）
   $("#upSend").onclick = function(){
     var code = null; try { code = localStorage.getItem("g5sync.code"); } catch (e) {}
     if (!code) return msg("請先在下面「跨裝置同步」開啟或加入同步，這台裝置才能送題目。", true);
