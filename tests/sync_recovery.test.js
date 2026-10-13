@@ -171,6 +171,66 @@ for (const when of ['重開前', '重開後恢復前']) {
   });
 }
 
+// ---------------- A05L–A08L：從同步連結（#sync=同一家庭碼）重開（Codex 第 8 輪 FAIL：join() 無條件清 checkpoint）----------------
+// 孩子常用的入口是家長傳來的連結／QR，不是一般網址；同一家庭碼重新加入必須保留待確認上傳、走恢復判斷。
+async function reopenViaLink(t, ctx, code) {
+  ctx.d.api.destroy();
+  const d = owner(ctx.backend, ctx.N, {storage: ctx.d.storage, href: 'https://windsorya.github.io/g5-help/#sync=' + code});
+  ctx.d = d; t.after(() => d.api.destroy());
+  await d.api.ready;
+  return d;
+}
+test('A05L 首次啟用 D8 提交後回應遺失 ⇒ 從同步連結重開、不多答：保留 pending、確認 D8、無衝突', async t => {
+  const ctx = await fresh(t, D(8));
+  ctx.N.drop = 1; await ctx.d.api.enable(); ctx.code = ctx.d.api.getState().code;
+  await reopenViaLink(t, ctx, ctx.code); await ctx.clock.advance(60000);
+  assertSettled(ctx, 8, 1, 'A05L');
+  await assertKeepsSyncing(ctx, 9, 2);
+});
+for (const when of ['重開前', '重開後恢復前']) {
+  test('A06L 同 A05L，' + when + '答成 D9 ⇒ 先確認 D8 再上傳 D9，之後仍有請求', async t => {
+    const ctx = await fresh(t, D(8));
+    ctx.N.drop = 1; await ctx.d.api.enable(); ctx.code = ctx.d.api.getState().code;
+    if (when === '重開前') { ctx.d.storage.setItem(KEY, D(9)); await reopenViaLink(t, ctx, ctx.code); }
+    else { ctx.N.down = true; await reopenViaLink(t, ctx, ctx.code); ctx.d.storage.setItem(KEY, D(9)); ctx.N.down = false; }
+    await ctx.clock.advance(60000);
+    assertSettled(ctx, 9, 2, 'A06L ' + when);
+    assert.deepEqual(ctx.N.commits.map(c => c.rev), [1, 2], '只有 D8、D9 兩次提交');
+    await assertKeepsSyncing(ctx, 10, 3);
+  });
+}
+test('A07L baseline＝D8，D9 提交後回應遺失 ⇒ 從同步連結重開、不多答：確認 D9、無衝突', async t => {
+  const ctx = await synced8(t);
+  ctx.N.drop = 1; ctx.d.storage.setItem(KEY, D(9)); await ctx.clock.advance(4000);
+  await reopenViaLink(t, ctx, ctx.code); await ctx.clock.advance(60000);
+  assertSettled(ctx, 9, 2, 'A07L');
+  await assertKeepsSyncing(ctx, 10, 3);
+});
+for (const when of ['重開前', '重開後恢復前']) {
+  test('A08L 同 A07L，' + when + '答成 D10 ⇒ 雲端最終 D10，後續同步持續', async t => {
+    const ctx = await synced8(t);
+    ctx.N.drop = 1; ctx.d.storage.setItem(KEY, D(9)); await ctx.clock.advance(4000);
+    if (when === '重開前') { ctx.d.storage.setItem(KEY, D(10)); await reopenViaLink(t, ctx, ctx.code); }
+    else { ctx.N.down = true; await reopenViaLink(t, ctx, ctx.code); ctx.d.storage.setItem(KEY, D(10)); ctx.N.down = false; }
+    await ctx.clock.advance(60000);
+    assertSettled(ctx, 10, 3, 'A08L ' + when);
+    await assertKeepsSyncing(ctx, 11, 4);
+  });
+}
+test('A16L 從「不同家庭碼」的同步連結加入 ⇒ 舊家庭的 checkpoint 清掉，pending 不送進新家庭', async t => {
+  const ctx = await synced8(t);
+  ctx.backend.handle({op: 'put', code: CODE2, key: KEY, rev: 0, data: D(50)});
+  ctx.N.drop = 1; ctx.d.storage.setItem(KEY, D(9)); await ctx.clock.advance(4000);
+  assert.ok(ck(ctx.d) && ck(ctx.d).pending, '前置：舊家庭有待確認的 D9');
+  const puts = ctx.N.puts.length;
+  await reopenViaLink(t, ctx, CODE2); await ctx.clock.advance(8000);
+  const k = ck(ctx.d);
+  assert.ok(!k || (k.codeHash === H(CODE2) && !(k.pending && k.pending.data === D(9))), '舊家庭的 pending 作廢：' + JSON.stringify(k));
+  assert.ok(!ctx.N.puts.slice(puts).some(p => p.data === D(9)), '不把舊家庭的 D9 送進新家庭');
+  assert.equal(ctx.backend.store.record(CODE2, KEY).data, D(50), '新家庭雲端不被蓋掉');
+  assert.equal(ctx.d.storage.getItem(KEY), D(9), '本機進度保留');
+});
+
 // ---------------- A09–A18 ----------------
 for (const how of ['送出前關頁', '請求沒到後端就斷線']) {
   test('A09 pending 已保存、' + how + ' ⇒ 重開後送原 payload（D9），不改成最新 D10 猜測、也不遺漏', async t => {
@@ -344,6 +404,34 @@ test('A16a 只有舊 metadata（沒有 checkpoint）⇒ 遷移 baseline、不編
   d.storage.setItem(KEY, D(9)); await clock.advance(60000);
   assertSettled(ctx, 9, 2, 'A16a');
   assert.deepEqual(JSON.parse(d.storage.getItem(META)).keys['g5sci.v3'], sci, '其他站的 metadata 不變');
+});
+
+test('A16e 舊版（只有 g5sync.meta、沒有 pending）D8 已確認→D9 提交回應遺失→本機 D10，新版重開 ⇒ 顯示「無法確認」（unsure），不當成確定分歧', async t => {
+  const clock = new Clock(), backend = server(clock), N = net(backend);
+  backend.handle({op: 'put', code: CODE, key: KEY, rev: 0, data: D(8)});
+  backend.handle({op: 'put', code: CODE, key: KEY, rev: 1, data: D(9)});   // 舊版送的 D9：後端存了、回應遺失，舊版沒有留下證據
+  const meta = JSON.stringify({version: 1, codeHash: H(CODE), keys: {[KEY]: {rev: 1, hash: H(D(8)), updated: clock.now()}}});
+  const d = owner(backend, N, {initial: {[KEY]: D(10), 'g5sync.code': CODE, [META]: meta}});
+  t.after(() => d.api.destroy());
+  await d.api.ready; await clock.advance(8000);
+  const c = d.api.getState().conflicts[KEY];
+  assert.ok(c, '雙邊不同：要保留兩份');
+  assert.equal(c.unsure, true, '舊版沒有 pending 證據，無法確認是哪台寫的 ⇒ unsure');
+  assert.match(statusText(d), /無法確認/);
+  assert.equal(pickButtons(d).length, 0, '沒有選邊按鈕');
+  assert.equal(d.storage.getItem(KEY), D(10), '這台照常用這台的');
+  assert.equal(backend.store.record(CODE, KEY).data, D(9), '雲端那份不動');
+});
+
+test('A16f 新版自己的 checkpoint（baseline 已由新版確認、沒有 pending）遇到雲端下一號不同 ⇒ 仍是確定分歧（不因 A16e 變成 unsure）', async t => {
+  const ctx = await synced8(t);
+  ctx.d.api.destroy();
+  ctx.backend.handle({op: 'put', code: ctx.code, key: KEY, rev: 1, data: D(20)});
+  ctx.d.storage.setItem(KEY, D(9));
+  const d = owner(ctx.backend, ctx.N, {storage: ctx.d.storage}); ctx.d = d; t.after(() => d.api.destroy());
+  await d.api.ready; await ctx.clock.advance(8000);
+  const c = d.api.getState().conflicts[KEY];
+  assert.ok(c && !c.unsure, '新版有完整證據：另一台寫的 ⇒ 確定分歧：' + JSON.stringify(c));
 });
 
 test('A16b 上傳途中切換家庭 ⇒ 舊家庭的遲到回應不能寫入新家庭的 checkpoint', async t => {

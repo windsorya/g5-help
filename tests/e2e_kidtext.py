@@ -472,11 +472,25 @@ def selftests(B):
     br = "甲" * 25 + "<br>" + "乙" * 25 + "。"
     plain = "丙" * 50 + "。"
     out = {}
-    for name, s_, vp in (("span", span, None), ("br", br, None), ("br-narrow", br, {"width": 320, "height": 640}), ("plain-narrow", plain, {"width": 320, "height": 640})):
+    # 第 8 輪：white-space:pre-line 下兩個 span 中間只隔一個「純換行」文字節點＝真正換行，各 25 字要通過；normal 下同樣的原始碼換行只是空白，要攔
+    preline = '<span style="display:block;white-space:pre-line"><span>' + "甲" * 25 + "</span>\n<span>" + "乙" * 25 + "</span>。</span>"
+    normalnl = '<span style="display:block"><span>' + "甲" * 25 + "</span>\n<span>" + "乙" * 25 + "</span>。</span>"
+    for name, s_, vp in (("span", span, None), ("br", br, None), ("br-narrow", br, {"width": 320, "height": 640}), ("plain-narrow", plain, {"width": 320, "height": 640}),
+                         ("preline-newline", preline, None), ("normal-newline", normalnl, None)):
         r = lesson_open(fixture=[fixture_entry("t-b15", say=s_)], eid="t-b15", limit=SELF_MAX, viewport=vp)
         out[name] = [x for x in r.viol if x["kind"] == "length"]
         r.close()
-    rec("B15", out["span"] and not out["br"] and not out["br-narrow"] and out["plain-narrow"], out)
+    rec("B15", out["span"] and not out["br"] and not out["br-narrow"] and out["plain-narrow"] and not out["preline-newline"] and out["normal-newline"], out)
+    # B18（第 8 輪）：「這步看不懂」收到回饋改成 107 字 ⇒ 真的按下去要攔；正式內容另由 confused_case 五種回饋都走到
+    long107 = "很" * 105 + "。"
+    r = Run(B, B.device, "self", subs=[("收到了！會換一個更好懂的說法。先試試看下一步。", long107)])
+    r.ctx.add_init_script("try{localStorage.setItem('g5sync.code','ABCDEFGHJKMN')}catch(e){}")
+    r.ctx.route(lambda u: u.startswith(EP), lambda route: route.fulfill(status=200, content_type="application/json", headers={"Access-Control-Allow-Origin": "*"}, body='{"ok":true}'))
+    r.go("#h/sci-q5-bangen"); r.pg.get_by_role("button", name="開始學").click()
+    r.pg.locator("#lesson .lstep").first.locator("button[data-confused]").click()
+    r.pg.locator("#lesson .lstep").first.locator("[data-cmsg]").filter(has_text="很很很").wait_for(timeout=5000)
+    v = r.snap("按「這步看不懂」（107 字回饋）"); r.close()
+    rec("B18", has(v, "length", minchars=100), v)
     # B16 解釋藏在 hidden、未展開 details：不得借用；展開後另驗
     hid = '<span hidden>光合作用（植物用陽光做養分）</span>光合作用很重要。'
     det = '<details id="gl"><summary>看解釋</summary>光合作用（植物用陽光做養分）</details><span>光合作用很重要。</span>'
@@ -532,8 +546,92 @@ def u01(B):
     return {"ok": ok, "detail": res}
 
 
+# ---------------- 「這步看不懂」五種回饋（第 8 輪 B18：driver 原本沒按過，107 字的突變也不會被量到）----------------
+HOLD_CONFUSED_JS = r"""(function(){
+  var f = window.fetch;
+  window.fetch = function(url, cfg){
+    if (window.__holdConfused && cfg && /"op":"confused"/.test(String(cfg.body))) {
+      return new Promise(function(done){ window.__releaseConfused = function(){ done(f.apply(window, [url, cfg])); }; });
+    }
+    return f.apply(window, arguments);
+  };
+})();"""
+
+
+def confused_case(B, eid="sci-q5-bangen"):
+    modes = (("nocode", None, "這台還沒開同步"), ("sending", "ok", "送出中…"), ("ok", "ok", "收到了！會換一個更好懂的說法"),
+             ("fail", "fail", "沒送成功，請跟爸爸媽媽說"), ("net", "net", "沒送成功（可能沒有網路）"))
+    for name, mode, want in modes:
+        r = Run(B, B.device, f"{eid}:confused-{name}")
+        if mode:
+            r.ctx.add_init_script("try{localStorage.setItem('g5sync.code','ABCDEFGHJKMN')}catch(e){}")
+            r.ctx.add_init_script(HOLD_CONFUSED_JS)
+
+            def make_gas(mode):   # 不能用預設參數綁 mode：Playwright 依參數個數把 request 當第二個參數傳進來
+                def gas(route):
+                    req = json.loads(route.request.post_data or "{}")
+                    if req.get("op") == "confused" and mode == "net":   # 回壞內容＝fetch 那條 catch（WebKit 對 abort 會另報一條 access control 頁面錯誤）
+                        return route.fulfill(status=502, content_type="text/html", headers={"Access-Control-Allow-Origin": "*"}, body="<html>")
+                    body = {"ok": mode != "fail"} if req.get("op") == "confused" else {"ok": False, "err": "server"}
+                    route.fulfill(status=200, content_type="application/json", headers={"Access-Control-Allow-Origin": "*"}, body=json.dumps(body))
+                return gas
+            r.ctx.route(lambda u: u.startswith(EP), make_gas(mode))
+        r.go(f"#h/{eid}")
+        r.pg.get_by_role("button", name="開始學").click()
+        if name == "sending":
+            r.pg.evaluate("window.__holdConfused = true; 0")
+        r.pg.locator("#lesson .lstep").first.locator("button[data-confused]").click()
+        msg = r.pg.locator("#lesson .lstep").first.locator("[data-cmsg]")
+        try:
+            msg.filter(has_text=want).wait_for(timeout=5000)
+        except Exception:
+            pass
+        r.snap("按「這步看不懂」：" + name)
+        got = msg.inner_text()
+        if want in got:
+            r.mark(f"app:confused-{name}")
+        else:
+            r.errors.append(f"「這步看不懂」{name} 沒出現預期回饋：{got!r}")
+        if name == "sending":
+            r.pg.evaluate("window.__releaseConfused && window.__releaseConfused(); 0")
+            r.pg.wait_for_timeout(300); r.snap("送出中→收到了")
+        B.absorb(r.close(), [])
+
+
+# ---------------- 唯讀提示：第二個分頁、取鎖被拒、瀏覽器沒有 Web Locks（第 8 輪 B18：第二分頁提示 45 字沒人量）----------------
+def readonly_cases(B, eid="sci-q5-bangen"):
+    READONLY = "window.KidGate && window.G5HelpWriter && document.querySelector('#topBtns .banner')"
+    # 第二個分頁
+    r = Run(B, B.device, "readonly:second-tab")
+    r.go(f"#h/{eid}")
+    first = r.pg
+    second = r.ctx.new_page(); second.on("pageerror", lambda e: r.errors.append(str(e)))
+    second.goto(ORIGIN + "index.html#h/" + eid); second.wait_for_function(READONLY, timeout=15000)
+    r.pg = second
+    r.snap("第二個分頁：篇內")
+    ok = second.evaluate("G5HelpWriter()") is False and "另一個分頁" in second.locator("#topBtns").inner_text()
+    second.evaluate("location.hash=''; 0"); second.wait_for_selector("#home:not([hidden])")
+    second.locator("#setBox summary").click(); r.snap("第二個分頁：首頁家長設定")
+    r.branches.update(second.evaluate("window.__branches || []"))
+    second.close(); r.pg = first
+    B.absorb(r.close(), ["readonly:second-tab"] if ok else [])
+    for case, init, want in (("readonly:lockfail", "navigator.locks.request=function(){return Promise.reject(new Error('lock-rejected'));};", "拿不到存檔的權限"),
+                             ("readonly:nolocks", "try{Object.defineProperty(Navigator.prototype,'locks',{get:function(){return undefined;},configurable:true});}catch(e){}"
+                                                  "try{Object.defineProperty(navigator,'locks',{get:function(){return undefined;},configurable:true});}catch(e){}", "瀏覽器太舊")):
+        r = Run(B, B.device, case)
+        r.ctx.add_init_script(init)
+        r.pg.goto(ORIGIN + "index.html#h/" + eid); r.pg.wait_for_function(READONLY, timeout=15000)
+        r.snap("唯讀：" + case)
+        ok = want in r.pg.locator("#topBtns").inner_text()
+        if not ok:
+            r.errors.append(f"{case} 沒出現預期提示：{r.pg.locator('#topBtns').inner_text()!r}")
+        B.absorb(r.close(), [case] if ok else [])
+
+
 def run_browser(B):
     home_case(B)
+    confused_case(B)
+    readonly_cases(B)
     for eid in [e for e in json.loads(subprocess.check_output(["node", "-e", "console.log(JSON.stringify(require('./src/hard.js').LIST.map(e=>[e.id,e.kind])))"], cwd=ROOT))]:
         if eid[1] == "steps":
             steps_cases(B, eid[0])
@@ -550,13 +648,14 @@ def run_browser(B):
 
 def main():
     only = sys.argv[sys.argv.index("--only") + 1] if "--only" in sys.argv else None
-    limit = json.loads(subprocess.check_output(["node", "-e", "console.log(require('./src/hard.js').readingAt(new Date()).maxSentence)"], cwd=ROOT))
-    report = {"index_sha256": sha(ROOT / "index.html"), "kidgate_sha256": sha(ROOT / "tests" / "kidgate.js"), "driver_sha256": sha(Path(__file__)),
-              "max": limit, "self_max": SELF_MAX, "browsers": {}}
+    # 正式上限固定（小五 40，tests/kidtext.js OFFICIAL_MAX）：不用執行當天的年級換算（第 8 輪 B19：隔年同一份 41 字會從紅變綠）
+    limit = json.loads(subprocess.check_output(["node", "-e", "console.log(require('./tests/kidtext.js').OFFICIAL_MAX)"], cwd=ROOT))
+    stamp = {"index_sha256": sha(ROOT / "index.html"), "kidgate_sha256": sha(ROOT / "tests" / "kidgate.js"), "driver_sha256": sha(Path(__file__)), "max": limit}
+    report = dict(stamp, self_max=SELF_MAX, browsers={})
     if OUT.exists() and only:
-        old = json.loads(OUT.read_text())
-        if old.get("index_sha256") == report["index_sha256"]:
-            report["browsers"] = old.get("browsers", {})
+        # 只跑一個瀏覽器：另一個瀏覽器的結果原樣保留「它自己當時量的」hash（逐瀏覽器 stamp），由 tests/kidtext.js 逐瀏覽器判新鮮度；
+        # 採字器／driver／index.html 任一變了，那份舊結果就判過期，不會因為頂層 hash 換新而被沿用（第 8 輪）
+        report["browsers"] = {k: v for k, v in json.loads(OUT.read_text()).get("browsers", {}).items() if k != only}
     with sync_playwright() as p:
         for name, launcher, device in (("chromium", p.chromium, {"viewport": {"width": 1280, "height": 900}}),
                                        ("webkit", p.webkit, p.devices["iPad (gen 7)"])):
@@ -573,7 +672,7 @@ def main():
             uniq = {}
             for v in B.viol:
                 uniq.setdefault((v["kind"], v.get("word"), v.get("text")), v)
-            report["browsers"][name] = {"cases": sorted(B.cases), "branches": sorted(B.branches), "violations": list(uniq.values()),
+            report["browsers"][name] = {**stamp, "cases": sorted(B.cases), "branches": sorted(B.branches), "violations": list(uniq.values()),
                                         "selftests": B.selftests, "errors": B.errors, "snapshots": B.snaps}
             for v in uniq.values():
                 say(f"VIOLATION {name} [{v['kind']}] {v['case']} @ {v['at']}：" + (f"「{v.get('word')}」…{v['text']}…" if v["kind"] == "word" else f"{v.get('chars', '')} 字：{v['text']}"))

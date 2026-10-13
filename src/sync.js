@@ -129,7 +129,8 @@
     function blankCk(key) {
       var ck = {version: 1, codeHash: contentHash(code), key: key, baseline: null, pending: null};
       var old = metaBaseline(key);   // 舊版只有 g5sync.meta：只遷移已確認的 baseline，不編造 pending（A16）
-      if (old) { ck.baseline = {rev: old.rev, hash: old.hash, updated: integer(old.updated) ? old.updated : null}; }
+      // legacy：這個 baseline 來自舊版（舊版送出時不留 pending）⇒ 之後雲端前進、本機也改了，無法證明是哪台寫的（A16，第 8 輪）
+      if (old) { ck.baseline = {rev: old.rev, hash: old.hash, updated: integer(old.updated) ? old.updated : null, legacy: true}; }
       return ck;
     }
     function readCk(key) {
@@ -454,7 +455,7 @@
       if (cloud.rev === b.rev && contentHash(cloud.data) !== b.hash) { showConflict(key, cloud, true); return; }
       if (cloud.rev > b.rev) {
         if (contentHash(local) === b.hash) { replaceLocal(key, cloud, token); }
-        else { showConflict(key, cloud); }
+        else { showConflict(key, cloud, b.legacy === true); }   // 新版的 baseline 沒有 pending＝確定是另一台；舊版遷移來的＝無法確認
         return;
       }
       if (local !== null && contentHash(local) !== b.hash) { return startPending(key, local, b.rev, token); }
@@ -587,6 +588,12 @@
       }, force === true);
     }
     function activate(newCode) {
+      // 有 accept 的頁面從同步連結（#sync=同一家庭碼）重開＝同一個家庭重新加入：保留 checkpoint 與 baseline，交給恢復判斷（A05–A08，第 8 輪）。
+      // 換成不同家庭碼才作廢舊的待確認上傳（A16）。沒有 accept 的客戶端照舊一律清掉（A18）。
+      if (pageOwned && read(CODE) === newCode) {
+        stopped = false; resetSession(newCode); render();
+        return sync(true);
+      }
       // Clear the old baseline first. A partial storage failure then fails conservatively.
       storage.removeItem(META);
       if (pageOwned) { keys.forEach(function (key) { storage.removeItem(CKPT + key); }); }   // 換家庭：舊的待確認上傳作廢（A16）

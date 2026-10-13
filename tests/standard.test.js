@@ -10,7 +10,7 @@ const fs = require("fs");
 const path = require("path");
 const H = require("../src/hard.js");
 const ROOT = path.join(__dirname, "..");
-const MAX_SENTENCE = H.readingAt(new Date()).maxSentence;
+const MAX_SENTENCE = require("./kidtext.js").OFFICIAL_MAX;   // 固定小五 40（設計 D B19；第 8 輪：不跟執行日期漂移，年級換算另由 kidgate.test.js 測）
 const SELF = "help";   // 本站在三站切換列裡的代號
 
 // ===== 三站共通判準（三支 standard.test.js 這一段逐字相同，只有上面的 SELF／MAX_SENTENCE 與下面取資料的方式不同）=====
@@ -123,7 +123,7 @@ const harvestSelf = (id) => BROWSERS_OK(id);
 function BROWSERS_OK(id) { const h = KT.readHarvest(); return !!h && KT.BROWSERS.every((b) => h.browsers[b] && h.browsers[b].selftests[id] && h.browsers[b].selftests[id].ok); }
 
 test("標準③白話：孩子看到的每一句不超過年級句長上限（每一種 kind）", () => {
-  assert.equal(MAX_SENTENCE, (KT.readHarvest() || {}).max, "採字時的句長上限要等於今天年級的上限");
+  assert.equal(MAX_SENTENCE, (KT.readHarvest() || {}).max, "採字時的句長上限要等於正式上限（小五 40，固定）");
   assert.deepEqual(KT.harvestProblems(["length", "unclassified"]), []);
 });
 

@@ -1,11 +1,15 @@
 {
  "index_sha256": "e55e6d2870ac00e08d47fb10b15218b937471f235bd01d7a1659d56cb50abb73",
- "kidgate_sha256": "cad36d3a27ab4dc5716a44ae7151d6760e49f44f9b977a9d931d852e6e5614ae",
- "driver_sha256": "812c7bc883bfea052494be2b78953dadd79f45c86af43af549ee294aad58d349",
+ "kidgate_sha256": "a04d71ab1e674b838882259504b3f0666b6ebc552e9443a536406664561715c6",
+ "driver_sha256": "6518700e20affa6954bfd3dfb32b24d4a335ebfc1f47efec554a404b00c6cf8d",
  "max": 40,
  "self_max": 40,
  "browsers": {
   "chromium": {
+   "index_sha256": "e55e6d2870ac00e08d47fb10b15218b937471f235bd01d7a1659d56cb50abb73",
+   "kidgate_sha256": "a04d71ab1e674b838882259504b3f0666b6ebc552e9443a536406664561715c6",
+   "driver_sha256": "6518700e20affa6954bfd3dfb32b24d4a335ebfc1f47efec554a404b00c6cf8d",
+   "max": 40,
    "cases": [
     "home",
     "home:hide",
@@ -17,6 +21,9 @@
     "p38-6-2:practice",
     "p38-6-2:resume",
     "p38-6-2:video",
+    "readonly:lockfail",
+    "readonly:nolocks",
+    "readonly:second-tab",
     "sci-q5-bangen:direct",
     "sci-q5-bangen:lesson",
     "sci-q5-bangen:mastery",
@@ -28,6 +35,11 @@
    ],
    "branches": [
     "app:alt",
+    "app:confused-fail",
+    "app:confused-net",
+    "app:confused-nocode",
+    "app:confused-ok",
+    "app:confused-sending",
     "app:finish-clean",
     "app:finish-hint",
     "app:finish-wrong",
@@ -338,8 +350,32 @@
         "case": "self",
         "at": "開始學"
        }
+      ],
+      "preline-newline": [],
+      "normal-newline": [
+       {
+        "kind": "length",
+        "unit": "lesson",
+        "chars": 50,
+        "text": "甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙",
+        "case": "self",
+        "at": "開始學"
+       }
       ]
      }
+    },
+    "B18": {
+     "ok": true,
+     "detail": [
+      {
+       "kind": "length",
+       "unit": "lesson",
+       "chars": 105,
+       "text": "很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很",
+       "case": "self",
+       "at": "按「這步看不懂」（107 字回饋）"
+      }
+     ]
     },
     "B16": {
      "ok": true,
@@ -438,9 +474,13 @@
     }
    },
    "errors": [],
-   "snapshots": 133
+   "snapshots": 143
   },
   "webkit": {
+   "index_sha256": "e55e6d2870ac00e08d47fb10b15218b937471f235bd01d7a1659d56cb50abb73",
+   "kidgate_sha256": "a04d71ab1e674b838882259504b3f0666b6ebc552e9443a536406664561715c6",
+   "driver_sha256": "6518700e20affa6954bfd3dfb32b24d4a335ebfc1f47efec554a404b00c6cf8d",
+   "max": 40,
    "cases": [
     "home",
     "home:hide",
@@ -452,6 +492,9 @@
     "p38-6-2:practice",
     "p38-6-2:resume",
     "p38-6-2:video",
+    "readonly:lockfail",
+    "readonly:nolocks",
+    "readonly:second-tab",
     "sci-q5-bangen:direct",
     "sci-q5-bangen:lesson",
     "sci-q5-bangen:mastery",
@@ -463,6 +506,11 @@
    ],
    "branches": [
     "app:alt",
+    "app:confused-fail",
+    "app:confused-net",
+    "app:confused-nocode",
+    "app:confused-ok",
+    "app:confused-sending",
     "app:finish-clean",
     "app:finish-hint",
     "app:finish-wrong",
@@ -773,8 +821,32 @@
         "case": "self",
         "at": "開始學"
        }
+      ],
+      "preline-newline": [],
+      "normal-newline": [
+       {
+        "kind": "length",
+        "unit": "lesson",
+        "chars": 50,
+        "text": "甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙",
+        "case": "self",
+        "at": "開始學"
+       }
       ]
      }
+    },
+    "B18": {
+     "ok": true,
+     "detail": [
+      {
+       "kind": "length",
+       "unit": "lesson",
+       "chars": 105,
+       "text": "很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很",
+       "case": "self",
+       "at": "按「這步看不懂」（107 字回饋）"
+      }
+     ]
     },
     "B16": {
      "ok": true,
@@ -873,7 +945,7 @@
     }
    },
    "errors": [],
-   "snapshots": 133
+   "snapshots": 143
   }
  }
 }

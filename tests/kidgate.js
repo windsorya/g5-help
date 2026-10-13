@@ -91,11 +91,17 @@
         continue;
       }
       var el = n.parentElement;
-      if (!el || !n.nodeValue || !/\S/.test(n.nodeValue) || !shown(el, win)) { continue; }
+      if (!el || !n.nodeValue || !shown(el, win)) { continue; }
       var block = blockOf(el, win);
       if (!block) { continue; }
-      var ws = win.getComputedStyle(block).whiteSpace;
-      var t = /^(pre|pre-line|pre-wrap|break-spaces)$/.test(ws) ? n.nodeValue.replace(/[ \t]+/g, ' ') : n.nodeValue.replace(/\s+/g, ' ');
+      // 先看 white-space 再決定純空白節點算不算：pre／pre-line／pre-wrap／break-spaces 下的換行是真正換行（句界，Codex 第 8 輪 B15），
+      // 其他情況的純空白只是排版空白，照舊略過（不開新區塊）
+      var ws = win.getComputedStyle(block).whiteSpace, keepsNewline = /^(pre|pre-line|pre-wrap|break-spaces)$/.test(ws);
+      if (!/\S/.test(n.nodeValue)) {
+        if (keepsNewline && /\n/.test(n.nodeValue) && cur && cur.el === block) { cur.text += '\n'; }
+        continue;
+      }
+      var t = keepsNewline ? n.nodeValue.replace(/[ \t]+/g, ' ') : n.nodeValue.replace(/\s+/g, ' ');
       if (!cur || cur.el !== block) {
         var r = regionOf(block);
         cur = {el: block, text: '', cat: r.cat, unit: r.unit, sel: r.sel, tag: block.tagName.toLowerCase()};

@@ -77,16 +77,21 @@ class Case:
         self.ctx.clock.install()
         self.pg = None
 
-    def open(self):
+    def open(self, frag=""):
         self.pg = self.ctx.new_page()
         self.pg.on("pageerror", lambda e: self.errors.append(str(e)))
-        self.pg.goto(ORIGIN + "index.html")
+        self.pg.goto(ORIGIN + "index.html" + frag)
         self.pg.wait_for_function("window.G5HelpWriter && G5HelpWriter() && document.querySelector('#g5sync .g5s-panel')", timeout=15000)
         return self.pg
 
     def reopen(self):
         self.pg.close()
         return self.open()
+
+    def reopen_link(self, code):
+        """從家長傳來的同步連結（#sync=同一家庭碼）重開——孩子實際常用的入口（第 8 輪 A05–A08 FAIL）。"""
+        self.pg.close()
+        return self.open("#sync=" + code)
 
     def tick(self, ms):
         for _ in range(max(1, ms // 1000)):
@@ -230,8 +235,50 @@ def run(browser, device, label):
             c.keeps_syncing(code, n + 1, 4, "A08")
         return f
 
+    # A05L–A08L：同 A05–A08，但從同步連結（#sync=同一家庭碼）重開；另驗 checkpoint 沒被清掉、之後仍有請求
+    def via_link(c, code):
+        c.reopen_link(code)
+        frag = c.pg.evaluate("location.hash")
+        check(f"{c.label} 同步連結重開後網址的 #sync 已拿掉", "sync=" not in frag, frag)
+
+    def a05l(c):
+        code = first_enable_lost(c)
+        via_link(c, code); c.tick(60000); c.settled(code, 8, 1, "A05L 連結重開不多答")
+        c.keeps_syncing(code, 9, 2, "A05L")
+
+    def a06l(before):
+        def f(c):
+            code = first_enable_lost(c)
+            if before:
+                n = c.answer(); via_link(c, code)
+            else:
+                c.be.down = True; via_link(c, code); n = c.answer(); c.be.down = False
+                c.pg.evaluate("window.dispatchEvent(new Event('online')); 0")
+            c.tick(60000); c.settled(code, n, 2, "A06L 連結重開" + ("前" if before else "後恢復前") + "多答")
+            c.keeps_syncing(code, n + 1, 3, "A06L")
+        return f
+
+    def a07l(c):
+        code = baseline8(c); n = lose_d9(c)
+        via_link(c, code); c.tick(60000); c.settled(code, n, 2, "A07L 連結重開不多答")
+        c.keeps_syncing(code, n + 1, 3, "A07L")
+
+    def a08l(before):
+        def f(c):
+            code = baseline8(c); lose_d9(c)
+            if before:
+                n = c.answer(); via_link(c, code)
+            else:
+                c.be.down = True; via_link(c, code); n = c.answer(); c.be.down = False
+                c.pg.evaluate("window.dispatchEvent(new Event('online')); 0")
+            c.tick(60000); c.settled(code, n, 3, "A08L 連結重開" + ("前" if before else "後恢復前") + "多答")
+            c.keeps_syncing(code, n + 1, 4, "A08L")
+        return f
+
     for name, fn in (("A01", a01), ("A02", a02), ("A03", a03), ("A04", a04), ("A05", a05), ("A06a", a06(True)), ("A06b", a06(False)),
-                     ("A07", a07), ("A08a", a08(True)), ("A08b", a08(False))):
+                     ("A07", a07), ("A08a", a08(True)), ("A08b", a08(False)),
+                     ("A05L", a05l), ("A06La", a06l(True)), ("A06Lb", a06l(False)),
+                     ("A07L", a07l), ("A08La", a08l(True)), ("A08Lb", a08l(False))):
         case(name, fn)
 
 
