@@ -3,6 +3,8 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const U = require('../src/upload.js');
 
 test('說明加前綴【補題:科目:單元】；多張照片標第幾張', () => {
@@ -74,6 +76,76 @@ test('多張照片送出結果的訊息：全成功／部分失敗講清楚哪�
   assert.match(none, /沒有送出/);
   assert.match(none, /再按一次/);
   assert.doesNotMatch(none, /送出 0 張/);
+});
+
+// ── 清單／撤回生命週期用到的純函式（Codex 設計者結論 docs/upload-list-lifecycle-codex-designer-20261013.md；瀏覽器行為見 tests/e2e_upload.py U1–U15）──
+
+test('GAS 回應：HTTP 不是 2xx、不是 JSON、不是物件，一律當失敗（U15：錯誤頁不能當成功）', () => {
+  assert.throws(() => U.parseReply(false, '{"ok":true,"items":[]}'));
+  assert.throws(() => U.parseReply(true, '<html>Error</html>'));
+  assert.throws(() => U.parseReply(true, ''));
+  assert.throws(() => U.parseReply(true, '[1,2]'));
+  assert.throws(() => U.parseReply(true, 'null'));
+  assert.throws(() => U.parseReply(true, '"ok"'));
+  assert.deepEqual(U.parseReply(true, '{"ok":true,"items":[]}'), { ok: true, items: [] });
+  assert.deepEqual(U.parseReply(true, '{"ok":false,"err":"server"}'), { ok: false, err: 'server' });
+});
+
+test('清單回應形狀：只有 ok:true 且 items 是陣列才算成功', () => {
+  assert.deepEqual(U.mineItems({ ok: true, items: [{ id: 'a' }] }), [{ id: 'a' }]);
+  assert.deepEqual(U.mineItems({ ok: true, items: [] }), []);
+  assert.equal(U.mineItems({ ok: true, items: null }), null);
+  assert.equal(U.mineItems({ ok: true, items: {} }), null);
+  assert.equal(U.mineItems({ ok: true, items: 'a,b' }), null);
+  assert.equal(U.mineItems({ ok: true }), null);
+  assert.equal(U.mineItems({ ok: false, items: [] }), null);
+  assert.equal(U.mineItems({ ok: 'true', items: [] }), null);
+  assert.equal(U.mineItems(null), null);
+});
+
+test('撤回結果分類：成功／做好了／找不到／其他失敗／無法確認（回應殘缺不算失敗也不算成功）', () => {
+  assert.equal(U.withdrawOutcome({ ok: true }), 'ok');
+  assert.equal(U.withdrawOutcome({ ok: true, already: true }), 'ok');
+  assert.equal(U.withdrawOutcome({ ok: false, err: 'done' }), 'done');
+  assert.equal(U.withdrawOutcome({ ok: false, err: 'not-found' }), 'not-found');
+  assert.equal(U.withdrawOutcome({ ok: false, err: 'bad-id' }), 'fail');
+  assert.equal(U.withdrawOutcome({ ok: false }), 'fail');
+  assert.equal(U.withdrawOutcome(null), 'unknown');
+  assert.equal(U.withdrawOutcome({}), 'unknown');
+  assert.equal(U.withdrawOutcome({ ok: 1 }), 'unknown');
+});
+
+test('撤回訊息：網路失敗、逾時、回應殘缺都講「還沒確認」，不說成功、也不說沒撤回（伺服器可能已經做了）', () => {
+  ['net', 'timeout', 'unknown'].forEach((o) => {
+    assert.match(U.withdrawMessage(o), /還沒確認/, o);
+    assert.doesNotMatch(U.withdrawMessage(o), /撤回了|沒有撤回成功/, o);
+  });
+  assert.match(U.withdrawMessage('ok'), /撤回了/);
+  assert.match(U.withdrawMessage('done'), /已經做好了/);
+  assert.match(U.withdrawMessage('not-found'), /找不到/);
+  assert.match(U.withdrawMessage('fail'), /沒有撤回成功/);
+});
+
+test('家庭碼：空字串、null、非字串都當作沒開同步（不能拿空碼去查）', () => {
+  assert.equal(U.familyOf(''), null);
+  assert.equal(U.familyOf(null), null);
+  assert.equal(U.familyOf(undefined), null);
+  assert.equal(U.familyOf(123), null);
+  assert.equal(U.familyOf('ABCDEFGHJKMN'), 'ABCDEFGHJKMN');
+});
+
+test('已確認撤回的題目：之後任何清單回應都濾掉（撤回前發出的查詢晚到、伺服器慢一步都不讓它回來）', () => {
+  const items = [{ id: 'a' }, { id: 'b' }, { id: 'c-1' }, { id: 'd' }, { id: '__proto__' }];
+  assert.deepEqual(U.dropWithdrawn(items, ['b', 'c-1', '__proto__']).map((x) => x.id), ['a', 'd']);
+  assert.deepEqual(U.dropWithdrawn(items, []).map((x) => x.id), ['a', 'b', 'c-1', 'd', '__proto__']);
+  assert.deepEqual(U.dropWithdrawn(null, ['a']), []);
+});
+
+test('查詢與撤回的期限 90 秒（設計者設計值），常數旁寫明 cap-why', () => {
+  assert.equal(U.DEADLINE_MS, 90000);
+  const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'upload.js'), 'utf8');
+  const line = src.split('\n').find((l) => /DEADLINE_MS\s*=\s*90000/.test(l));
+  assert.ok(line && /cap-why:/.test(line), line);
 });
 
 test('清單查詢的本科前綴：與說明前綴同形、後端 PREFIX_RE 收得下；科目不對丟錯', () => {
