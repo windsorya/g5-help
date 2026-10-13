@@ -227,7 +227,8 @@
     function onCodeChange(e) { onFamilyEvent(e && typeof e.newValue !== "undefined" ? e.newValue : myCode()); }
     function onStorage(e) {
       if (e && e.key === CODE_KEY) { onFamilyEvent(e.newValue); return; }
-      if (!e || e.key === null || typeof e.key === "undefined") { if (familyCheck()) refresh(); }   // 整個清掉或不明事件：照輪詢比
+      if (e && e.key === null) { onFamilyEvent(null); return; }   // 別頁 clear()：同步碼曾被清掉＝有事件，送達時即使已恢復原碼也作廢（審 0b02f39）
+      if (!e || typeof e.key === "undefined") { if (familyCheck()) refresh(); }   // 不明事件：照輪詢比
     }
 
     // 唯一的清單查詢入口：掛載、重新整理鈕、reload()、上傳結束、撤回結束、換家庭後都走這裡
@@ -370,7 +371,9 @@
         if (!still()) return;   // 已被換家庭、stop、重掛終結：不解別人的鎖、不清草稿、不改訊息
         endOp(op); UP_OP = null; lock(false);
         var all = oks.length === files.length && oks.every(function (x) { return x === true; });
-        msg(out, op.noFamily ? "這台裝置的同步碼在雲端找不到紀錄：請先在「跨裝置同步」按一次同步再送。" : sendSummary(files.length, oks), !all);
+        // 同一批若還有送到或不確定的照片，照結果分類一起講，不能只叫人整批重送（審 0b02f39）
+        var settled = oks.length === files.length && oks.every(function (x) { return x === false; });
+        msg(out, op.noFamily ? "這台裝置的同步碼在雲端找不到紀錄：請先在「跨裝置同步」按一次同步再送。" + (settled ? "" : sendSummary(files.length, oks)) : sendSummary(files.length, oks), !all);
         if (all) { $(".g5u-file").value = ""; $(".g5u-note").value = ""; }
         if (op.dispatched) dropQuery();   // 送過照片：送出前發的查詢看不到新題，作廢重查
         refresh();

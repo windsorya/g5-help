@@ -399,7 +399,9 @@ test('A06 沒有任何事件、也沒被輪詢看到的 A→B→A（期間上傳
 
 for (const [label, flip] of [
   ['同頁 sync.js 自訂事件', (E) => { E.rawSet(CB); E.codeEvent(CA, CB); E.rawSet(CA); E.codeEvent(CB, CA); }],
-  ['別頁 storage 事件', (E) => { E.rawSet(CB); E.rawSet(CA); E.storageEvent(CA, CB); E.storageEvent(CB, CA); }]
+  ['別頁 storage 事件', (E) => { E.rawSet(CB); E.rawSet(CA); E.storageEvent(CA, CB); E.storageEvent(CB, CA); }],
+  // 審 0b02f39 第 1 列：別頁 localStorage.clear()（storage 事件 key:null）後又恢復原碼；事件送達時已讀回 A，也算「有事件」
+  ['別頁 clear() 後恢復原碼', (E) => { E.rawSet(null); E.rawSet(CA); E.fire('storage', { key: null, oldValue: null, newValue: null }); E.storageEvent(null, CA); }]
 ]) {
   test(`A07 有事件的 A→B→A（${label}）：在途上傳第二張不送、草稿保留、提示不確定有沒有送到；在途撤回的成功不顯示`, async () => {
     const E = makeEnv(CA);
@@ -467,6 +469,35 @@ test('A09 第一張回應遺失（伺服器其實存了）、第二張縮圖時�
   assert.match(out, /不確定有沒有送到/, out);
   assert.ok(!out.includes(D0), out);
   assert.equal(E.n()['g5u-note'].value, '草稿');
+});
+
+// 審 0b02f39 第 2 列：同一批裡有 no-family、也有回應遺失的照片：不能只叫人「按一次同步再送」（整批重送會讓那張留兩筆）
+test('A09b 第一張回 no-family、第二張回應遺失（伺服器其實存了）：提示同時講同步與「不確定有沒有送到、不要直接重送」，草稿保留', async () => {
+  const E = makeEnv(CA);
+  E.db[CA + '|' + PRE.國語] = [it('a1')];
+  E.mount(); await flush();
+  E.hold = (b) => b.op === 'upload';
+  await E.send([1, 2], '草稿');
+  E.pending('upload')[0].reply({ ok: false, err: 'no-family' }); await flush();
+  E.db[CA + '|' + PRE.國語].unshift(it('up2'));   // 伺服器存了第二張
+  E.pending('upload')[0].fail(); await flush();
+  const out = E.text('g5u-out');
+  assert.match(out, /同步/, out);
+  assert.match(out, /不確定有沒有送到/, out);
+  assert.match(out, /不要直接重送/, out);
+  assert.equal(E.n()['g5u-note'].value, '草稿');
+});
+
+test('A09c 整批都回 no-family：只講先按一次同步再送（不多出不確定提示）', async () => {
+  const E = makeEnv(CA);
+  E.mount(); await flush();
+  E.hold = (b) => b.op === 'upload';
+  await E.send([1, 2], '草稿');
+  E.pending('upload')[0].reply({ ok: false, err: 'no-family' }); await flush();
+  E.pending('upload')[0].reply({ ok: false, err: 'no-family' }); await flush();
+  const out = E.text('g5u-out');
+  assert.match(out, /按一次同步再送/, out);
+  assert.doesNotMatch(out, /不確定/, out);
 });
 
 test('A10 同頁國語＋數學、別頁換 B 一次、兩筆都回成功、之後一律失敗：B:2/0/0、各自是本科的 B、沒有第 3 筆', async () => {
