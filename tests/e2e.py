@@ -460,7 +460,13 @@ def flow_codex_help_r1(browser):
     ctx, page, errors = open_page(browser, init=init)
     st = page.evaluate("G5HelpPage.state('p38-6-2')")
     keys = page.evaluate("Object.keys(localStorage)")
-    check("必修2 新紀錄壞掉時仍搬入舊紀錄（做完 2 題），壞掉的原文另存", st and st["solved"] == 2 and any(k.startswith("g5help.v1.broken.") for k in keys), (st, keys))
+    check("必修2 新紀錄壞掉時仍搬入舊紀錄（做完 2 題）；讀取時不動原文（第 4 輪必修 3）", st and st["solved"] == 2 and page.evaluate("localStorage.getItem('g5help.v1')") == "{bad", (st, keys))
+    page.get_by_role("button", name="繼續練習（第 3 題）").click()
+    solve_practice(page, *FIXED[2])
+    keys = page.evaluate("Object.keys(localStorage)")
+    bk = [k for k in keys if k.startswith("g5help.v1.broken.")]
+    check("必修2 第一次存檔才備份壞原文（備份內容＝原文），主 key 換成新紀錄、做完 3 題",
+          len(bk) == 1 and page.evaluate(f"localStorage.getItem('{bk[0]}')") == "{bad" and store(page)["solved"] == 3, (bk, store(page)))
     ctx.close()
     # 必修 3：左小右大的分數題，答對時講對方向
     lt = {"id": "t-frac-lt", "date": "2026-10-13", "subject": "數學", "kind": "frac-compare", "source": "測試", "title": "測試：左小右大",
@@ -557,6 +563,47 @@ def flow_single_writer(browser, label):
     ctx2.close()
 
 
+def flow_codex_r4(browser):
+    """Codex 2026-10-13 第 4 輪（設計後首輪）必修 1、2、5 與建議 7。"""
+    seed = "localStorage.setItem('g5help.v1',JSON.stringify({v:1,entries:{'p38-6-2':{solved:8,idx:8,r:1},'t-guoyu':{solved:5,idx:5,r:1}}}));"
+    # 必修 1（T21）：讀取突然失敗時存檔，不能把另一篇洗掉
+    ctx, pg, errors = open_page(browser, init=FIXTURE + "if(!sessionStorage.getItem('a')){sessionStorage.setItem('a','1');" + seed + "}", url=HOME + "#h/t-guoyu")
+    pg.wait_for_function("window.G5HelpWriter && G5HelpWriter()")
+    pg.evaluate("(function(){var g=window.__origGet=Storage.prototype.getItem;Storage.prototype.getItem=function(k){if(k==='g5help.v1')throw new Error('io');return g.call(this,k);};})(); 0")
+    pg.get_by_role("button", name="我已經會了，直接練習").click()
+    pg.locator('#practice .chip[data-k="1"]').click()
+    raw = pg.evaluate("(function(){Storage.prototype.getItem=window.__origGet;return localStorage.getItem('g5help.v1');})()")
+    db = json.loads(raw)["entries"]
+    check("r4必修1 讀取失敗時不寫入：數學仍 8 題、國語仍 5 題（進度留在記憶體）", db["p38-6-2"]["solved"] == 8 and db["t-guoyu"]["solved"] == 5 and pg.evaluate("G5HelpDirty()") == 1, {k: v["solved"] for k, v in db.items()})
+    ctx.close()
+    # 必修 2（T16）：壞資料備份失敗後，空間恢復要能重試存進去
+    init = ("if(!sessionStorage.getItem('b')){sessionStorage.setItem('b','1');localStorage.setItem('g5help.v1','{bad');}"
+            "window.__fail=true;var _s=Storage.prototype.setItem;Storage.prototype.setItem=function(k,v){if(window.__fail&&String(k).indexOf('g5help.v1.broken.')===0)throw new Error('quota');return _s.call(this,k,v);};")
+    ctx, pg, errors = open_page(browser, init=init)
+    pg.wait_for_function("window.G5HelpWriter && G5HelpWriter()")
+    pg.get_by_role("button", name="我已經會了，直接練習").click()
+    solve_practice(pg, *FIXED[0])
+    check("r4必修2 備份失敗：原文不動、進度標成未存", pg.evaluate("localStorage.getItem('g5help.v1')") == "{bad" and pg.evaluate("G5HelpDirty()") == 1)
+    pg.evaluate("window.__fail=false; 0")
+    pg.locator("#nextQ").click(); solve_practice(pg, *FIXED[1])
+    check("r4必修2 空間恢復後重試成功：兩題都存進去、未存歸零", store(pg)["solved"] == 2 and pg.evaluate("G5HelpDirty()") == 0, store(pg))
+    ctx.close()
+    # 必修 5（T20）：取鎖被瀏覽器拒絕 ⇒ 唯讀並說明、沒有 JS 錯誤
+    ctx, pg, errors = open_page(browser, init="navigator.locks.request=function(){return Promise.reject(new Error('lock-rejected'));};")
+    pg.wait_for_timeout(500)
+    check("r4必修5 取鎖被拒：唯讀並說明", pg.evaluate("G5HelpWriter()") is False and "拿不到存檔的權限" in pg.locator("#topBtns").inner_text(), pg.locator("#topBtns").inner_text())
+    check("r4必修5 取鎖被拒：沒有未處理的錯誤", not errors, errors)
+    ctx.close()
+    # 建議 7（T22）：唯讀分頁對 localStorage 的寫入次數＝0
+    ctx = browser.new_context(); ctx.add_init_script(FIXTURE + "window.__w=0;var _s2=Storage.prototype.setItem,_r2=Storage.prototype.removeItem;Storage.prototype.setItem=function(k,v){window.__w++;return _s2.call(this,k,v);};Storage.prototype.removeItem=function(k){window.__w++;return _r2.call(this,k);};")
+    a = ctx.new_page(); a.goto(URL); a.wait_for_function("window.G5HelpWriter && G5HelpWriter()")
+    b = ctx.new_page(); b.goto(HOME + "#h/t-guoyu"); b.wait_for_timeout(800)
+    a.get_by_role("button", name="我已經會了，直接練習").click(); solve_practice(a, *FIXED[0])
+    b.wait_for_timeout(500)
+    check("r4建議7 唯讀分頁寫入次數＝0", b.evaluate("G5HelpWriter()") is False and b.evaluate("window.__w") == 0, b.evaluate("window.__w"))
+    ctx.close()
+
+
 def main():
     with sync_playwright() as p:
         cr = p.chromium.launch()
@@ -570,6 +617,7 @@ def main():
         flow_codex_help_r1(cr)
         flow_codex_help_r2(cr)
         flow_single_writer(cr, "Chromium")
+        flow_codex_r4(cr)
         flow_home(cr)
         flow_migrate(cr)
         flow_steps(cr, "手機390", {"viewport": {"width": 390, "height": 844}, "is_mobile": True, "has_touch": True}, shots=True)

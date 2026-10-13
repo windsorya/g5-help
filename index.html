@@ -471,57 +471,67 @@ function parseDB(raw){
 // ①每篇帶版本號 r；本分頁記 BASE[id]＝最後讀到或寫入的 r。
 // ②存檔先讀磁碟另一份；磁碟這篇的 r 比 BASE 新＝別的分頁先更新了 ⇒ 改用磁碟版、重開這篇、不覆寫。
 // ③寫成功才更新 BASE；寫失敗時記憶體裡的進度一律不動（DIRTY 記著，下次一起寫）。
-// ④壞掉的紀錄備份不了 ⇒ BLOCKED：不刪原文、不再寫入，進度只留在畫面上。
-var WRITER = false, BLOCKED = false, BASE = Object.create(null), DIRTY = Object.create(null);
-function readEntries(){
-  var raw = null;
-  try { raw = localStorage.getItem(KEY); } catch (e) { return Object.create(null); }
+// ④壞掉的紀錄：先用不撞名的 key 備份並讀回核對，成功才用新資料覆蓋主 key；備份不了就不覆蓋，進度留在記憶體、下次存檔再試。
+// ⑤讀取失敗≠沒有紀錄；DIRTY 在任何失敗出口之前先記；同一時間只有一個寫入分頁（Web Locks）。
+var WRITER = false, BASE = Object.create(null), DIRTY = Object.create(null), BACKED = null;
+// 讀磁碟：只讀、不寫（Codex 第 4 輪必修 1、3）。回 {ok:false} ＝讀取失敗（不是「沒有紀錄」），呼叫端不得據此寫入；
+// broken＝主 key 有原文但讀不懂，備份與替換一律在 save() 裡、確認備份成功後才做。
+function readDisk(){
+  var raw;
+  try { raw = localStorage.getItem(KEY); } catch (e) { return {ok:false}; }
   var es = raw === null ? null : parseDB(raw);
-  if (es) return es;
-  if (raw !== null && WRITER) {   // 唯讀分頁不做任何寫入（含備份壞資料）
-    try { localStorage.setItem(KEY + ".broken." + Date.now(), raw); localStorage.removeItem(KEY); }
-    catch (e) { BLOCKED = true; }   // 備份失敗：原文留在原地，之後不寫
-  }
+  if (es) return {ok:true, entries:es, broken:null};
   es = Object.create(null);
   try {
     // 2026-10-12 那一頁放在自然複習網站時存在 g5math.v1：搬進第 1 篇（舊資料原文不動）
     var old = JSON.parse(localStorage.getItem("g5math.v1") || "null");
     if (old && old.v === 1) es["p38-6-2"] = clean1(old);
   } catch (e) {}
-  return es;
+  return {ok:true, entries:es, broken:raw};   // raw 為 null＝第一次用；非 null＝壞資料待備份
 }
-function loadDB(){ var es = readEntries(); Object.keys(es).forEach(function(id){ BASE[id] = es[id].r; }); return {v:1, entries:es}; }
-var DB = loadDB(), st = null, NOTICE = "";
+function readEntries(){ var d = readDisk(); return d.ok ? d.entries : null; }
+function loadDB(){ var d = readDisk(), es = d.ok ? d.entries : Object.create(null); Object.keys(es).forEach(function(id){ BASE[id] = es[id].r; }); return {v:1, entries:es, readOk:d.ok}; }
+var DB = loadDB(), st = null, NOTICE = "", GEN = 0;
 function stateOf(id){ if (!own(DB.entries, id)) { DB.entries[id] = fresh(); BASE[id] = 0; } return DB.entries[id]; }
+function dirtyCount(){ return Object.keys(DIRTY).length; }
 function adoptNewer(disk){
-  // 別的分頁更新了目前這一篇：改用磁碟版並重開這一篇
-  DB.entries[E.id] = disk[E.id]; BASE[E.id] = disk[E.id].r; delete DIRTY[E.id];
-  NOTICE = "另一個分頁剛更新了這一篇，已換成最新的進度。";
-  setTimeout(function(){ if (E) openEntry(E); }, 0);
+  // 別的分頁更新了目前這一篇：改用磁碟版並重開這一篇（延後工作綁篇 id＋畫面世代，切走就作廢；Codex 第 4 輪必修 4）
+  var id = E.id, gen = GEN;
+  DB.entries[id] = disk[id]; BASE[id] = disk[id].r; delete DIRTY[id];
+  setTimeout(function(){ if (E && E.id === id && GEN === gen) { NOTICE = "另一個分頁剛更新了這一篇，已換成最新的進度。"; openEntry(E); } }, 0);
+}
+function backupBroken(raw){
+  // 壞資料：用不會撞名的 key 備份並讀回核對；成功才允許之後用新資料覆蓋主 key（不先刪主 key）
+  if (BACKED === raw) return true;
+  var k = KEY + ".broken." + Date.now() + "." + Math.floor(Math.random() * 1e9);
+  try { localStorage.setItem(k, raw); if (localStorage.getItem(k) !== raw) return false; BACKED = raw; return true; } catch (e) { return false; }
 }
 function save(){
   if (!WRITER) return false;   // 唯讀分頁（另一個分頁在練）一律不寫
-  if (BLOCKED) return false;
-  var disk = readEntries();
-  if (BLOCKED) return false;
-  if (E && st && own(disk, E.id) && disk[E.id].r > (BASE[E.id] || 0)) { adoptNewer(disk); return false; }
-  if (E && st) DIRTY[E.id] = true;
+  if (E && st) DIRTY[E.id] = true;   // 任何失敗出口之前先記下「這篇有沒存好的進度」（Codex 第 4 輪必修 2）
+  var d = readDisk();
+  if (!d.ok) { drawRec(); return false; }   // 讀取失敗≠沒有紀錄：不寫，進度留在記憶體，下次再試
+  if (d.broken !== null && !backupBroken(d.broken)) { drawRec(); return false; }   // 備份不了就不覆蓋原文；下次存檔會再試
+  var disk = d.entries;
+  if (E && st && own(disk, E.id) && disk[E.id].r > (BASE[E.id] || 0) && !own(DIRTY, E.id)) { adoptNewer(disk); return false; }
   var out = Object.create(null), next = Object.create(null);
   Object.keys(disk).forEach(function(id){ out[id] = disk[id]; });
   Object.keys(DIRTY).forEach(function(id){
-    if (own(disk, id) && disk[id].r > (BASE[id] || 0)) { delete DIRTY[id]; return; }   // 別篇被別的分頁更新過：以磁碟為準
-    var copy = JSON.parse(JSON.stringify(DB.entries[id])); copy.r = (BASE[id] || 0) + 1; out[id] = copy; next[id] = copy.r;
+    if (!own(DB.entries, id)) { delete DIRTY[id]; return; }
+    var copy = JSON.parse(JSON.stringify(DB.entries[id])); copy.r = Math.max(BASE[id] || 0, own(disk, id) ? disk[id].r : 0) + 1; out[id] = copy; next[id] = copy.r;
   });
-  try { localStorage.setItem(KEY, JSON.stringify({v:1, entries:out})); } catch (e) { return false; }
+  try { localStorage.setItem(KEY, JSON.stringify({v:1, entries:out})); } catch (e) { drawRec(); return false; }
   Object.keys(next).forEach(function(id){ BASE[id] = next[id]; DB.entries[id].r = next[id]; delete DIRTY[id]; });
   Object.keys(disk).forEach(function(id){ if (!own(next, id) && !own(DIRTY, id)) { DB.entries[id] = disk[id]; BASE[id] = disk[id].r; } });
   if (E) st = DB.entries[E.id];
+  drawRec();
   return true;
 }
 // 別的分頁存檔時：其他篇換成磁碟版（還沒寫出去的除外）；目前這一篇若磁碟較新，改用並重開
 window.addEventListener("storage", function(ev){
   if (ev.key !== KEY) return;
   var disk = readEntries();
+  if (!disk) return;   // 讀不到就什麼都不動
   Object.keys(disk).forEach(function(id){ if (own(DIRTY, id) || (E && id === E.id)) return; DB.entries[id] = disk[id]; BASE[id] = disk[id].r; });
   if (E && own(disk, E.id) && disk[E.id].r > (BASE[E.id] || 0) && !own(DIRTY, E.id)) adoptNewer(disk);
   if (!E) drawHome();
@@ -539,7 +549,9 @@ function parseNum(raw){
 function chipsAsk(body, q, opts, judge, onOk, cls){
   var box = add(body, '<div class="ask"><div class="qq">' + q + '</div><div class="chips">' + opts.map(function(o, i){ return '<button type="button" class="chip' + (cls ? " " + cls : "") + '" data-i="' + i + '">' + o.label + '</button>'; }).join("") + '</div><div class="fb" hidden></div></div>');
   var out = $(".fb", box), bs = box.querySelectorAll(".chip");
+  var g0 = GEN;
   each(bs, function(b){ b.onclick = function(){
+    if (g0 !== GEN) return;
     var o = opts[+b.dataset.i], r = judge(o.value);
     if (r.ok) { each(bs, function(x){ x.disabled = true; }); b.classList.add("picked"); fb(out, true, r.msg || "對了！"); if (onOk) onOk(o.value, r); }
     else { b.classList.remove("shake"); void b.offsetWidth; b.classList.add("shake", "tried"); fb(out, false, r.msg); }
@@ -552,7 +564,9 @@ function numsAsk(body, q, items, onOk){
     return '<label class="nl">' + (it.pre || "") + '<input class="num" type="text" inputmode="numeric" pattern="[0-9]*" enterkeyhint="done" autocomplete="off" data-i="' + i + '" aria-label="' + esc(it.aria || "答案") + '">' + (it.post || "") + '</label>';
   }).join("") + '</div><div class="row"><button class="btn sm" type="button">檢查</button></div><div class="fb" hidden></div></div>');
   var ins = box.querySelectorAll("input"), bt = $("button", box), out = $(".fb", box), tries = 0;
+  var gg = GEN;
   function go(){
+    if (gg !== GEN) return;
     for (var i = 0; i < items.length; i++) {
       var it = items[i], pn = parseNum(ins[i].value), v = pn.empty || pn.bad ? NaN : pn.v;
       var r = pn.empty ? {ok:false, msg:"先填一個數字。"} : pn.bad ? {ok:false, msg:"只能填整數，例如 15。"} : it.check ? it.check(v) : v === it.ans ? {ok:true} : {ok:false, msg:"再算一次。" + (it.hint ? "提示：" + it.hint : "")};
@@ -776,7 +790,11 @@ function renderPractice(){
     r3.innerHTML = '<div class="qq">③ 比大小：' + fr(ea) + ' 和 ' + fr(eb) + '</div><div class="qq">所以 ' + fr(a) + ' ○ ' + fr(b) + '？</div><div class="chips">' +
       SIGNS.map(function(o){ return '<button type="button" class="chip sign" data-s="' + esc(o.value) + '">' + o.label + '</button>'; }).join("") + '</div><div class="fb" hidden></div>';
     var out = $(".fb", r3), bs = r3.querySelectorAll(".chip");
-    each(bs, function(bt){ bt.onclick = function(){
+    var g0 = GEN;
+    var g1 = GEN;
+  each(bs, function(bt){ bt.onclick = function(){
+    if (g1 !== GEN) return;
+      if (g0 !== GEN) return;
       var r = F.checkSign(a, b, ea, eb, bt.dataset.s);
       if (r.ok) { each(bs, function(x){ x.disabled = true; }); bt.classList.add("picked"); fb(out, true, r.msg); $("#pbox", P).innerHTML = sym(s.sign); $("#pbox", P).classList.add("got"); finish(); }
       else { cur.wrongs++; save(); bt.classList.remove("shake"); void bt.offsetWidth; bt.classList.add("shake", "tried"); fb(out, false, r.msg); }
@@ -801,7 +819,9 @@ function renderPractice(){
   }
   function wireRow(row, check, hints){
     var out = $(".fb", row), hb = $(".hint", row), lvl = 0;
-    function go(){
+    var gg = GEN;
+  function go(){
+    if (gg !== GEN) return;
       var r = check();
       if (r.ok) { lock(row); fb(out, true, r.msg); r.next(); }
       else { if (r.countable) { cur.wrongs++; save(); } fb(out, false, r.msg); }
@@ -830,6 +850,8 @@ function drawTopBtns(){
   if (st.mastered) M.innerHTML = '<div class="win"><b class="t">這種題你已經會了</b><span>連續 ' + need() + ' 題自己做對。想多練可以繼續做。</span></div>';
 }
 function drawRec(){
+  if (dirtyCount()) { var w = $("#lead"); if (w) w.textContent = "這台裝置還有練習進度沒存好（可能空間不足或瀏覽器限制），請先不要關閉這一頁；會自動再試。"; }
+  if (!E || !st) return;
   $("#rec").textContent = st.solved ? "這台裝置上的練習紀錄：做完 " + st.solved + " 題，其中 " + st.clean + " 題沒看提示、一次就對；目前連續 " + st.streak + " 題。" + (st.mastered ? "已達「連續 " + need() + " 題自己做對」。" : "") : "這台裝置上還沒有練習紀錄。";
 }
 function drawVids(){
@@ -874,7 +896,9 @@ function choicePractice(){
     '<div class="small muted">連續 ' + need() + ' 題第一次就選對，就算學會。</div><div class="qtext">' + q.q + '</div><div class="chips">' +
     q.opts.map(function(o, k){ return '<button type="button" class="chip" data-k="' + k + '">' + esc(o) + '</button>'; }).join("") + '</div><div class="fb" hidden></div><div id="pend" style="display:grid;gap:12px" hidden></div>';
   var out = $(".fb", P), bs = P.querySelectorAll(".chip");
+  var g1 = GEN;
   each(bs, function(bt){ bt.onclick = function(){
+    if (g1 !== GEN) return;
     var k = +bt.dataset.k;
     if (k !== q.a) { cur.wrongs++; save(); bt.classList.remove("shake"); void bt.offsetWidth; bt.classList.add("shake", "tried"); fb(out, false, (q.why && q.why[k]) || "再想想看。"); return; }
     each(bs, function(x){ x.disabled = true; }); bt.classList.add("picked"); fb(out, true, q.ok || "對了！");
@@ -910,7 +934,7 @@ function countdown(){
   $("#cd").textContent = left >= 0 ? "・期中考 11/5 還有 " + left + " 天" : "";
 }
 function openEntry(e){
-  E = e; st = stateOf(e.id);
+  GEN++; E = e; st = stateOf(e.id);
   $("#home").hidden = true; $("#entry").hidden = false;
   $("#lesson").innerHTML = ""; $("#lesson").hidden = true; $("#practice").innerHTML = ""; $("#practice").hidden = true;
   $("#src").textContent = e.source + "（" + e.subject + "）" + (e.ask ? "：" + e.ask : "");
@@ -925,7 +949,7 @@ function openEntry(e){
 function route(){
   var m = /^#h\/([\w-]+)$/.exec(location.hash), e = m && H.get(m[1]);
   if (e) return openEntry(e);
-  E = null; st = null; document.title = "五年級難題解說";
+  GEN++; E = null; st = null; document.title = "五年級難題解說";
   $("#vids").innerHTML = ""; $("#vidBox").hidden = true;   // 回首頁就關掉影片（Codex 建議 7）
   $("#entry").hidden = true; $("#home").hidden = false; drawHome();
 }
@@ -936,20 +960,22 @@ window.addEventListener("hashchange", route);
 var READONLY_MSG = "這個網站已經在另一個分頁（或視窗）開著了，請回到那個分頁練習；那邊關掉後，這一頁會自動接手。";
 function start(){ countdown(); route(); window.dispatchEvent(new Event("g5help-ready")); }
 if (navigator.locks && navigator.locks.request) {
+  var lockFail = function(){ WRITER = false; READONLY_MSG = "這一頁拿不到存檔的權限（瀏覽器拒絕），只能看不能練；請重新整理或換瀏覽器。"; start(); };
   navigator.locks.request("g5help-writer", {ifAvailable: true}, function(lock){
     if (!lock) {
       WRITER = false; start();
-      navigator.locks.request("g5help-writer", function(){ location.reload(); return new Promise(function(){}); });
+      navigator.locks.request("g5help-writer", function(){ location.reload(); return new Promise(function(){}); }).catch(function(){});
       return;
     }
     WRITER = true; DB = loadDB(); start();
     return new Promise(function(){});   // 整個頁面存活期間都持有
-  });
+  }).catch(lockFail);
 } else {
   READONLY_MSG = "這個瀏覽器太舊，不能安全存練習紀錄；請更新 iPad／瀏覽器後再練習。";
   WRITER = false; start();
 }
 window.G5HelpWriter = function(){ return WRITER; };
+window.G5HelpDirty = function(){ return dirtyCount(); };
 window.G5HelpPage = {state:function(id){ return JSON.parse(JSON.stringify(DB.entries[id] || null)); }};
 })();
 </script>
@@ -963,7 +989,9 @@ window.G5HelpPage = {state:function(id){ return JSON.parse(JSON.stringify(DB.ent
     endpoint: "https://script.google.com/macros/s/AKfycbxwo08VVT5tSRf-DsQEoo1hMlCm1YytGTzj89BPtJ6YWjPieuKyAPbnWXjUKagBdL6l/exec",
     keys: ["g5help.v1"], container: "#g5sync",
     summarize: {"g5help.v1": function(j){ try { var x = JSON.parse(j), n = 0, m = 0; Object.keys(x.entries || {}).forEach(function(k){ n += x.entries[k].solved || 0; if (x.entries[k].mastered) m++; }); return "練習做完 " + n + " 題、學會 " + m + " 篇"; } catch (e) { return "（讀不懂的紀錄）"; } }},
-    onReplaced: function(){ if (!queued) { queued = true; setTimeout(function(){ location.reload(); }, 0); } }
+    onReplaced: function(){
+      if (window.G5HelpDirty && window.G5HelpDirty()) { var w = document.getElementById("lead"); if (w) w.textContent = "雲端有較新的紀錄，但這台還有進度沒存好，先不換；存好後重新整理就會用最新的。"; return; }
+      if (!queued) { queued = true; setTimeout(function(){ location.reload(); }, 0); } }
   }); }
   window.addEventListener("g5help-ready", boot, {once: true});
 })();
