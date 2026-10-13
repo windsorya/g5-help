@@ -85,7 +85,9 @@ test("B18 用 .textContent 寫的新回饋字串、沒有對應分支 ⇒ 完整
   // 改了哪一句完全脫鉤（設計 D 降級：提醒不擋件；Codex 審 d4c6e4f、2ac79de）
   const named = (line, mark) => KT.appBranchProblems(SECT + "\n  " + line + "\n").some((p) => p.includes(mark));
   assert.ok(named('msg.textContent = "測新加回饋甲，' + "很".repeat(100) + '。";', "測新加回饋甲"), "新加 textContent 回饋");
-  assert.ok(named('msg.textContent = ok ? "測新加回饋乙" : "測新加回饋丙";', "測新加回饋丙"), "三元運算的第二個字串也算一個分支");
+  // 三元運算兩支都要被數到：提醒訊息要寫「有 2 個回饋」（只數第一支會寫 1 個；Codex 審 75cf7ce）
+  assert.ok(KT.appBranchProblems(SECT + '\n  msg.textContent = ok ? "測新加回饋乙" : "測新加回饋丙";\n')
+    .some((p) => p.includes("測新加回饋丙") && /有 2 個回饋/.test(p)), "三元運算的第二個字串也算一個分支");
   assert.ok(!named("el.textContent = 測無字面變數;", "測無字面變數"), "沒有字面字串的指定（交給別處的分支）不算");
 });
 
