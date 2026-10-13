@@ -222,7 +222,7 @@ function bar(n, d, o){
   return '<svg class="fbar" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="' + esc(o.label || ("切成 " + d + " 格，塗了 " + n + " 格")) + '">' + s + '</svg>';
 }
 
-// ---------- 存檔：g5help.v1＝{v:1, entries:{篇id: 那一篇的教學與練習紀錄}, hidden:{篇id: 隱藏時間}, deleted:{篇id: 刪除時間}}；不碰自然複習的 g5sci.v3 ----------
+// ---------- 存檔：g5help.v1＝{v:1, entries:{篇id: 那一篇的教學與練習紀錄}, hidden:{篇id: 隱藏時間, "_del_"+篇id: 刪除時間}}（記憶體裡刪除另放 DB.deleted）；不碰自然複習的 g5sci.v3 ----------
 // 格式的讀、清洗、寫在 src/helpdoc.js（node 測試 tests/helpdoc.test.js 用同一份）。
 var KEY = "g5help.v1", DOC = window.G5HelpDoc, fresh = DOC.fresh, clean1 = DOC.clean1, own = DOC.own;
 function noHidden(){ return Object.create(null); }

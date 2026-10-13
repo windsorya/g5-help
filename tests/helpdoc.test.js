@@ -123,3 +123,35 @@ test("H12 刪掉的篇不算進「已隱藏」；恢復全部不會帶回刪掉�
   const c = D.cleared(r.hidden, r.deleted);
   assert.equal(c.deleted.b, 3);
 });
+
+// Codex 審 6495640 FAIL：另開 deleted 欄位，舊版頁面讀寫一次就洗掉。改存成 hidden 裡的 "_del_<id>"。
+const OLDDOC = require("./fixtures/helpdoc.legacy-4e7e680.js");   // 加刪除前那一版（git show 4e7e680:src/helpdoc.js）
+test("H13 舊版頁面（4e7e680）讀寫一次：刪除照留、那篇仍隱藏、不會跑回「已隱藏」清單", () => {
+  const r = D.remove({}, {}, "p38-6-2", 77);
+  const raw = D.serialize({}, r.hidden, r.deleted);
+  const o = OLDDOC.parse(raw);
+  assert.ok(o, "舊版讀得懂");
+  assert.ok(OLDDOC.isHidden(o.hidden, "p38-6-2"), "舊版仍當隱藏");
+  const back = D.parse(OLDDOC.serialize(o.entries, o.hidden));
+  assert.equal(back.deleted["p38-6-2"], 77, "舊版存過一次，刪除還在");
+  assert.deepEqual(D.hiddenIn(back.hidden, [{id: "p38-6-2"}], back.deleted), []);
+});
+
+test("H14 存檔格式：hidden 裡是 _del_ 標記、沒有另開 deleted 欄位；記憶體裡拆開、標記不算隱藏的篇", () => {
+  const r = D.remove({a: 1}, {}, "b", 3);
+  const j = JSON.parse(D.serialize({}, r.hidden, r.deleted));
+  assert.deepEqual(j.hidden, {a: 1, b: 3, _del_b: 3});
+  assert.ok(!("deleted" in j));
+  const back = D.parse(JSON.stringify(j));
+  assert.deepEqual(plain(back.hidden), {a: 1, b: 3});
+  assert.deepEqual(plain(back.deleted), {b: 3});
+  assert.throws(() => D.remove({}, {}, "_del_x", 1), "篇 id 不能以 _del_ 開頭");
+  assert.throws(() => D.remove({}, {}, "x".repeat(56), 1), "加前綴超過 60 字的 id 不收");
+  assert.deepEqual(plain(D.parse('{"v":1,"entries":{},"hidden":{"_del_":5}}').deleted), {}, "只有前綴沒有 id 的標記丟掉");
+});
+
+test("H15 6495640 寫過的 deleted 欄位照樣讀得懂，下次存檔改成 _del_ 標記", () => {
+  const d = D.parse('{"v":1,"entries":{},"hidden":{"x":1},"deleted":{"x":2}}');
+  assert.equal(d.deleted.x, 2);
+  assert.deepEqual(JSON.parse(D.serialize(d.entries, d.hidden, d.deleted)).hidden, {x: 1, _del_x: 2});
+});

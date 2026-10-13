@@ -855,9 +855,9 @@ def flow_delete(browser, label="Chromium"):
     check(f"{label} 刪除D1 已隱藏清單每篇都有「恢復」和「刪除」", row.get_by_role("button", name="恢復").is_visible() and dbtn.inner_text() == "刪除" and pg.locator('button[data-del="p38-6-2"]').count() == 1)
     dbtn.click()
     check(f"{label} 刪除D2 按一次只變成「確定刪除？」＋「取消」，還沒刪、也沒寫檔",
-          dbtn.inner_text() == "確定刪除？" and pg.locator("#hidBox button[data-undel]").is_visible() and not db_of(pg).get("deleted"), (dbtn.inner_text(), db_of(pg)))
+          dbtn.inner_text() == "確定刪除？" and pg.locator("#hidBox button[data-undel]").is_visible() and "_del_t-guoyu" not in db_of(pg).get("hidden", {}), (dbtn.inner_text(), db_of(pg)))
     pg.locator("#hidBox button[data-undel]").click()
-    check(f"{label} 刪除D3 按「取消」回到「刪除」，沒有刪", dbtn.inner_text() == "刪除" and not db_of(pg).get("deleted"))
+    check(f"{label} 刪除D3 按「取消」回到「刪除」，沒有刪", dbtn.inner_text() == "刪除" and "_del_t-guoyu" not in db_of(pg).get("hidden", {}))
     dbtn.click(); pg.wait_for_timeout(5600)
     check(f"{label} 刪除D4 5 秒沒再按：自動回到「刪除」", dbtn.inner_text() == "刪除", dbtn.inner_text())
     dbtn.click(); dbtn.click()
@@ -865,13 +865,13 @@ def flow_delete(browser, label="Chromium"):
     check(f"{label} 刪除D5 確定後：已隱藏剩 1 篇、國語那科說「還沒有題目」",
           pg.locator("#hidBox summary").inner_text() == "顯示已隱藏的 1 篇" and "還沒有題目" in pg.locator(G).inner_text(), (pg.locator("#hidBox summary").inner_text(), pg.locator(G).inner_text()))
     check(f"{label} 刪除D6 存檔：deleted 記這篇、hidden 仍留這篇、作答紀錄歸零",
-          isinstance(d.get("deleted", {}).get("t-guoyu"), int) and d["hidden"].get("t-guoyu") == 5 and d["entries"]["t-guoyu"]["solved"] == 0 and d["entries"]["t-guoyu"]["lessonDone"] is False, d)
+          isinstance(d.get("hidden", {}).get("_del_t-guoyu"), int) and d["hidden"].get("t-guoyu") == 5 and d["entries"]["t-guoyu"]["solved"] == 0 and d["entries"]["t-guoyu"]["lessonDone"] is False, d)
     pg.reload(); pg.wait_for_function("window.G5HelpWriter && G5HelpWriter()")
     check(f"{label} 刪除D7 重新整理後仍刪掉、紀錄沒被舊資料併回來", card_count(pg, G) == 0 and db_of(pg)["entries"]["t-guoyu"]["solved"] == 0, db_of(pg))
     pg.locator("#setBox summary").click(); pg.locator("#unhideAll").click()
     d = db_of(pg)
     check(f"{label} 刪除D8 「恢復全部隱藏的篇」只帶回數學那篇，刪掉的不回來",
-          card_count(pg, '.subj[data-subj="數學"]') == 1 and card_count(pg, G) == 0 and pg.locator("#hidBox").count() == 0 and list(d["hidden"].keys()) == ["t-guoyu"], d)
+          card_count(pg, '.subj[data-subj="數學"]') == 1 and card_count(pg, G) == 0 and pg.locator("#hidBox").count() == 0 and sorted(d["hidden"].keys()) == ["_del_t-guoyu", "t-guoyu"], d)
     txt = pg.locator("#home").inner_text()
     check(f"{label} 刪除D9 新字每句不超過 40 字", not sentences_over(txt), sentences_over(txt))
     check(f"{label} 刪除 沒有 JS 錯誤", not errors, errors)
