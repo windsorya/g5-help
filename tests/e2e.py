@@ -454,18 +454,6 @@ def flow_video_live(browser, label, device=None):
 
 def flow_codex_help_r1(browser):
     """Codex 2026-10-13 審難題站第 1 輪：必修 1–6、建議 7，照它的重現步驟。"""
-    # 必修 1：兩個分頁各練一篇，兩篇紀錄都要在
-    ctx = browser.new_context()
-    ctx.add_init_script(FIXTURE)
-    a = ctx.new_page(); a.goto(URL); a.wait_for_selector("#entry:not([hidden])")
-    b = ctx.new_page(); b.goto(HOME + "#h/t-guoyu"); b.wait_for_selector("#entry:not([hidden])")
-    a.get_by_role("button", name="我已經會了，直接練習").click()
-    solve_practice(a, *FIXED[0])
-    b.get_by_role("button", name="我已經會了，直接練習").click()
-    b.locator('#practice .chip[data-k="1"]').click()
-    db = json.loads(b.evaluate("localStorage.getItem('g5help.v1')"))["entries"]
-    check("必修1 兩個分頁各做一題：數學與國語兩篇紀錄都在", db.get("p38-6-2", {}).get("solved") == 1 and db.get("t-guoyu", {}).get("solved") == 1, {k: v.get("solved") for k, v in db.items()})
-    ctx.close()
     # 必修 2：新 key 壞掉、舊 g5math.v1 完整 ⇒ 仍搬入舊紀錄，壞掉的原文另存
     old = {"v": 1, "lessonDone": True, "idx": 2, "seed": 7, "streak": 2, "clean": 2, "solved": 2, "mastered": False, "log": [], "cur": None}
     init = "if(!sessionStorage.getItem('x')){sessionStorage.setItem('x','1');localStorage.setItem('g5help.v1','{bad');localStorage.setItem('g5math.v1'," + json.dumps(json.dumps(old)) + ");}"
@@ -537,24 +525,36 @@ def flow_codex_help_r2(browser):
     page.goto(HOME + "#h/p38-6-2"); page.wait_for_selector("#entry:not([hidden])")
     check("r2必修3 存不進去時切篇再切回，數學仍是做完 1 題", page.evaluate("G5HelpPage.state('p38-6-2')")["solved"] == 1, page.evaluate("G5HelpPage.state('p38-6-2')"))
     ctx.close()
-    # 必修 4：同一篇開兩個分頁，A 答錯後 B 要接到；B 學會後 A 的舊狀態不能蓋掉
+
+
+def flow_single_writer(browser, label):
+    """Codex 設計者方案 B（docs/storage-design-B-20261013.md T01/T11/T13/T17/T19/T20/T22）：
+    同一時間只有一個分頁能練習與寫入；第二個分頁唯讀；第一個關掉後第二個自動接手並讀到最新紀錄。"""
     ctx = browser.new_context(); ctx.add_init_script(FIXTURE)
-    a = ctx.new_page(); a.goto(HOME + "#h/t-guoyu"); a.wait_for_selector("#entry:not([hidden])")
-    b = ctx.new_page(); b.goto(HOME + "#h/t-guoyu"); b.wait_for_selector("#entry:not([hidden])")
+    a = ctx.new_page(); a.goto(URL); a.wait_for_selector("#entry:not([hidden])")
+    a.wait_for_function("window.G5HelpWriter && window.G5HelpWriter()")
+    b = ctx.new_page(); b.goto(HOME + "#h/t-guoyu"); b.wait_for_selector("#entry:not([hidden])"); b.wait_for_timeout(500)
+    check(f"{label} T17 兩個分頁：恰好一個可寫（A 可寫、B 唯讀）", a.evaluate("G5HelpWriter()") is True and b.evaluate("G5HelpWriter()") is False)
+    check(f"{label} T13 唯讀分頁沒有作答按鈕、顯示「另一個分頁開著」", b.locator("#topBtns button").count() == 0 and "另一個分頁" in b.locator("#topBtns").inner_text())
+    before = b.evaluate("localStorage.getItem('g5help.v1')")
     a.get_by_role("button", name="我已經會了，直接練習").click()
-    a.locator('#practice .chip[data-k="0"]').click()          # 第 1 題答錯
-    b.wait_for_timeout(500)
-    stb = b.evaluate("G5HelpPage.state('t-guoyu')")
-    check("r2必修4 A 答錯後 B 分頁接到答錯紀錄", (stb.get("cur") or {}).get("wrongs") == 1, stb)
+    solve_practice(a, *FIXED[0])
+    check(f"{label} T01 A 做完一題有存檔", json.loads(a.evaluate("localStorage.getItem('g5help.v1')"))["entries"]["p38-6-2"]["solved"] == 1)
+    check(f"{label} T22 唯讀分頁 B 沒有寫入任何東西", b.evaluate("G5HelpWriter()") is False and before != a.evaluate("localStorage.getItem('g5help.v1')"))
+    a.close()
+    b.wait_for_function("window.G5HelpWriter && window.G5HelpWriter()", timeout=10000)
+    b.wait_for_selector("#entry:not([hidden])")
+    check(f"{label} T19 A 關掉後 B 自動接手變成可寫", b.evaluate("G5HelpWriter()") is True)
     b.get_by_role("button", name="我已經會了，直接練習").click()
-    for k in (1, 0, 0, 1):
-        b.locator(f'#practice .chip[data-k="{k}"]').click()
-        if b.locator("#nextQ").count(): b.locator("#nextQ").click()
-    a.get_by_role("button", name="再看一次教學").first.click() if a.get_by_role("button", name="再看一次教學").count() else None
-    a.wait_for_timeout(300)
-    db = json.loads(b.evaluate("localStorage.getItem('g5help.v1')"))["entries"]["t-guoyu"]
-    check("r2必修4 B 練完後第 1 題記成不是一次對、A 沒有把紀錄蓋回 0", db["solved"] >= 4 and db["log"][0]["clean"] is False, {k: db[k] for k in ("solved", "streak", "mastered")})
+    b.locator('#practice .chip[data-k="1"]').click()
+    db = json.loads(b.evaluate("localStorage.getItem('g5help.v1')"))["entries"]
+    check(f"{label} T01 接手後兩篇紀錄都在（數學 1、國語 1）", db["p38-6-2"]["solved"] == 1 and db["t-guoyu"]["solved"] == 1, {k: v["solved"] for k, v in db.items()})
     ctx.close()
+    # T20：沒有 Web Locks 的舊瀏覽器 ⇒ 唯讀並說明，不退回無鎖寫入
+    ctx2, pg, errors = open_page(browser, init="delete Navigator.prototype.locks; Object.defineProperty(navigator,'locks',{value:undefined});")
+    check(f"{label} T20 沒有 Web Locks：唯讀並說明瀏覽器太舊", pg.evaluate("G5HelpWriter()") is False and "太舊" in pg.locator("#topBtns").inner_text())
+    check(f"{label} T20 沒有 JS 錯誤", not errors, errors)
+    ctx2.close()
 
 
 def main():
@@ -569,6 +569,7 @@ def main():
         flow_corrupt_store(cr)
         flow_codex_help_r1(cr)
         flow_codex_help_r2(cr)
+        flow_single_writer(cr, "Chromium")
         flow_home(cr)
         flow_migrate(cr)
         flow_steps(cr, "手機390", {"viewport": {"width": 390, "height": 844}, "is_mobile": True, "has_touch": True}, shots=True)
@@ -578,6 +579,7 @@ def main():
         ipad = p.devices["iPad (gen 7)"]
         flow_full(wk, "iPad", ipad, width=ipad["viewport"]["width"], shots=True)
         flow_steps(wk, "iPad", ipad)
+        flow_single_writer(wk, "WebKit")
         if BASE.startswith("https:"):
             flow_video_live(wk, "線上iPad", ipad)
         wk.close()

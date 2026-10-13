@@ -427,7 +427,7 @@ function parseDB(raw){
 // ②存檔先讀磁碟另一份；磁碟這篇的 r 比 BASE 新＝別的分頁先更新了 ⇒ 改用磁碟版、重開這篇、不覆寫。
 // ③寫成功才更新 BASE；寫失敗時記憶體裡的進度一律不動（DIRTY 記著，下次一起寫）。
 // ④壞掉的紀錄備份不了 ⇒ BLOCKED：不刪原文、不再寫入，進度只留在畫面上。
-var BLOCKED = false, BASE = Object.create(null), DIRTY = Object.create(null);
+var WRITER = false, BLOCKED = false, BASE = Object.create(null), DIRTY = Object.create(null);
 function readEntries(){
   var raw = null;
   try { raw = localStorage.getItem(KEY); } catch (e) { return Object.create(null); }
@@ -455,6 +455,7 @@ function adoptNewer(disk){
   setTimeout(function(){ if (E) openEntry(E); }, 0);
 }
 function save(){
+  if (!WRITER) return false;   // 唯讀分頁（另一個分頁在練）一律不寫
   if (BLOCKED) return false;
   var disk = readEntries();
   if (BLOCKED) return false;
@@ -772,6 +773,7 @@ function renderPractice(){
 // ---------- 首頁按鈕、紀錄、影片 ----------
 function drawTopBtns(){
   var T = $("#topBtns");
+  if (!WRITER) { T.innerHTML = '<div class="banner" role="status" style="background:var(--sun-soft);border-radius:12px;padding:12px 16px">' + esc(READONLY_MSG) + '</div>'; $("#mastery").hidden = true; return; }
   T.innerHTML = st.lessonDone ?
     '<button class="btn" type="button" id="goPractice">' + (st.solved ? "繼續練習（第 " + (st.idx + 1) + " 題）" : "換你自己做練習題") + '</button><button class="btn ghost" type="button" id="goLesson">再看一次教學</button>' :
     '<button class="btn" type="button" id="goLesson">開始學</button><button class="btn ghost" type="button" id="goPractice">我已經會了，直接練習</button>';
@@ -884,7 +886,25 @@ function route(){
 }
 $("#backHome").onclick = function(ev){ ev.preventDefault(); location.hash = ""; route(); };
 window.addEventListener("hashchange", route);
-countdown(); route();
+// 同一時間只讓一個分頁練習與寫入（Web Locks；Codex 2026-10-13 設計者方案 B）。
+// 拿不到鎖＝另一個分頁在練：這頁唯讀；等那頁關掉、鎖釋放後自動重新載入接手（重讀最新紀錄）。
+var READONLY_MSG = "這個網站已經在另一個分頁（或視窗）開著了，請回到那個分頁練習；那邊關掉後，這一頁會自動接手。";
+function start(){ countdown(); route(); window.dispatchEvent(new Event("g5help-ready")); }
+if (navigator.locks && navigator.locks.request) {
+  navigator.locks.request("g5help-writer", {ifAvailable: true}, function(lock){
+    if (!lock) {
+      WRITER = false; start();
+      navigator.locks.request("g5help-writer", function(){ location.reload(); return new Promise(function(){}); });
+      return;
+    }
+    WRITER = true; DB = loadDB(); start();
+    return new Promise(function(){});   // 整個頁面存活期間都持有
+  });
+} else {
+  READONLY_MSG = "這個瀏覽器太舊，不能安全存練習紀錄；請更新 iPad／瀏覽器後再練習。";
+  WRITER = false; start();
+}
+window.G5HelpWriter = function(){ return WRITER; };
 window.G5HelpPage = {state:function(id){ return JSON.parse(JSON.stringify(DB.entries[id] || null)); }};
 })();
 </script>
@@ -892,13 +912,15 @@ window.G5HelpPage = {state:function(id){ return JSON.parse(JSON.stringify(DB.ent
 // 跨裝置同步（家庭同步碼）：只同步本站自己的 g5help.v1；同步碼存在同網域 localStorage，自然站連過也算
 (function(){
   if (!window.G5Sync) return;   // sync.js 載不到就照常本機使用
+  function boot(){ if (!(window.G5HelpWriter && window.G5HelpWriter())) { var c = document.getElementById("g5sync"); if (c) c.textContent = "（在另一個分頁開著，同步由那一頁負責）"; return; }
   var queued = false;
   window.G5Sync.init({
     endpoint: "https://script.google.com/macros/s/AKfycbxwo08VVT5tSRf-DsQEoo1hMlCm1YytGTzj89BPtJ6YWjPieuKyAPbnWXjUKagBdL6l/exec",
     keys: ["g5help.v1"], container: "#g5sync",
     summarize: {"g5help.v1": function(j){ try { var x = JSON.parse(j), n = 0, m = 0; Object.keys(x.entries || {}).forEach(function(k){ n += x.entries[k].solved || 0; if (x.entries[k].mastered) m++; }); return "練習做完 " + n + " 題、學會 " + m + " 篇"; } catch (e) { return "（讀不懂的紀錄）"; } }},
     onReplaced: function(){ if (!queued) { queued = true; setTimeout(function(){ location.reload(); }, 0); } }
-  });
+  }); }
+  window.addEventListener("g5help-ready", boot, {once: true});
 })();
 </script>
 <script>
