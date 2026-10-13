@@ -698,6 +698,64 @@ def flow_codex_r5(browser, label="Chromium"):
     check(f"{label} r5補 同一題的答對 handler 重播只計一次", db["solved"] == 1 and db["idx"] == 1 and len(db["log"]) == 1, {k: db[k] for k in ("solved", "idx")})
     ctx.close()
 
+def flow_codex_r6(browser, label="Chromium"):
+    """Codex 2026-10-13 第 6 輪（4agent 後第 1 輪）三個新反例＋同寬掃描：切篇後重播畫面上「每一個」舊按鈕 handler。"""
+    loads = "sessionStorage.setItem('loads',String(+(sessionStorage.getItem('loads')||0)+1));"
+    # 反例 1：首頁套用雲端時 setItem 成功、緊接的讀回拋錯一次 ⇒ 記憶體與磁碟必須一致（不能磁碟 20、記憶體 8）
+    seed = "if(!sessionStorage.getItem('s')){sessionStorage.setItem('s','1');localStorage.setItem('g5help.v1',JSON.stringify({v:1,entries:{'p38-6-2':{solved:8,idx:8,r:1}}}));}"
+    ctx, pg, errors = open_page(browser, init=loads + seed, url=HOME)
+    pg.wait_for_function("window.G5HelpWriter && G5HelpWriter()")
+    cloud = json.dumps({"v": 1, "entries": {"p38-6-2": {"solved": 20, "idx": 20, "r": 9}}})
+    r = pg.evaluate("""(c)=>{var g=Storage.prototype.getItem,s=Storage.prototype.setItem,armed=false;
+      Storage.prototype.setItem=function(k,v){var x=s.call(this,k,v);if(k==='g5help.v1')armed=true;return x;};
+      Storage.prototype.getItem=function(k){if(armed&&k==='g5help.v1'){armed=false;throw new Error('io');}return g.call(this,k);};
+      var ok=G5HelpApplyRemote('g5help.v1',c);Storage.prototype.getItem=g;Storage.prototype.setItem=s;
+      return {ok:ok,mem:G5HelpPage.state('p38-6-2').solved,disk:JSON.parse(localStorage.getItem('g5help.v1')).entries['p38-6-2'].solved};}""", cloud)
+    check(f"{label} r6-1 套用雲端讀回失敗：記憶體和磁碟一致（不會之後把磁碟蓋回舊的）", r["mem"] == r["disk"], r)
+    pg.evaluate("location.hash='#h/p38-6-2'"); pg.wait_for_selector("#entry:not([hidden])")
+    pg.locator("#goPractice").click(); pg.wait_for_selector("#practice .prob"); solve_practice(pg, *prob_text(pg))
+    st = store(pg) or {}
+    check(f"{label} r6-1 接著做一題：從雲端的 20 題接下去（21），不倒退成 9", st.get("solved") == r["disk"] + 1, st)
+    ctx.close()
+    # 反例 2：冷啟動「再讀一次」的舊 handler 在讀成功、又有未存進度後被重播 ⇒ 不能把記憶體換回磁碟版
+    init = (loads + seed + "window.__rf=true;window.__wf=false;var _g=Storage.prototype.getItem,_s=Storage.prototype.setItem;"
+            "Storage.prototype.getItem=function(k){if(window.__rf&&k==='g5help.v1')throw new Error('io');return _g.call(this,k);};"
+            "Storage.prototype.setItem=function(k,v){if(window.__wf&&k==='g5help.v1')throw new Error('quota');return _s.call(this,k,v);};")
+    ctx, pg, errors = open_page(browser, init=init)
+    pg.wait_for_timeout(500)
+    pg.evaluate("window.__oldRetry = document.querySelector('#readRetry') && document.querySelector('#readRetry').onclick; window.__rf=false; 0")
+    pg.locator("#readRetry").click()
+    pg.evaluate("window.__wf=true; 0")
+    pg.locator("#goPractice").click(); pg.wait_for_selector("#practice .prob"); solve_practice(pg, *prob_text(pg))
+    before = pg.evaluate("G5HelpPage.state('p38-6-2').solved")
+    pg.evaluate("window.__oldRetry && window.__oldRetry(); 0")
+    after = pg.evaluate("G5HelpPage.state('p38-6-2').solved")
+    pg.evaluate("window.__wf=false; 0")
+    pg.wait_for_function("G5HelpDirty() === 0", timeout=9000)
+    disk = (store(pg) or {}).get("solved")
+    check(f"{label} r6-2 重播舊的「再讀一次」：未存的那題還在（記憶體 {before}→{after}、最後存進 {disk}）", before == 9 and after == 9 and disk == 9, {"before": before, "after": after, "disk": disk})
+    ctx.close()
+    # 同寬掃描（含反例 3 的分數題「給我提示」）：在某一篇把教學、練習的每個按鈕 handler 都存起來，切到別篇後全部重播
+    for start, other in (("p38-6-2", "t-guoyu"), ("t-guoyu", "p38-6-2")):
+        ctx, pg, errors = open_page(browser, init=FIXTURE, url=HOME + "#h/" + start)
+        pg.wait_for_function("window.G5HelpWriter && G5HelpWriter()")
+        pg.get_by_role("button", name="開始學").click(); pg.wait_for_timeout(200)
+        pg.evaluate("location.hash='#h/" + start + "'; 0") if False else None
+        pg.locator("#goPractice").click(); pg.wait_for_timeout(300)
+        n = pg.evaluate("""()=>{window.__stale=[];document.querySelectorAll('#lesson button, #practice button, #topBtns button').forEach(function(b){if(b.onclick)window.__stale.push([b,b.onclick]);});return window.__stale.length;}""")
+        snap = pg.evaluate("(id)=>JSON.stringify(G5HelpPage.state(id))", start)
+        disk0 = pg.evaluate("localStorage.getItem('g5help.v1')")
+        pg.evaluate("location.hash='#h/" + other + "'"); pg.wait_for_timeout(200)
+        pg.evaluate("""()=>{window.__stale.forEach(function(p){try{p[1].call(p[0],{preventDefault:function(){}});}catch(e){window.__staleErr=(window.__staleErr||[]).concat(String(e));}});}""")
+        pg.wait_for_timeout(300)
+        snap2 = pg.evaluate("(id)=>JSON.stringify(G5HelpPage.state(id))", start)
+        disk1 = pg.evaluate("localStorage.getItem('g5help.v1')")
+        errs = pg.evaluate("window.__staleErr||[]")
+        check(f"{label} r6 掃描：{start} 的 {n} 個舊按鈕在切到 {other} 後重播，{start} 的紀錄（記憶體與存檔）完全不變、沒有錯誤",
+              n >= 3 and snap == snap2 and disk0 == disk1 and not errs and not errors, {"n": n, "mem_same": snap == snap2, "disk_same": disk0 == disk1, "errs": errs + errors})
+        check(f"{label} r6 掃描：重播後畫面仍是 {other}、沒有被舊畫面改動", other in pg.evaluate("location.hash") and pg.locator("#entry:not([hidden])").count() == 1)
+        ctx.close()
+
 def flow_confused(browser):
     """交辦 #1319：每一步有「這步看不懂」；沒開同步給口頭說法；有同步碼就送 op=confused（攔下請求，不打真後端）。"""
     ctx, pg, errors = open_page(browser, init=FIXTURE, url=HOME + "#h/t-guoyu")
@@ -732,6 +790,7 @@ def main():
         flow_single_writer(cr, "Chromium")
         flow_codex_r4(cr)
         flow_codex_r5(cr)
+        flow_codex_r6(cr)
         flow_confused(cr)
         flow_home(cr)
         flow_migrate(cr)
@@ -744,6 +803,7 @@ def main():
         flow_steps(wk, "iPad", ipad)
         flow_single_writer(wk, "WebKit")
         flow_codex_r5(wk, "WebKit")
+        flow_codex_r6(wk, "WebKit")
         if BASE.startswith("https:"):
             flow_video_live(wk, "線上iPad", ipad)
         wk.close()

@@ -341,6 +341,8 @@
         else { showConflict(key, cloud); }
         return;
       }
+      // 本機內容已經和雲端一字不差（已同步過的裝置；例如頁面寫進去了但讀回失敗，#1303 第 6 輪）。第一次加入仍照 A4 一律問：只補 baseline，不出衝突、不備份、不換
+      if (local !== null && local === cloud.data) { saveBaseline(key, cloud.rev, cloud.data, cloud.updated); delete conflicts[key]; return; }
       if (cloud.rev < meta.rev || (cloud.rev === meta.rev && contentHash(cloud.data) !== meta.hash)) {
         showConflict(key, cloud); return;
       }
