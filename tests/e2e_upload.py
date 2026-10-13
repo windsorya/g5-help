@@ -25,7 +25,8 @@ from playwright.sync_api import sync_playwright
 
 ROOT = Path(__file__).resolve().parent.parent
 SRC_PATH = Path(os.environ.get("G5_UPLOAD_SRC") or ROOT / "src" / "upload.js")
-SRC = SRC_PATH.read_text(encoding="utf-8")
+# 補題區已停用（ENABLED=false）；本檔驗的是「開啟版」生命週期，留作恢復時的回歸
+SRC = SRC_PATH.read_text(encoding="utf-8").replace("var ENABLED = false;", "var ENABLED = true;")
 PNG = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")
 A = "ABCDEFGHJKMN"   # 家庭 A 的同步碼
 B = "PQRSTUVWXYZ2"   # 家庭 B

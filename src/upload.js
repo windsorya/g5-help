@@ -24,6 +24,11 @@
 // - 撤回、上傳各帶自己的操作身分；換家庭、stop、同容器重掛都讓它們失去資格。AbortController 只是省資源，正確性不靠它。
 (function (root) {
   "use strict";
+  // 停用（關功能）：迴圈 L20261013134831-7db82f 會診後第 2 次 FAIL（審 43ca485），依 4agent 報告停止條件當輪關補題區。
+  // mount 只畫一行暫停說明、回傳無作用的 {reload, stop}，上傳／查詢／撤回一律 0 請求；四個科目站不用改。
+  // 要恢復請律師另行交辦、開新迴圈：把 ENABLED 改回 true（以下程式原樣保留，tests/upload.test.js 以開啟版繼續驗）。
+  var ENABLED = false;
+  var PAUSED_HTML = '<div class="g5u"><p class="g5u-msg">補題區暫停使用；要傳題目，請到<a href="https://windsorya.github.io/g5-help/">難題站</a>的「家長傳題目」。</p></div>';
   var EP = "https://script.google.com/macros/s/AKfycbxwo08VVT5tSRf-DsQEoo1hMlCm1YytGTzj89BPtJ6YWjPieuKyAPbnWXjUKagBdL6l/exec";
   var SUBJECTS = ["國語", "數學", "自然", "社會"];
   var MAX_NOTE = 500;          // cap-why: gas/inbox.js MAX_NOTE（超過 GAS 回 bad-note）
@@ -162,6 +167,13 @@
     // 同一個容器只能有一個有效的元件：重掛先終結前一個（它的計時器、監聽、在途查詢／撤回／上傳全部失去資格）
     var prev = box[OWNER];
     if (prev && typeof prev.stop === "function") prev.stop();
+    if (!ENABLED) {
+      if (!document.getElementById("g5u-css")) { var st0 = document.createElement("style"); st0.id = "g5u-css"; st0.textContent = CSS; document.head.appendChild(st0); }
+      box.innerHTML = PAUSED_HTML;
+      var off = { reload: function () {}, stop: function () { if (box[OWNER] === off) box[OWNER] = null; } };
+      box[OWNER] = off;
+      return off;
+    }
     var ep = cfg.endpoint || EP, units = (cfg.units || []).filter(function (u) { return u && UNIT_RE.test(u.id) && u.id !== "all"; });
     if (!document.getElementById("g5u-css")) { var st = document.createElement("style"); st.id = "g5u-css"; st.textContent = CSS; document.head.appendChild(st); }
     box.innerHTML = '<div class="g5u">' +
@@ -419,6 +431,6 @@
 
   var api = { mount: mount, minePrefix: minePrefix, makeNote: makeNote, parseNote: parseNote, mineFor: mineFor, unitName: unitName, safeDoneUrl: safeDoneUrl, sendSummary: sendSummary, esc: esc, SUBJECTS: SUBJECTS,
     familyOf: familyOf, parseReply: parseReply, mineItems: mineItems, withdrawOutcome: withdrawOutcome, withdrawMessage: withdrawMessage, interruptMessage: interruptMessage,
-    DEADLINE_MS: DEADLINE_MS, CODE_EVENT: CODE_EVENT };
+    DEADLINE_MS: DEADLINE_MS, CODE_EVENT: CODE_EVENT, ENABLED: ENABLED };
   if (typeof module !== "undefined" && module.exports) module.exports = api; else root.G5Upload = api;
 })(typeof window !== "undefined" ? window : this);

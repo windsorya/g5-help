@@ -157,7 +157,8 @@ test('清單查詢的本科前綴：與說明前綴同形、後端 PREFIX_RE 收
 // VM：假 DOM（每個容器各一份）、假 fetch（可扣住、可指定回應；abort 一律無效）、假縮圖（可扣住）、
 // 假時鐘（setTimeout／setInterval 與 Date.now 只在 advance 時前進）。G5_UPLOAD_SRC 可指向別份元件（突變自檢用）。
 const vm = require('node:vm');
-const MOUNT_SRC = fs.readFileSync(process.env.G5_UPLOAD_SRC || path.join(__dirname, '..', 'src', 'upload.js'), 'utf8');
+// 補題區已停用（ENABLED=false）；以下生命週期測試用「開啟版」繼續驗，留作恢復時的回歸（停用契約見 upload_disabled.test.js）
+const MOUNT_SRC = fs.readFileSync(process.env.G5_UPLOAD_SRC || path.join(__dirname, '..', 'src', 'upload.js'), 'utf8').replace('var ENABLED = false;', 'var ENABLED = true;');
 const CA = 'ABCDEFGHJKMN', CB = 'PQRSTUVWXYZ2', PRE = { 國語: '【補題:國語:', 數學: '【補題:數學:' };
 const NODE_CLASSES = ['g5u-send', 'g5u-file', 'g5u-note', 'g5u-unit', 'g5u-out', 'g5u-health', 'g5u-wmsg', 'g5u-refresh'];
 const D0 = '照片沒有送出；確認後再按一次送出';   // 一張都還沒呼叫 post 時的打斷提示（A09：已送出去過就不能出現這句）
