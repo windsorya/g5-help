@@ -136,6 +136,7 @@ details p{margin:0 0 10px}
     <span class="muted">不懂的題目，一題一篇，只講那一題<span id="cd"></span></span>
   </header>
 
+  <div id="saveWarn" class="banner" role="alert" hidden style="background:var(--sun-soft);border-radius:12px;padding:12px 16px;margin-bottom:12px">這台裝置還有練習進度沒存好（可能空間不足或瀏覽器限制），請先不要關閉這一頁；每 3 秒會自動再試。 <button class="btn ghost sm" type="button" id="saveRetry">現在再存一次</button></div>
   <section id="home" style="display:grid;gap:18px">
     <div class="panel"><p style="margin:0">每一篇都是她說「看不懂」的那一題：跟著步驟自己動手做，做完再練幾題同類型的，練到會為止。不用重看整張考卷。</p></div>
     <div id="subjects" style="display:grid;gap:18px"></div>
@@ -239,75 +240,80 @@ function parseDB(raw){
     return out;
   } catch (e) { return null; }
 }
-// 存檔規則（Codex 第 2 輪必修 1–4 後重新設計，不再逐條補）：
-// ①每篇帶版本號 r；本分頁記 BASE[id]＝最後讀到或寫入的 r。
-// ②存檔先讀磁碟另一份；磁碟這篇的 r 比 BASE 新＝別的分頁先更新了 ⇒ 改用磁碟版、重開這篇、不覆寫。
-// ③寫成功才更新 BASE；寫失敗時記憶體裡的進度一律不動（DIRTY 記著，下次一起寫）。
-// ④壞掉的紀錄：先用不撞名的 key 備份並讀回核對，成功才用新資料覆蓋主 key；備份不了就不覆蓋，進度留在記憶體、下次存檔再試。
-// ⑤讀取失敗≠沒有紀錄；DIRTY 在任何失敗出口之前先記；同一時間只有一個寫入分頁（Web Locks）。
-var WRITER = false, BASE = Object.create(null), DIRTY = Object.create(null), BACKED = null;
-// 讀磁碟：只讀、不寫（Codex 第 4 輪必修 1、3）。回 {ok:false} ＝讀取失敗（不是「沒有紀錄」），呼叫端不得據此寫入；
+// 存檔規則（2026-10-13 第 5 輪後 4agent 定案：本頁記憶體是唯一真相，不再做跨分頁版本比對）：
+// ①同一時間只有一個寫入分頁（Web Locks）；sync.js 也不能直接寫 g5help.v1（canReplace／accept 交給本頁）。
+// ②取鎖後要「讀成功」才開放作答（READY）；讀不到＝不是沒有紀錄，給「再讀一次」，不建立空白紀錄。
+// ③作答改記憶體並標 DIRTY；save() 把記憶體整份寫進主 key，寫成功才清 DIRTY；失敗保留、每 3 秒自動再試、
+//   首頁與各篇都看得到警告（#saveWarn）。④壞資料先用不撞名的 key 備份並讀回核對，成功才覆蓋主 key。
+// ⑤不聽 storage 事件換資料（只有本頁會寫）；雲端新版本只在「首頁、沒有未存進度」時由本頁套用並重畫，不 reload。
+var WRITER = false, READY = false, DIRTY = Object.create(null), BACKED = null, RETRY = null;
+// 讀磁碟：只讀、不寫。回 {ok:false}＝讀取失敗（主 key 或舊 key 讀時拋錯；不是「沒有紀錄」）；
 // broken＝主 key 有原文但讀不懂，備份與替換一律在 save() 裡、確認備份成功後才做。
 function readDisk(){
-  var raw;
+  var raw, oldRaw;
   try { raw = localStorage.getItem(KEY); } catch (e) { return {ok:false}; }
   var es = raw === null ? null : parseDB(raw);
   if (es) return {ok:true, entries:es, broken:null};
+  try { oldRaw = localStorage.getItem("g5math.v1"); } catch (e) { return {ok:false}; }   // 舊 key 讀不到也算讀取失敗（Codex 第 5 輪必修 1）
   es = Object.create(null);
   try {
     // 2026-10-12 那一頁放在自然複習網站時存在 g5math.v1：搬進第 1 篇（舊資料原文不動）
-    var old = JSON.parse(localStorage.getItem("g5math.v1") || "null");
+    var old = JSON.parse(oldRaw || "null");
     if (old && old.v === 1) es["p38-6-2"] = clean1(old);
   } catch (e) {}
   return {ok:true, entries:es, broken:raw};   // raw 為 null＝第一次用；非 null＝壞資料待備份
 }
-function readEntries(){ var d = readDisk(); return d.ok ? d.entries : null; }
-function loadDB(){ var d = readDisk(), es = d.ok ? d.entries : Object.create(null); Object.keys(es).forEach(function(id){ BASE[id] = es[id].r; }); return {v:1, entries:es, readOk:d.ok}; }
+function loadDB(){ var d = readDisk(); return {v:1, entries:d.ok ? d.entries : Object.create(null), readOk:d.ok}; }
 var DB = loadDB(), st = null, NOTICE = "", GEN = 0;
-function stateOf(id){ if (!own(DB.entries, id)) { DB.entries[id] = fresh(); BASE[id] = 0; } return DB.entries[id]; }
+function stateOf(id){ if (!own(DB.entries, id)) DB.entries[id] = fresh(); return DB.entries[id]; }
 function dirtyCount(){ return Object.keys(DIRTY).length; }
-function adoptNewer(disk){
-  // 別的分頁更新了目前這一篇：改用磁碟版並重開這一篇（延後工作綁篇 id＋畫面世代，切走就作廢；Codex 第 4 輪必修 4）
-  var id = E.id, gen = GEN;
-  DB.entries[id] = disk[id]; BASE[id] = disk[id].r; delete DIRTY[id];
-  setTimeout(function(){ if (E && E.id === id && GEN === gen) { NOTICE = "另一個分頁剛更新了這一篇，已換成最新的進度。"; openEntry(E); } }, 0);
-}
 function backupBroken(raw){
   // 壞資料：用不會撞名的 key 備份並讀回核對；成功才允許之後用新資料覆蓋主 key（不先刪主 key）
   if (BACKED === raw) return true;
   var k = KEY + ".broken." + Date.now() + "." + Math.floor(Math.random() * 1e9);
   try { localStorage.setItem(k, raw); if (localStorage.getItem(k) !== raw) return false; BACKED = raw; return true; } catch (e) { return false; }
 }
+function saveFailed(){
+  // 存不進去：進度留在記憶體（DIRTY），3 秒後自動再試；首頁與各篇都看得到警告（Codex 第 5 輪必修 3）
+  if (!RETRY) RETRY = setTimeout(function(){ RETRY = null; if (dirtyCount()) save(); }, 3000);
+  drawWarn(); drawRec(); return false;
+}
 function save(){
-  if (!WRITER) return false;   // 唯讀分頁（另一個分頁在練）一律不寫
-  if (E && st) DIRTY[E.id] = true;   // 任何失敗出口之前先記下「這篇有沒存好的進度」（Codex 第 4 輪必修 2）
+  if (!WRITER || !READY) return false;   // 唯讀分頁、還沒讀成功：一律不寫
+  if (E && st) DIRTY[E.id] = true;   // 任何失敗出口之前先記下「這篇有沒存好的進度」
   var d = readDisk();
-  if (!d.ok) { drawRec(); return false; }   // 讀取失敗≠沒有紀錄：不寫，進度留在記憶體，下次再試
-  if (d.broken !== null && !backupBroken(d.broken)) { drawRec(); return false; }   // 備份不了就不覆蓋原文；下次存檔會再試
-  var disk = d.entries;
-  if (E && st && own(disk, E.id) && disk[E.id].r > (BASE[E.id] || 0) && !own(DIRTY, E.id)) { adoptNewer(disk); return false; }
-  var out = Object.create(null), next = Object.create(null);
-  Object.keys(disk).forEach(function(id){ out[id] = disk[id]; });
-  Object.keys(DIRTY).forEach(function(id){
-    if (!own(DB.entries, id)) { delete DIRTY[id]; return; }
-    var copy = JSON.parse(JSON.stringify(DB.entries[id])); copy.r = Math.max(BASE[id] || 0, own(disk, id) ? disk[id].r : 0) + 1; out[id] = copy; next[id] = copy.r;
-  });
-  try { localStorage.setItem(KEY, JSON.stringify({v:1, entries:out})); } catch (e) { drawRec(); return false; }
-  Object.keys(next).forEach(function(id){ BASE[id] = next[id]; DB.entries[id].r = next[id]; delete DIRTY[id]; });
-  Object.keys(disk).forEach(function(id){ if (!own(next, id) && !own(DIRTY, id)) { DB.entries[id] = disk[id]; BASE[id] = disk[id].r; } });
-  if (E) st = DB.entries[E.id];
-  drawRec();
+  if (!d.ok) return saveFailed();   // 讀取失敗≠沒有紀錄：不寫，進度留在記憶體
+  if (d.broken !== null && !backupBroken(d.broken)) return saveFailed();   // 備份不了就不覆蓋原文
+  var out = Object.create(null);
+  Object.keys(d.entries).forEach(function(id){ out[id] = d.entries[id]; });   // 磁碟上有、記憶體沒有的篇（例如搬家來的）照留
+  Object.keys(DB.entries).forEach(function(id){ out[id] = DB.entries[id]; });   // 記憶體是唯一真相
+  try { localStorage.setItem(KEY, JSON.stringify({v:1, entries:out})); } catch (e) { return saveFailed(); }
+  Object.keys(out).forEach(function(id){ if (!own(DB.entries, id)) DB.entries[id] = out[id]; });
+  DIRTY = Object.create(null);
+  if (RETRY) { clearTimeout(RETRY); RETRY = null; }
+  drawWarn(); drawRec();
   return true;
 }
-// 別的分頁存檔時：其他篇換成磁碟版（還沒寫出去的除外）；目前這一篇若磁碟較新，改用並重開
-window.addEventListener("storage", function(ev){
-  if (ev.key !== KEY) return;
-  var disk = readEntries();
-  if (!disk) return;   // 讀不到就什麼都不動
-  Object.keys(disk).forEach(function(id){ if (own(DIRTY, id) || (E && id === E.id)) return; DB.entries[id] = disk[id]; BASE[id] = disk[id].r; });
-  if (E && own(disk, E.id) && disk[E.id].r > (BASE[E.id] || 0) && !own(DIRTY, E.id)) adoptNewer(disk);
-  if (!E) drawHome();
-});
+function drawWarn(){
+  var w = $("#saveWarn"); if (!w) return;
+  w.hidden = !dirtyCount();
+}
+// 讀不到原有紀錄時的「再讀一次」：讀成功才開放作答，並接著原紀錄（不會被空白蓋掉）
+function retryRead(){
+  if (!WRITER) return;
+  var d = readDisk();
+  if (!d.ok) { NOTICE = "還是讀不到，請稍後再試，或重新整理這一頁。"; route(); return; }
+  DB = {v:1, entries:d.entries, readOk:true}; READY = true; route();
+}
+// 雲端有較新的紀錄：只在首頁、沒有未存進度時換上；換上＝寫進主 key、重畫首頁，不 reload（Codex 第 5 輪必修 2）
+function canReplace(key){ return key === KEY && WRITER && READY && !E && !dirtyCount(); }
+function applyRemote(key, raw){
+  if (!canReplace(key)) return false;
+  var es = parseDB(raw); if (!es) return false;
+  try { localStorage.setItem(KEY, raw); if (localStorage.getItem(KEY) !== raw) return false; } catch (e) { return false; }
+  GEN++; DB = {v:1, entries:es, readOk:true}; drawHome();
+  return true;
+}
 
 // ---------- 互動元件 ----------
 // iPad 中文鍵盤可能打出全形數字「１５」：先轉半形（Codex 第 1 輪必修 5）。回傳 {empty}、{bad}（不是整數）或 {v}
@@ -578,7 +584,7 @@ function renderPractice(){
     var g0 = GEN;
     var g1 = GEN;
   each(bs, function(bt){ bt.onclick = function(){
-    if (g1 !== GEN) return;
+    if (g1 !== GEN || st.cur !== cur) return;   // 這題已計分（st.cur 換掉）或已切走：舊 handler 失效，不重複計分
       if (g0 !== GEN) return;
       var r = F.checkSign(a, b, ea, eb, bt.dataset.s);
       if (r.ok) { each(bs, function(x){ x.disabled = true; }); bt.classList.add("picked"); fb(out, true, r.msg); $("#pbox", P).innerHTML = sym(s.sign); $("#pbox", P).classList.add("got"); finish(); }
@@ -624,6 +630,10 @@ function renderPractice(){
 function drawTopBtns(){
   var T = $("#topBtns");
   if (!WRITER) { T.innerHTML = '<div class="banner" role="status" style="background:var(--sun-soft);border-radius:12px;padding:12px 16px">' + esc(READONLY_MSG) + '</div>'; $("#mastery").hidden = true; return; }
+  if (!READY) {   // 讀不到原有紀錄：不給作答（Codex 第 5 輪必修 1），給「再讀一次」
+    T.innerHTML = '<div class="banner" role="status" style="background:var(--sun-soft);border-radius:12px;padding:12px 16px">這台裝置的練習紀錄暫時讀不到，為了不把以前的紀錄蓋掉，先不開始練習。</div><button class="btn" type="button" id="readRetry">再讀一次</button>';
+    $("#readRetry").onclick = retryRead; $("#mastery").hidden = true; return;
+  }
   T.innerHTML = st.lessonDone ?
     '<button class="btn" type="button" id="goPractice">' + (st.solved ? "繼續練習（第 " + (st.idx + 1) + " 題）" : "換你自己做練習題") + '</button><button class="btn ghost" type="button" id="goLesson">再看一次教學</button>' :
     '<button class="btn" type="button" id="goLesson">開始學</button><button class="btn ghost" type="button" id="goPractice">我已經會了，直接練習</button>';
@@ -635,7 +645,6 @@ function drawTopBtns(){
   if (st.mastered) M.innerHTML = '<div class="win"><b class="t">這種題你已經會了</b><span>連續 ' + need() + ' 題自己做對。想多練可以繼續做。</span></div>';
 }
 function drawRec(){
-  if (dirtyCount()) { var w = $("#lead"); if (w) w.textContent = "這台裝置還有練習進度沒存好（可能空間不足或瀏覽器限制），請先不要關閉這一頁；會自動再試。"; }
   if (!E || !st) return;
   $("#rec").textContent = st.solved ? "這台裝置上的練習紀錄：做完 " + st.solved + " 題，其中 " + st.clean + " 題沒看提示、一次就對；目前連續 " + st.streak + " 題。" + (st.mastered ? "已達「連續 " + need() + " 題自己做對」。" : "") : "這台裝置上還沒有練習紀錄。";
 }
@@ -663,7 +672,7 @@ function stepsLesson(){
     if (s.check) chipsAsk(b, s.check.q, s.check.opts.map(function(o, k){ return {label:esc(o), value:k}; }), function(v){
       return v === s.check.a ? {ok:true, msg:s.check.ok || "對了！"} : {ok:false, msg:(s.check.why && s.check.why[v]) || "再想想看。"};
     }, next);
-    else { var r = add(b, '<div class="row"><button class="btn sm" type="button" data-next>我懂了，下一步</button></div>'); $("button", r).onclick = function(){ this.disabled = true; next(); }; }
+    else { var r = add(b, '<div class="row"><button class="btn sm" type="button" data-next>我懂了，下一步</button></div>'), g = GEN; $("button", r).onclick = function(){ if (g !== GEN) return; this.disabled = true; next(); }; }
   }
   next();
 }
@@ -683,7 +692,7 @@ function choicePractice(){
   var out = $(".fb", P), bs = P.querySelectorAll(".chip");
   var g1 = GEN;
   each(bs, function(bt){ bt.onclick = function(){
-    if (g1 !== GEN) return;
+    if (g1 !== GEN || st.cur !== cur) return;   // 這題已計分或已切走：舊 handler 失效，不重複計分
     var k = +bt.dataset.k;
     if (k !== q.a) { cur.wrongs++; save(); bt.classList.remove("shake"); void bt.offsetWidth; bt.classList.add("shake", "tried"); fb(out, false, (q.why && q.why[k]) || "再想想看。"); return; }
     each(bs, function(x){ x.disabled = true; }); bt.classList.add("picked"); fb(out, true, q.ok || "對了！");
@@ -738,6 +747,7 @@ function route(){
   $("#vids").innerHTML = ""; $("#vidBox").hidden = true;   // 回首頁就關掉影片（Codex 建議 7）
   $("#entry").hidden = true; $("#home").hidden = false; drawHome();
 }
+$("#saveRetry").onclick = function(){ save(); };
 $("#backHome").onclick = function(ev){ ev.preventDefault(); location.hash = ""; route(); };
 window.addEventListener("hashchange", route);
 // 同一時間只讓一個分頁練習與寫入（Web Locks；Codex 2026-10-13 設計者方案 B）。
@@ -752,7 +762,7 @@ if (navigator.locks && navigator.locks.request) {
       navigator.locks.request("g5help-writer", function(){ location.reload(); return new Promise(function(){}); }).catch(function(){});
       return;
     }
-    WRITER = true; DB = loadDB(); start();
+    WRITER = true; DB = loadDB(); READY = DB.readOk; start();
     return new Promise(function(){});   // 整個頁面存活期間都持有
   }).catch(lockFail);
 } else {
@@ -761,6 +771,8 @@ if (navigator.locks && navigator.locks.request) {
 }
 window.G5HelpWriter = function(){ return WRITER; };
 window.G5HelpDirty = function(){ return dirtyCount(); };
+window.G5HelpCanReplace = canReplace;
+window.G5HelpApplyRemote = applyRemote;
 window.G5HelpPage = {state:function(id){ return JSON.parse(JSON.stringify(DB.entries[id] || null)); }};
 })();
 </script>
@@ -769,14 +781,13 @@ window.G5HelpPage = {state:function(id){ return JSON.parse(JSON.stringify(DB.ent
 (function(){
   if (!window.G5Sync) return;   // sync.js 載不到就照常本機使用
   function boot(){ if (!(window.G5HelpWriter && window.G5HelpWriter())) { var c = document.getElementById("g5sync"); if (c) c.textContent = "（在另一個分頁開著，同步由那一頁負責）"; return; }
-  var queued = false;
   window.G5Sync.init({
     endpoint: "https://script.google.com/macros/s/AKfycbxwo08VVT5tSRf-DsQEoo1hMlCm1YytGTzj89BPtJ6YWjPieuKyAPbnWXjUKagBdL6l/exec",
     keys: ["g5help.v1"], container: "#g5sync",
     summarize: {"g5help.v1": function(j){ try { var x = JSON.parse(j), n = 0, m = 0; Object.keys(x.entries || {}).forEach(function(k){ n += x.entries[k].solved || 0; if (x.entries[k].mastered) m++; }); return "練習做完 " + n + " 題、學會 " + m + " 篇"; } catch (e) { return "（讀不懂的紀錄）"; } }},
-    onReplaced: function(){
-      if (window.G5HelpDirty && window.G5HelpDirty()) { var w = document.getElementById("lead"); if (w) w.textContent = "雲端有較新的紀錄，但這台還有進度沒存好，先不換；存好後重新整理就會用最新的。"; return; }
-      if (!queued) { queued = true; setTimeout(function(){ location.reload(); }, 0); } }
+    // 雲端版本只能經由本頁套用（首頁、沒有未存進度時），不 reload（#1303 第 5 輪必修 2）
+    canReplace: function(key){ return window.G5HelpCanReplace(key); },
+    accept: function(key, data){ return window.G5HelpApplyRemote(key, data); }
   }); }
   window.addEventListener("g5help-ready", boot, {once: true});
 })();

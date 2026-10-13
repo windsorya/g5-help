@@ -393,3 +393,34 @@ test('S37 cloud choice retries a failed download and backs up local progress aft
   assert.equal(b.storage.getItem(KEY), data(10)); assert.equal(backups(b)[0][1], data(20));
   assert.equal(backend.store.record(code).rev, 2);
 });
+
+test('S30 頁面自己是唯一寫入者（#1303 r5）：canReplace=false 時不備份、不寫；之後允許才由 accept 寫入', async t => {
+  const clock = new Clock(), backend = server(clock);
+  const a = device(backend, {initial: {[KEY]: data(1)}});
+  t.after(() => a.api.destroy());
+  await a.api.ready; await a.api.enable();
+  const code = a.api.getState().code;
+  let allow = true; const accepted = [];
+  const b = device(backend, {canReplace: () => allow,
+    accept: (key, value) => { accepted.push(key); b.storage.setItem(key, value); return true; }});
+  t.after(() => b.api.destroy());
+  await b.api.ready; await b.api.join(code);
+  assert.equal(b.storage.getItem(KEY), data(1)); assert.deepEqual(accepted, [KEY], '加入時的下載也經由 accept');
+  a.storage.setItem(KEY, data(7)); await clock.advance(4000);
+  assert.equal(backend.store.record(code).data, data(7));
+  // 孩子重開頁面、直接進某一篇（頁面說現在不能換）
+  b.api.destroy(); allow = false;
+  const b2 = device(backend, {storage: b.storage, canReplace: () => allow,
+    accept: (key, value) => { accepted.push(key); b2.storage.setItem(key, value); return true; }});
+  t.after(() => b2.api.destroy());
+  const nb = backups(b2).length;
+  await b2.api.ready; await clock.advance(8000);
+  assert.equal(b2.storage.getItem(KEY), data(1), '不允許時本機不被換掉');
+  assert.equal(backups(b2).length, nb, '不允許時不寫備份（避免每 4 秒擠掉舊備份）');
+  assert.deepEqual(accepted, [KEY]);
+  assert.match(b2.api.getState().status, /回到首頁/);
+  allow = true; await clock.advance(4000);
+  assert.equal(b2.storage.getItem(KEY), data(7), '允許後經由 accept 換成雲端版');
+  assert.deepEqual(accepted, [KEY, KEY]);
+  assert.equal(backups(b2).length, nb + 1, '真的要換時才備份一次');
+});

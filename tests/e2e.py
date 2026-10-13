@@ -604,6 +604,100 @@ def flow_codex_r4(browser):
     ctx.close()
 
 
+def flow_codex_r5(browser, label="Chromium"):
+    """Codex 2026-10-13 第 5 輪必修 1–3、建議 4（4agent 定案：本頁記憶體是唯一真相、sync.js 不直接寫 g5help.v1、不 reload）。"""
+    loads = "sessionStorage.setItem('loads',String(+(sessionStorage.getItem('loads')||0)+1));"
+    seed = "localStorage.setItem('g5help.v1',JSON.stringify({v:1,entries:{'p38-6-2':{solved:8,idx:8,streak:3,clean:8,mastered:true,lessonDone:true,r:1}}}));"
+    # 必修 1：冷啟動讀取失敗 ⇒ 不給作答、給「再讀一次」；恢復後接續原紀錄，不會被空白蓋掉
+    for key, pre in (("g5help.v1", seed), ("g5math.v1", "localStorage.setItem('g5math.v1',JSON.stringify({v:1,solved:4,idx:4,streak:1,clean:4,mastered:false,lessonDone:true}));")):
+        init = (loads + "if(!sessionStorage.getItem('s')){sessionStorage.setItem('s','1');" + pre + "}"
+                "window.__rf=true;var _g=Storage.prototype.getItem;Storage.prototype.getItem=function(k){if(window.__rf&&k==='" + key + "')throw new Error('io');return _g.call(this,k);};")
+        ctx, pg, errors = open_page(browser, init=init)
+        pg.wait_for_timeout(600)
+        check(f"{label} r5必修1 冷啟動讀 {key} 失敗：沒有作答按鈕、有「再讀一次」", pg.locator("#goPractice").count() == 0 and pg.locator("#readRetry").count() == 1, pg.locator("#topBtns").inner_text())
+        pg.evaluate("window.__rf=false; 0")
+        if pg.locator("#readRetry").count():
+            pg.locator("#readRetry").click()
+        want = 8 if key == "g5help.v1" else 4
+        ok = pg.locator("#goPractice").count() == 1
+        if ok:
+            pg.locator("#goPractice").click(); pg.wait_for_selector("#practice .prob"); solve_practice(pg, *prob_text(pg))
+        st = (store(pg) or {}) if ok else {}
+        check(f"{label} r5必修1 恢復讀取後接續原紀錄（{want}→{want + 1} 題，不被空白蓋掉）", st.get("solved") == want + 1, st)
+        check(f"{label} r5必修1 沒有 JS 錯誤", not errors, errors)
+        ctx.close()
+    # 必修 2：雲端版本只在「首頁、沒有未存進度」時套用；套用不 reload
+    cloud = json.dumps({"v": 1, "entries": {"p38-6-2": {"solved": 20, "idx": 20, "r": 9}}})
+    init = (loads + "window.__fail=false;var _s=Storage.prototype.setItem;Storage.prototype.setItem=function(k,v){if(window.__fail&&k==='g5help.v1')throw new Error('quota');return _s.call(this,k,v);};")
+    ctx, pg, errors = open_page(browser, init=init)
+    pg.wait_for_function("window.G5HelpWriter && G5HelpWriter()")
+    has = pg.evaluate("typeof window.G5HelpApplyRemote === 'function'")
+    check(f"{label} r5必修2 有 G5HelpApplyRemote（同步只能經由本頁套用）", has)
+    if has:
+        pg.evaluate("window.__fail=true; 0")
+        pg.locator("#goPractice").click(); solve_practice(pg, *FIXED[0])
+        r1 = pg.evaluate("(c)=>G5HelpApplyRemote('g5help.v1', c)", cloud)
+        check(f"{label} r5必修2 有未存進度：拒絕套用雲端、不 reload", r1 is False and pg.evaluate("sessionStorage.getItem('loads')") == "1" and pg.evaluate("G5HelpDirty()") == 1)
+        pg.evaluate("window.__fail=false; 0")
+        pg.wait_for_function("G5HelpDirty() === 0", timeout=9000)
+        r2 = pg.evaluate("(c)=>G5HelpApplyRemote('g5help.v1', c)", cloud)
+        check(f"{label} r5必修2 正在某一篇裡：先不套用（回首頁才換）", r2 is False and store(pg)["solved"] == 1)
+        pg.evaluate("location.hash=''"); pg.wait_for_selector("#home:not([hidden])")
+        r3 = pg.evaluate("(c)=>G5HelpApplyRemote('g5help.v1', c)", cloud)
+        check(f"{label} r5必修2 首頁、沒有未存：套用雲端、寫進存檔、不 reload", r3 is True and json.loads(pg.evaluate("localStorage.getItem('g5help.v1')"))["entries"]["p38-6-2"]["solved"] == 20 and pg.evaluate("sessionStorage.getItem('loads')") == "1")
+        check(f"{label} r5必修2 套用後首頁狀態跟著變（練習中）", "練習中" in pg.locator('.subj[data-subj="數學"]').inner_text())
+    check(f"{label} r5必修2 沒有 JS 錯誤", not errors, errors)
+    ctx.close()
+    # 必修 3：存不進去 ⇒ 回首頁也看得到警告；恢復後自動重試成功、警告消失
+    ctx, pg, errors = open_page(browser, init=init)
+    pg.wait_for_function("window.G5HelpWriter && G5HelpWriter()")
+    pg.evaluate("window.__fail=true; 0")
+    pg.locator("#goPractice").click(); solve_practice(pg, *FIXED[0])
+    pg.evaluate("location.hash=''"); pg.wait_for_selector("#home:not([hidden])")
+    warn = pg.locator("#saveWarn")
+    check(f"{label} r5必修3 首頁看得到「還沒存好」警告", warn.count() == 1 and warn.is_visible())
+    pg.evaluate("window.__fail=false; 0")
+    try:
+        pg.wait_for_function("G5HelpDirty() === 0", timeout=9000); auto = True
+    except Exception:
+        auto = False
+    check(f"{label} r5必修3 恢復後自動重試存好（不用再作答）", auto and (store(pg) or {}).get("solved") == 1, pg.evaluate("G5HelpDirty()"))
+    check(f"{label} r5必修3 存好後警告消失", warn.count() == 0 or not warn.is_visible())
+    ctx.close()
+    # 建議 4：舊畫面的「我懂了，下一步」在切走後按下去不出錯；別人改了磁碟也不會讓已答對的題目沒存到
+    ctx, pg, errors = open_page(browser, init=FIXTURE, url=HOME + "#h/t-guoyu")
+    pg.wait_for_function("window.G5HelpWriter && G5HelpWriter()")
+    pg.get_by_role("button", name="開始學").click()
+    chip(pg, "認真的人")
+    pg.wait_for_selector("button[data-next]")
+    pg.evaluate("window.__oldNext = document.querySelector('button[data-next]'); location.hash = '#h/p38-6-2'; 0")
+    pg.wait_for_selector("#prob .frac, #prob")
+    pg.evaluate("window.__oldNext.click(); 0"); pg.wait_for_timeout(200)
+    check(f"{label} r5建議4 切走後按舊的「下一步」：沒有錯誤、數學篇畫面不被動到", not errors and pg.locator('#lesson .lstep').count() == 0, errors)
+    ctx.close()
+    ctx, pg, errors = open_page(browser, init=FIXTURE, url=HOME + "#h/t-guoyu")
+    pg.wait_for_function("window.G5HelpWriter && G5HelpWriter()")
+    pg.locator("#goPractice").click()
+    pg.evaluate("""localStorage.setItem('g5help.v1', JSON.stringify({v:1,entries:{'t-guoyu':{solved:7,idx:7,r:50}}}));
+                   window.dispatchEvent(new StorageEvent('storage',{key:'g5help.v1'})); 0""")
+    pg.wait_for_timeout(100)
+    c1 = pg.locator('#practice .chip[data-k="1"]')
+    if c1.count():
+        c1.click()
+    pg.wait_for_timeout(100)
+    db = json.loads(pg.evaluate("localStorage.getItem('g5help.v1')"))["entries"]["t-guoyu"]
+    check(f"{label} r5建議4 畫面說對了的那一題確實存進去（本頁是唯一真相）", db["solved"] == 1 and "對" in pg.locator("#practice").inner_text(), db)
+    check(f"{label} r5建議4 沒有 JS 錯誤", not errors, errors)
+    ctx.close()
+    # GPT 4agent 補：同一個答對 handler 直接再呼叫一次（不靠按鈕 disabled），只能算一題
+    ctx, pg, errors = open_page(browser, init=FIXTURE, url=HOME + "#h/t-guoyu")
+    pg.wait_for_function("window.G5HelpWriter && G5HelpWriter()")
+    pg.locator("#goPractice").click()
+    pg.evaluate("""(function(){var b=document.querySelector('#practice .chip[data-k="1"]'),h=b.onclick;b.click();h.call(b);})(); 0""")
+    db = json.loads(pg.evaluate("localStorage.getItem('g5help.v1')"))["entries"]["t-guoyu"]
+    check(f"{label} r5補 同一題的答對 handler 重播只計一次", db["solved"] == 1 and db["idx"] == 1 and len(db["log"]) == 1, {k: db[k] for k in ("solved", "idx")})
+    ctx.close()
+
 def main():
     with sync_playwright() as p:
         cr = p.chromium.launch()
@@ -618,6 +712,7 @@ def main():
         flow_codex_help_r2(cr)
         flow_single_writer(cr, "Chromium")
         flow_codex_r4(cr)
+        flow_codex_r5(cr)
         flow_home(cr)
         flow_migrate(cr)
         flow_steps(cr, "手機390", {"viewport": {"width": 390, "height": 844}, "is_mobile": True, "has_touch": True}, shots=True)
@@ -628,6 +723,7 @@ def main():
         flow_full(wk, "iPad", ipad, width=ipad["viewport"]["width"], shots=True)
         flow_steps(wk, "iPad", ipad)
         flow_single_writer(wk, "WebKit")
+        flow_codex_r5(wk, "WebKit")
         if BASE.startswith("https:"):
             flow_video_live(wk, "線上iPad", ipad)
         wk.close()

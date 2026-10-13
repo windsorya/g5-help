@@ -144,7 +144,8 @@ function device(server, options = {}) {
     summarize: options.summarize || {'g5sci.v3': data => '練過 ' + JSON.parse(data).n + ' 題'},
     now: clock.now, storage, fetch,
     random: array => { for (let i = 0; i < array.length; i++) array[i] = seed++ % 240; },
-    onReplaced: key => { d.replacements.push(key); options.onReplaced?.(key, d); }
+    onReplaced: key => { d.replacements.push(key); options.onReplaced?.(key, d); },
+    canReplace: options.canReplace, accept: options.accept
   };
   if (options.nativeRandom) delete init.random;
   if (options.random) init.random = options.random;

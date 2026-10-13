@@ -89,7 +89,7 @@
     try { storage = options.storage || root.localStorage; } catch (ignoreStorage) { storage = null; }
     var code = null, epoch = 0, destroyed = false, stopped = false;
     var busy = null, activeAbort = null, retryTimer = null, failures = 0, retryAt = 0;
-    var needsGet = {}, conflicts = {}, decisions = {}, observed = {}, replaced = [];
+    var needsGet = {}, conflicts = {}, decisions = {}, observed = {}, replaced = [], deferred = {};
     var status = '尚未開啟同步', notice = '', viewCode, view = {};
 
     function read(key) {
@@ -298,12 +298,20 @@
       if (cloud.data === null) { throw error('server'); }
       var currentMeta = baseline(key);
       if (currentMeta && currentMeta.rev > cloud.rev) { showConflict(key, cloud); return; }
+      // 頁面自己是唯一寫入者時（難題站，#1303 第 5 輪）：先問能不能換（有未存進度、正在某一篇裡就不行），
+      // 不行就什麼都不動（不備份、不寫），下一輪再 GET 再問；可以才備份，並交給頁面自己寫入與重畫（不 reload）。
+      if (typeof options.canReplace === 'function' && !options.canReplace(key)) {
+        needsGet[key] = true; deferred[key] = true; return;
+      }
       var local = read(key);
       backup(key, local);
       assertActive(token);
       // Synchronous read/backup/write; no awaited work between decision and replacement.
-      write(key, cloud.data);
+      if (typeof options.accept === 'function') {
+        if (!options.accept(key, cloud.data)) { needsGet[key] = true; deferred[key] = true; return; }
+      } else { write(key, cloud.data); }
       if (read(key) !== cloud.data) { throw error('storage'); }
+      delete deferred[key];
       replaced.push(key); // Notify even if persisting the following metadata fails.
       saveBaseline(key, cloud.rev, cloud.data, cloud.updated);
       delete conflicts[key];
@@ -344,7 +352,7 @@
       if (hash !== meta.hash && local !== null) { return put(key, local, meta.rev, token); }
     }
     function resetSession(nextCode) {
-      epoch += 1; code = nextCode; needsGet = {}; conflicts = {}; decisions = {}; observed = {}; replaced = [];
+      epoch += 1; code = nextCode; needsGet = {}; conflicts = {}; decisions = {}; observed = {}; replaced = []; deferred = {};
       failures = 0; retryAt = 0; notice = '';
       if (retryTimer !== null) { root.clearTimeout(retryTimer); retryTimer = null; }
       keys.forEach(function (key) { needsGet[key] = true; });
@@ -370,6 +378,7 @@
         return needsGet[key] || !meta || contentHash(local) !== meta.hash;
       });
       status = dirty ? '等待同步本機變更' : '已同步 ' + taipei(now(), false);
+      if (keys.some(function (key) { return !!deferred[key]; })) { status = '雲端有較新的進度，回到首頁、存好後就會換上。'; }
       if (keys.some(function (key) { var meta = baseline(key); return meta && meta.rev > 0 && read(key) === null; })) {
         status = '這台的進度已移除，雲端紀錄保留；重新加入可下載。';
       }
