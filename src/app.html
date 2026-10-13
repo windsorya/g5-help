@@ -471,7 +471,7 @@ function step4(){
   var sa = SOL.sa, sb = SOL.sb, L = SOL.lcm;
   var b = stepCard(4, "再通分 " + F.txt(sa) + " 和 " + F.txt(sb));
   add(b, '<p>約分以後，題目變成 ' + fr(sa) + ' 和 ' + fr(sb) + '。分母 ' + sa.d + ' 和 ' + sb.d + ' 還是不一樣，現在才通分——數字小多了！</p>');
-  numsAsk(b, sa.d + ' 和 ' + sb.d + ' 的最小公倍數是多少？', [{pre:"", ans:L, aria:"最小公倍數", check:function(v){
+  numsAsk(b, sa.d + ' 和 ' + sb.d + ' 的最小公倍數（兩個數共同的倍數裡，最小的那一個）是多少？', [{pre:"", ans:L, aria:"最小公倍數", check:function(v){
     if (v === L) return {ok:true};
     if (v <= 0) return {ok:false, msg:"要找比 0 大的公倍數：從 " + sa.d + " 的倍數和 " + sb.d + " 的倍數裡，找第一個一樣的數。"};
     if (v % sa.d === 0 && v % sb.d === 0) return {ok:false, msg:v + " 也是 " + sa.d + " 和 " + sb.d + " 的公倍數，但還有更小的，再找找看。"};
@@ -577,8 +577,8 @@ function renderPractice(){
       return {ok:false, countable:x.code !== "empty", msg:x.msg};
     }, [
       function(){ var ma = [], mb = []; for (var i = 1; i <= s.lcm / sa.d; i++) ma.push(sa.d * i); for (var j = 1; j <= s.lcm / sb.d; j++) mb.push(sb.d * j);
-        return "先找 " + sa.d + " 和 " + sb.d + " 的最小公倍數。" + sa.d + " 的倍數：" + ma.join("、") + "…；" + sb.d + " 的倍數：" + mb.join("、") + "…，第一個兩邊都有的就是。"; },
-      function(){ return "最小公倍數是 " + s.lcm + "。" + F.txt(sa) + " 的分子分母都乘 " + (s.lcm / sa.d) + " → " + F.txt(s.ea) + "；" + F.txt(sb) + " 的分子分母都乘 " + (s.lcm / sb.d) + " → " + F.txt(s.eb) + "。"; }
+        return "先找 " + sa.d + " 和 " + sb.d + " 的最小公倍數（兩個數共同的倍數裡，最小的那一個）。" + sa.d + " 的倍數：" + ma.join("、") + "…；" + sb.d + " 的倍數：" + mb.join("、") + "…，第一個兩邊都有的就是。"; },
+      function(){ return "最小公倍數（共同的倍數裡最小的）是 " + s.lcm + "。" + F.txt(sa) + " 的分子分母都乘 " + (s.lcm / sa.d) + " → " + F.txt(s.ea) + "；" + F.txt(sb) + " 的分子分母都乘 " + (s.lcm / sb.d) + " → " + F.txt(s.eb) + "。"; }
     ]);
     reveal(r2);
   }

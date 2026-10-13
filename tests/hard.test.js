@@ -99,42 +99,49 @@ function glossed(text, w, at) {
   const rest = text.slice(at + w.length), around = text.slice(Math.max(0, at - 3), at);
   return /^（[^）\s]+）/.test(rest) || (/[^\s（）]（$/.test(text.slice(Math.max(0, at - 2), at)) && rest.startsWith("）")) || /叫做?「$/.test(around);
 }
-// 孩子讀得到的字，依讀到的順序串起來；題目原文（question／ask）照抄試卷，不算我們寫的字。
-// 答錯回饋（check.why／practice.why）也是孩子讀的（Codex 審 5367999：舊版漏查）。
-function kidText(e) {
-  const why = (c) => (c && Array.isArray(c.why) ? c.why : []);
-  const parts = e.kind === "steps"
-    ? [e.lead].concat(...e.steps.map((s) => [s.say, s.check && s.check.q, s.check && s.check.opts.join("／"), s.check && s.check.ok].concat(why(s.check))),
-        e.answer, ...(e.practice || []).map((q) => [q.q + "／" + q.opts.join("／")].concat(why(q))))
-    : [e.lead, e.prior && e.prior.q, e.prior && e.prior.ok, e.prior && e.prior.hint];
-  return parts.map(stripTags).join("\n");
-}
+// 孩子看到的文字一律從 tests/kidtext.js 取（依畫面顯示順序的路徑；Codex 審 bdad9d6：舊版自己串、把 ok 排在 why 前面、漏 practice.ok 與數學篇步驟字）。
+const KT = require("./kidtext.js");
 // 每一種 kind 都查（Codex 審 5367999：舊版只篩 steps，數學篇寫什麼都過）。回傳問題清單，空＝通過。
 function wordProblems(e) {
   const out = [];
   if (e.kind === "steps" && !(e.words && typeof e.words === "object" && !Array.isArray(e.words))) out.push(e.id + " 要列出 words（本篇用到的難詞→白話；真的沒有就寫 {}）");
-  const body = kidText(e);
-  Object.keys(H.HARD_WORDS).concat(Object.keys(e.words || {})).forEach((w) => {
-    const at = body.indexOf(w);
-    if (at >= 0 && !glossed(body, w, at)) out.push(e.id + " 的難詞「" + w + "」第一次出現沒有附白話（寫成「" + w + "（白話）」或「白話（" + w + "）」或「叫「" + w + "」」）：…" + body.slice(Math.max(0, at - 12), at + w.length + 8) + "…");
+  const { paths, pieces } = KT.kidText(e);
+  const words = Object.keys(H.HARD_WORDS).concat(Object.keys(e.words || {}));
+  paths.forEach((p, pi) => {
+    const body = p.join("\n");
+    words.forEach((w) => {
+      const at = body.indexOf(w);
+      if (at >= 0 && !glossed(body, w, at)) out.push(e.id + (pi ? "（答錯分支 " + pi + "）" : "") + " 的難詞「" + w + "」第一次出現沒有附白話（寫成「" + w + "（白話）」或「白話（" + w + "）」或「叫「" + w + "」」）：…" + body.slice(Math.max(0, at - 12), at + w.length + 8) + "…");
+    });
   });
+  pieces.forEach((t) => words.forEach((w) => {
+    const at = t.indexOf(w);
+    if (at >= 0 && !glossed(t, w, at) && !/就是$/.test(t.slice(Math.max(0, at - 2), at))) out.push(e.id + " 畫面程式字串的難詞「" + w + "」沒有附白話：" + t);
+  }));
   // readReview 從 #1319（2026-10-13）起才規定；之前上線的篇（p38-6-2，10-12）不追溯，下次改寫那篇時補。
   const r = e.readReview;
   if (e.date >= "2026-10-13" && !(r && typeof r.by === "string" && r.by && /^\d{4}-\d{2}-\d{2}$/.test(r.date) && r.grade === H.gradeAt(new Date(r.date + "T12:00:00+08:00")) && Array.isArray(r.fixed)))
     out.push(e.id + " 要有 readReview {by: 審查模型, date, grade: 當天年級, fixed: [依審查改了哪些詞句]}——上線前請第二個模型依年級列出看不懂的詞句");
-  return out;
+  return [...new Set(out)];
 }
 
 test("難詞第一次出現就要附白話；每篇都要有第二個模型的年級閱讀審查紀錄", () => {
   H.LIST.forEach((e) => assert.deepEqual(wordProblems(e), []));
 });
 
-test("用詞閘自檢：Codex 審 5367999 的三個突變都要被抓到", () => {
+test("用詞閘自檢：Codex 審 5367999、bdad9d6 的突變都要被抓到", () => {
   const clone = (id) => JSON.parse(JSON.stringify(H.get(id)));
+  const has = (e, w) => wordProblems(e).some((x) => x.includes(w));
   const a = clone("sci-q5-bangen"); a.lead = "先弄清楚板根（）。";
   assert.ok(wordProblems(a).length, "空括號不算附白話");
   const b = clone("sci-q5-bangen"); b.lead = "看下面。"; b.steps[0].say = "看圖。"; b.steps[0].check.why[0] = "再想想蒸散。";
-  assert.ok(wordProblems(b).some((x) => /蒸散/.test(x)), "答錯回饋裡的難詞也要查");
+  assert.ok(has(b, "蒸散"), "答錯回饋裡的難詞也要查");
+  const b2 = clone("sci-q5-bangen"); b2.lead = "看下面。"; b2.steps[0].say = "看圖。";
+  b2.steps[0].check.ok = "對！光合作用（植物用陽光做成養分）。"; b2.steps[0].check.why[0] = "再想想光合作用。";
+  assert.ok(has(b2, "光合作用"), "答錯分支先看到 why，後面的 ok 不能替它解釋");
+  const b3 = clone("sci-q5-bangen"); b3.practice[0].ok = "對！這就是蒸散。";
+  assert.ok(has(b3, "蒸散"), "練習答對回饋也是孩子看得到的字");
   const c = clone("p38-6-2"); c.lead = "先認識光合作用。";
-  assert.ok(wordProblems(c).some((x) => /光合作用/.test(x)), "數學篇（frac-compare）也要查");
+  assert.ok(has(c, "光合作用"), "數學篇（frac-compare）也要查");
+  assert.ok(KT.kidText(H.get("p38-6-2")).pieces.some((t) => /最小公倍數/.test(t)), "數學篇步驟字串要進用詞閘（第四步問最小公倍數）");
 });

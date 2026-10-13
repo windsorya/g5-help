@@ -515,3 +515,36 @@ test('S38 有 accept 的頁面：上傳回應遺失後重試，雲端內容＝�
   d.storage.setItem(KEY, data(10)); await clock.advance(60000);
   assert.equal(backend.store.record(code).data, data(10), '之後的進度要能繼續上傳');
 });
+
+// Codex 審 bdad9d6：回應遺失後、重試前又多答一題（本機 10、雲端是自己剛送的 9）→ 仍卡衝突。
+// 判準改成「雲端內容是上次確認後我送出過的任何一份」＝自己的寫入。
+test('S39 有 accept 的頁面：回應遺失後又多答一題才重試，雲端是自己先前送的那份 ⇒ 不出衝突、最新進度照常上傳', async t => {
+  const clock = new Clock(), backend = server(clock);
+  const a = device(backend, {initial: {[KEY]: data(8)}}); t.after(() => a.api.destroy());
+  await a.api.ready; await a.api.enable();
+  const code = a.api.getState().code; a.api.destroy();
+  let lose = true;
+  const d = device(backend, {storage: a.storage, canReplace: () => true, accept: (k, v) => { d.storage.setItem(k, v); return true; },
+    fetch: async req => {
+      const result = backend.handle(req);
+      if (req.op === 'put' && lose) { lose = false; throw new TypeError('lost response after commit'); }
+      return {ok: true, json: async () => result};
+    }}); t.after(() => d.api.destroy()); await d.api.ready;
+  d.storage.setItem(KEY, data(9)); await d.api.sync();
+  assert.equal(backend.store.record(code).data, data(9));
+  d.storage.setItem(KEY, data(10));
+  await clock.advance(60000);
+  assert.equal(Object.keys(d.api.getState().conflicts).length, 0, '雲端那份是自己送的，不是兩份紀錄');
+  assert.equal(backend.store.record(code).data, data(10), '最新進度要上傳');
+});
+
+test('S40 有 accept 的頁面：雲端是別台裝置的內容（不是自己送過的）仍照縮範圍規則各自保留，不覆蓋', async t => {
+  const {clock, backend, a, b, code} = await pair(t);
+  b.api.destroy();
+  const b2 = device(backend, {storage: b.storage, canReplace: () => true, accept: (k, v) => { b2.storage.setItem(k, v); return true; }}); t.after(() => b2.api.destroy());
+  await b2.api.ready;
+  a.storage.setItem(KEY, data(50)); await a.api.sync();
+  b2.storage.setItem(KEY, data(60)); await clock.advance(60000);
+  assert.equal(backend.store.record(code).data, data(50), '別台的不能被蓋掉');
+  assert.equal(b2.storage.getItem(KEY), data(60), '這台的也不能被蓋掉');
+});

@@ -22,11 +22,23 @@ test("標準②圖：通用格式每一步都有圖", () => {
     assert.ok(/<svg[^>]*aria-label="[^"]{4,}"/.test(String(s.fig || "")), e.id + " 第 " + (i + 1) + " 步沒有圖")));
 });
 
-test("標準③白話：解說每一句不超過年級句長上限", () => {
-  const long = [];
-  H.LIST.filter((e) => e.kind === "steps").forEach((e) => [e.lead, e.answer].concat(e.steps.map((s) => s.say)).forEach((t) =>
-    String(t || "").replace(/<[^>]*>/g, "").split(/[。！？\n]|<br>/).forEach((s) => { if (s.trim().length > MAX_SENTENCE) long.push(e.id + "：" + s.trim()); })));
-  assert.deepEqual(long, []);
+// 孩子看到的字一律從 tests/kidtext.js 取（每一種 kind；Codex 審 bdad9d6：舊版只篩 steps，數學篇寫 100 字一句也過）。
+const KT = require("./kidtext.js");
+function longSentences(e) {
+  const { paths, pieces } = KT.kidText(e), long = [];
+  [...new Set(paths.flat().concat(pieces))].forEach((t) => String(t || "").split(/[。！？\n]/).forEach((s) => {
+    if (s.trim().length > MAX_SENTENCE) long.push(e.id + "：" + s.trim());
+  }));
+  return long;
+}
+
+test("標準③白話：孩子看到的每一句不超過年級句長上限（每一種 kind）", () => {
+  assert.deepEqual(H.LIST.map(longSentences).flat(), []);
+});
+
+test("標準③自檢：數學篇超長句要被抓到", () => {
+  const c = JSON.parse(JSON.stringify(H.get("p38-6-2"))); c.lead = "字".repeat(100) + "。";
+  assert.ok(longSentences(c).length, "frac-compare 篇也要量句長");
 });
 
 test("標準④三站切換列、⑤不被搜尋引擎收錄", () => {

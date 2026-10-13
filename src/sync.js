@@ -90,6 +90,9 @@
     var code = null, epoch = 0, destroyed = false, stopped = false;
     var busy = null, activeAbort = null, retryTimer = null, failures = 0, retryAt = 0;
     var needsGet = {}, conflicts = {}, decisions = {}, observed = {}, replaced = [], deferred = {};
+    // sent[key]＝上次確認（baseline）之後，這個分頁送出過的每份內容。回應遺失時雲端可能已經是其中任何一份——
+    // 那是自己的寫入，不是另一台裝置（Codex 審 5367999、bdad9d6）。
+    var sent = {}, SENT_KEEP = 20;   // cap-why: 每 4 秒最多送一次、成功就清空；20 份＝連續 80 秒回應全遺失，再多就當成真的衝突
     var status = '尚未開啟同步', notice = '', viewCode, view = {};
     // 頁面自己是唯一寫入者（提供 accept，難題站）：#1303 第 7 輪後依升級階梯縮範圍——關閉「留這台／留雲端」衝突選擇，
     // 兩台不一樣就各自保留（這台用這台的、雲端那份不動），不出按鈕、resolve 拒絕。自然站（沒有 accept）照舊。
@@ -122,6 +125,7 @@
       if (previous && integer(previous.rev) && previous.rev > rev) { needsGet[key] = true; return; }
       meta.keys[key] = {rev: rev, hash: contentHash(data), updated: updated};
       write(META, JSON.stringify(meta));
+      delete sent[key];
     }
     function active(token) {
       return !destroyed && !stopped && token === epoch && code && read(CODE) === code;
@@ -325,12 +329,16 @@
       if (data === null) { return Promise.resolve(); }
       if (data.length > 900000) { return Promise.reject(error('too-big')); }
       if (chosenCloud) { backup(key, chosenCloud.data); }
+      var mine = sent[key] || (sent[key] = []);
+      if (mine.indexOf(data) < 0) { mine.push(data); if (mine.length > SENT_KEEP) { mine.shift(); } }
       return request({op: 'put', key: key, rev: rev, data: data}, token).then(function (r) {
         assertActive(token);
-        // 上傳回應遺失後重試：雲端已經是這份內容（後端其實存好了）⇒ 不是兩份紀錄，補 baseline 繼續同步。
-        // 只給有 accept 的頁面（難題站：沒有選擇按鈕，出衝突＝從此不再同步）；自然站照 S31 出衝突讓人選（Codex 審 5367999）。
-        if (r.err === 'conflict' && typeof options.accept === 'function' && r.data === data && typeof r.rev === 'number') {
-          saveBaseline(key, r.rev, data, r.updated); delete conflicts[key]; return;
+        // 上傳回應遺失後重試：雲端是這個分頁先前送過的某一份（後端其實存好了）⇒ 不是兩份紀錄：
+        // baseline 改成雲端那份，下一輪再把本機最新的推上去。
+        // 只給有 accept 的頁面（難題站：沒有選擇按鈕，出衝突＝從此不再同步）；自然站照 S31 出衝突讓人選。
+        if (r.err === 'conflict' && typeof options.accept === 'function' && typeof r.rev === 'number' &&
+            typeof r.data === 'string' && (sent[key] || []).indexOf(r.data) >= 0) {
+          saveBaseline(key, r.rev, r.data, r.updated); delete conflicts[key]; return;
         }
         if (r.err === 'conflict') { showConflict(key, r); return; }
         // The baseline is the exact request payload, never a newer local edit.
@@ -364,7 +372,7 @@
       if (hash !== meta.hash && local !== null) { return put(key, local, meta.rev, token); }
     }
     function resetSession(nextCode) {
-      epoch += 1; code = nextCode; needsGet = {}; conflicts = {}; decisions = {}; observed = {}; replaced = []; deferred = {};
+      epoch += 1; code = nextCode; needsGet = {}; sent = {}; conflicts = {}; decisions = {}; observed = {}; replaced = []; deferred = {};
       failures = 0; retryAt = 0; notice = '';
       if (retryTimer !== null) { root.clearTimeout(retryTimer); retryTimer = null; }
       keys.forEach(function (key) { needsGet[key] = true; });
