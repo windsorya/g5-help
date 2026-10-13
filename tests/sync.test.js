@@ -492,3 +492,26 @@ test('S36 沒有 accept 的頁面：本機＝雲端但 baseline 舊時，照改�
   await b2.api.ready;
   assert.equal(Object.keys(b2.api.getState().conflicts).length, 1, '自然站照改前：出衝突');
 });
+
+// Codex 審 5367999 的 FAIL「上傳回應遺失」：後端已存好、只是回應丟了 → 重試時雲端內容＝這次要送的內容。
+// 有 accept 的頁面（難題站）不出衝突（它沒有選擇按鈕，出衝突＝從此不再同步），只補 baseline 並繼續同步。
+test('S38 有 accept 的頁面：上傳回應遺失後重試，雲端內容＝要送的內容 ⇒ 不出衝突、之後的進度照常上傳', async t => {
+  const clock = new Clock(), backend = server(clock);
+  const a = device(backend, {initial: {[KEY]: data(8)}}); t.after(() => a.api.destroy());
+  await a.api.ready; await a.api.enable();
+  const code = a.api.getState().code; a.api.destroy();
+  let lose = true;
+  const d = device(backend, {storage: a.storage, canReplace: () => true, accept: (k, v) => { d.storage.setItem(k, v); return true; },
+    fetch: async req => {
+      const result = backend.handle(req);
+      if (req.op === 'put' && lose) { lose = false; throw new TypeError('lost response after commit'); }
+      return {ok: true, json: async () => result};
+    }}); t.after(() => d.api.destroy()); await d.api.ready;
+  d.storage.setItem(KEY, data(9)); await d.api.sync();
+  assert.equal(backend.store.record(code).data, data(9));
+  await clock.advance(4000);
+  assert.equal(Object.keys(d.api.getState().conflicts).length, 0, '內容一樣不是兩份紀錄');
+  assert.doesNotMatch(d.api.getState().status, /不一樣/);
+  d.storage.setItem(KEY, data(10)); await clock.advance(60000);
+  assert.equal(backend.store.record(code).data, data(10), '之後的進度要能繼續上傳');
+});

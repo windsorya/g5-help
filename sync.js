@@ -327,6 +327,11 @@
       if (chosenCloud) { backup(key, chosenCloud.data); }
       return request({op: 'put', key: key, rev: rev, data: data}, token).then(function (r) {
         assertActive(token);
+        // 上傳回應遺失後重試：雲端已經是這份內容（後端其實存好了）⇒ 不是兩份紀錄，補 baseline 繼續同步。
+        // 只給有 accept 的頁面（難題站：沒有選擇按鈕，出衝突＝從此不再同步）；自然站照 S31 出衝突讓人選（Codex 審 5367999）。
+        if (r.err === 'conflict' && typeof options.accept === 'function' && r.data === data && typeof r.rev === 'number') {
+          saveBaseline(key, r.rev, data, r.updated); delete conflicts[key]; return;
+        }
         if (r.err === 'conflict') { showConflict(key, r); return; }
         // The baseline is the exact request payload, never a newer local edit.
         saveBaseline(key, r.rev, data, r.updated);

@@ -17,7 +17,9 @@
   function view(it, items, lastFetch, now) {
     if (it.status === "done") return { pct: 100, text: "做好了" };
     if (it.status !== "fetched") {
-      var due = (num(lastFetch) ? lastFetch : now) + FETCH_EVERY;
+      // 電腦從沒取過題目＝不知道它在不在跑，不承諾時間（舊版用「現在＋10 分」會每次打開都往後順延）
+      if (!num(lastFetch)) return { pct: 33, text: "已送出，等電腦取回" };
+      var due = lastFetch + FETCH_EVERY;
       return { pct: 33, text: due >= now ? "已送出，最晚 " + hhmm(due) + " 前電腦會取回" : "已送出，等電腦取回" };
     }
     var start = num(it.time) ? it.time : now, total = estimate(items), eta = start + total;

@@ -18,6 +18,15 @@ test('已送出：33%，顯示最晚幾點前電腦會取回（上次取題＋10
   assert.match(v.text, /最晚 14:07 前/);
 });
 
+// Codex 審 5367999：電腦從沒取過題目（lastFetch=0）時舊版用「現在＋10 分」，每次打開都往後順延、永遠不會過期。
+test('電腦從沒取過題目：不承諾時間（不得用現在時間往後推）', () => {
+  [0, null, undefined].forEach((lf) => {
+    const v = P.view({ status: 'new', time: T0 }, [], lf, T0 + 60 * MIN);
+    assert.equal(v.pct, 33);
+    assert.doesNotMatch(v.text, /最晚/);
+  });
+});
+
 test('已送出但電腦比預期久沒取：不承諾時間', () => {
   const v = P.view({ status: 'new', time: T0 }, [], T0 - 30 * MIN, T0 + MIN);
   assert.equal(v.pct, 33);

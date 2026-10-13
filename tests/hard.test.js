@@ -93,24 +93,48 @@ test("白話程度跟著年級：今天的年級、每一篇每一句都不超�
 // 用詞難度（交辦 #1319，2026-10-13 律師問「只檢查句長、用詞靠我注意，這機制合理嗎」）：
 // 句長只是代理指標；看不懂多半卡在詞。三道：①難詞第一次出現就要附白話（本測試）②第二個模型依年級審過（readReview）
 // ③孩子按「這步看不懂」的真實回饋（app.html → GAS Inbox）。①擋得住「已知的難詞」，擋不住沒列進表的詞 ⇒ 靠②③補。
-test("難詞第一次出現就要附白話；每篇都要有第二個模型的年級閱讀審查紀錄", () => {
-  const strip = (x) => String(x || "").replace(/<[^>]*>/g, "").replace(/&[a-z]+;/g, "");
-  const glossed = (text, w, at) => {
-    const after = text.slice(at + w.length, at + w.length + 1), before = text.slice(Math.max(0, at - 1), at), around = text.slice(Math.max(0, at - 3), at);
-    return after === "（" || (before === "（" && text.slice(at + w.length, at + w.length + 1) === "）") || /叫做?「$/.test(around) || /叫「$/.test(around);
-  };
-  H.LIST.filter((e) => e.kind === "steps").forEach((e) => {
-    assert.ok(e.words && typeof e.words === "object" && !Array.isArray(e.words), e.id + " 要列出 words（本篇用到的難詞→白話；真的沒有就寫 {}）");
-    const words = Object.keys(H.HARD_WORDS).concat(Object.keys(e.words));
-    // 依孩子讀到的順序串起來；題目原文（question／ask）照抄試卷，不算我們寫的字
-    const body = [e.lead].concat(...e.steps.map((s) => [s.say, s.check && s.check.q, s.check && s.check.opts.join("／"), s.check && s.check.ok]), e.answer, (e.practice || []).map((q) => q.q + "／" + q.opts.join("／"))).map(strip).join("\n");
-    words.forEach((w) => {
-      const at = body.indexOf(w);
-      if (at < 0) return;
-      assert.ok(glossed(body, w, at), e.id + " 的難詞「" + w + "」第一次出現沒有附白話（寫成「" + w + "（白話）」或「（" + w + "）」或「叫「" + w + "」」）：…" + body.slice(Math.max(0, at - 12), at + w.length + 8) + "…");
-    });
-    const r = e.readReview;
-    assert.ok(r && typeof r.by === "string" && r.by && /^\d{4}-\d{2}-\d{2}$/.test(r.date) && r.grade === H.gradeAt(new Date(r.date + "T12:00:00+08:00")) && Array.isArray(r.fixed),
-      e.id + " 要有 readReview {by: 審查模型, date, grade: 當天年級, fixed: [依審查改了哪些詞句]}——上線前請第二個模型依年級列出看不懂的詞句");
+// 括號裡要真的有白話：「板根（）」不算（Codex 審 5367999：舊版只看後面是不是「（」）。
+const stripTags = (x) => String(x || "").replace(/<[^>]*>/g, "").replace(/&[a-z]+;/g, "");
+function glossed(text, w, at) {
+  const rest = text.slice(at + w.length), around = text.slice(Math.max(0, at - 3), at);
+  return /^（[^）\s]+）/.test(rest) || (/[^\s（）]（$/.test(text.slice(Math.max(0, at - 2), at)) && rest.startsWith("）")) || /叫做?「$/.test(around);
+}
+// 孩子讀得到的字，依讀到的順序串起來；題目原文（question／ask）照抄試卷，不算我們寫的字。
+// 答錯回饋（check.why／practice.why）也是孩子讀的（Codex 審 5367999：舊版漏查）。
+function kidText(e) {
+  const why = (c) => (c && Array.isArray(c.why) ? c.why : []);
+  const parts = e.kind === "steps"
+    ? [e.lead].concat(...e.steps.map((s) => [s.say, s.check && s.check.q, s.check && s.check.opts.join("／"), s.check && s.check.ok].concat(why(s.check))),
+        e.answer, ...(e.practice || []).map((q) => [q.q + "／" + q.opts.join("／")].concat(why(q))))
+    : [e.lead, e.prior && e.prior.q, e.prior && e.prior.ok, e.prior && e.prior.hint];
+  return parts.map(stripTags).join("\n");
+}
+// 每一種 kind 都查（Codex 審 5367999：舊版只篩 steps，數學篇寫什麼都過）。回傳問題清單，空＝通過。
+function wordProblems(e) {
+  const out = [];
+  if (e.kind === "steps" && !(e.words && typeof e.words === "object" && !Array.isArray(e.words))) out.push(e.id + " 要列出 words（本篇用到的難詞→白話；真的沒有就寫 {}）");
+  const body = kidText(e);
+  Object.keys(H.HARD_WORDS).concat(Object.keys(e.words || {})).forEach((w) => {
+    const at = body.indexOf(w);
+    if (at >= 0 && !glossed(body, w, at)) out.push(e.id + " 的難詞「" + w + "」第一次出現沒有附白話（寫成「" + w + "（白話）」或「白話（" + w + "）」或「叫「" + w + "」」）：…" + body.slice(Math.max(0, at - 12), at + w.length + 8) + "…");
   });
+  // readReview 從 #1319（2026-10-13）起才規定；之前上線的篇（p38-6-2，10-12）不追溯，下次改寫那篇時補。
+  const r = e.readReview;
+  if (e.date >= "2026-10-13" && !(r && typeof r.by === "string" && r.by && /^\d{4}-\d{2}-\d{2}$/.test(r.date) && r.grade === H.gradeAt(new Date(r.date + "T12:00:00+08:00")) && Array.isArray(r.fixed)))
+    out.push(e.id + " 要有 readReview {by: 審查模型, date, grade: 當天年級, fixed: [依審查改了哪些詞句]}——上線前請第二個模型依年級列出看不懂的詞句");
+  return out;
+}
+
+test("難詞第一次出現就要附白話；每篇都要有第二個模型的年級閱讀審查紀錄", () => {
+  H.LIST.forEach((e) => assert.deepEqual(wordProblems(e), []));
+});
+
+test("用詞閘自檢：Codex 審 5367999 的三個突變都要被抓到", () => {
+  const clone = (id) => JSON.parse(JSON.stringify(H.get(id)));
+  const a = clone("sci-q5-bangen"); a.lead = "先弄清楚板根（）。";
+  assert.ok(wordProblems(a).length, "空括號不算附白話");
+  const b = clone("sci-q5-bangen"); b.lead = "看下面。"; b.steps[0].say = "看圖。"; b.steps[0].check.why[0] = "再想想蒸散。";
+  assert.ok(wordProblems(b).some((x) => /蒸散/.test(x)), "答錯回饋裡的難詞也要查");
+  const c = clone("p38-6-2"); c.lead = "先認識光合作用。";
+  assert.ok(wordProblems(c).some((x) => /光合作用/.test(x)), "數學篇（frac-compare）也要查");
 });
