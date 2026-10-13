@@ -91,6 +91,10 @@
     var busy = null, activeAbort = null, retryTimer = null, failures = 0, retryAt = 0;
     var needsGet = {}, conflicts = {}, decisions = {}, observed = {}, replaced = [], deferred = {};
     var status = '尚未開啟同步', notice = '', viewCode, view = {};
+    // 頁面自己是唯一寫入者（提供 accept，難題站）：#1303 第 7 輪後依升級階梯縮範圍——關閉「留這台／留雲端」衝突選擇，
+    // 兩台不一樣就各自保留（這台用這台的、雲端那份不動），不出按鈕、resolve 拒絕。自然站（沒有 accept）照舊。
+    var pageOwned = typeof options.accept === 'function';
+    var KEPT = '兩台裝置的紀錄不一樣：這台照常用這台的，雲端那份不動（各自保留，不會互相蓋掉）。';
 
     function read(key) {
       if (!storage) { throw error('storage'); }
@@ -236,11 +240,12 @@
         if (!cloud) { return; }
         var local = read(key), obs = observe(key, local);
         var box = el('section', 'conflict');
-        box.appendChild(el('h3', 'conflict-title', key + '：請選擇保留哪份完整紀錄'));
+        box.appendChild(el('h3', 'conflict-title', key + (pageOwned ? '：兩台的紀錄不一樣' : '：請選擇保留哪份完整紀錄')));
         box.appendChild(el('p', 'local-summary', '這台：' + summary(key, local)));
         box.appendChild(el('p', 'local-time', '本機變更偵測時間：' + taipei(obs.detected, true) + '；實際作答時間由各站紀錄提供。'));
         box.appendChild(el('p', 'cloud-summary', '雲端：' + summary(key, cloud.data)));
         box.appendChild(el('p', 'cloud-time', '雲端更新時間：' + taipei(cloud.updated, true)));
+        if (pageOwned) { box.appendChild(el('p', 'kept', KEPT)); view.conflicts.appendChild(box); return; }
         var keepLocal = button('留這台的', function () { resolve(key, 'local'); }); keepLocal.disabled = local === null || !!decisions[key];
         var keepCloud = button('留雲端的', function () { resolve(key, 'cloud'); }); keepCloud.disabled = cloud.data === null || !!decisions[key];
         box.appendChild(keepLocal); box.appendChild(keepCloud); view.conflicts.appendChild(box);
@@ -290,7 +295,7 @@
     function showConflict(key, cloud) {
       delete decisions[key]; // A newly observed cloud version requires a new choice.
       conflicts[key] = {rev: cloud.rev, data: cloud.data, updated: cloud.updated};
-      status = '有兩份進度，請選擇要保留的紀錄。';
+      status = pageOwned ? KEPT : '有兩份進度，請選擇要保留的紀錄。';
       render();
     }
     function replaceLocal(key, cloud, token) {
@@ -342,7 +347,7 @@
         return;
       }
       // 本機內容已經和雲端一字不差（已同步過的裝置；例如頁面寫進去了但讀回失敗，#1303 第 6 輪）。第一次加入仍照 A4 一律問：只補 baseline，不出衝突、不備份、不換
-      if (local !== null && local === cloud.data) { saveBaseline(key, cloud.rev, cloud.data, cloud.updated); delete conflicts[key]; return; }
+      if (pageOwned && local !== null && local === cloud.data) { saveBaseline(key, cloud.rev, cloud.data, cloud.updated); delete conflicts[key]; delete deferred[key]; return; }
       if (cloud.rev < meta.rev || (cloud.rev === meta.rev && contentHash(cloud.data) !== meta.hash)) {
         showConflict(key, cloud); return;
       }
@@ -373,7 +378,7 @@
     }
     function completed() {
       if (keys.some(function (key) { return !!conflicts[key]; })) {
-        status = '有兩份進度，請選擇要保留的紀錄。'; return;
+        status = pageOwned ? KEPT : '有兩份進度，請選擇要保留的紀錄。'; return;
       }
       var dirty = keys.some(function (key) {
         var meta = baseline(key), local = read(key);
@@ -492,6 +497,7 @@
       return action.then(function () { delete decisions[key]; });
     }
     function resolve(key, choice) {
+      if (pageOwned) { return Promise.resolve(false); }   // 縮範圍：頁面擁有的 key 不提供選邊覆蓋
       if (destroyed || stopped || !conflicts[key] || decisions[key] || keys.indexOf(key) < 0 || (choice !== 'local' && choice !== 'cloud')) { return Promise.resolve(false); }
       decisions[key] = choice;
       render();

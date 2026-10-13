@@ -425,7 +425,7 @@ test('S32 頁面自己是唯一寫入者（#1303 r5）：canReplace=false 時不
   assert.equal(backups(b2).length, nb + 1, '真的要換時才備份一次');
 });
 
-test('S33 本機內容已經等於雲端（例如頁面寫進去了但讀回失敗）：只補 baseline，不出衝突、不再換', async t => {
+test('S33 有 accept 的頁面（難題站）本機內容已經等於雲端（例如頁面寫進去了但讀回失敗）：只補 baseline，不出衝突、不再換', async t => {
   const clock = new Clock(), backend = server(clock);
   const a = device(backend, {initial: {[KEY]: data(1)}});
   t.after(() => a.api.destroy());
@@ -437,10 +437,58 @@ test('S33 本機內容已經等於雲端（例如頁面寫進去了但讀回失�
   a.storage.setItem(KEY, data(7)); await clock.advance(4000);
   // b 的本機已經是 data(7)，但 baseline 還停在 rev 1
   b.storage.setItem(KEY, data(7)); b.api.destroy();
-  const b2 = device(backend, {storage: b.storage}); t.after(() => b2.api.destroy());
+  const b2 = device(backend, {storage: b.storage, canReplace: () => true, accept: (k, v) => { b2.storage.setItem(k, v); return true; }}); t.after(() => b2.api.destroy());
   const nb = backups(b2).length;
   await b2.api.ready;
   assert.equal(Object.keys(b2.api.getState().conflicts).length, 0, '內容一樣不該問要留哪一份');
   assert.equal(JSON.parse(b2.storage.getItem('g5sync.meta')).keys[KEY].rev, backend.store.record(code).rev, 'baseline 補到雲端的 rev');
   assert.equal(backups(b2).length, nb, '內容一樣不必備份');
+  assert.doesNotMatch(b2.api.getState().status, /回到首頁/, '補完 baseline 不再顯示「回到首頁就會換上」');
+});
+
+// #1303 第 7 輪後依升級階梯縮範圍：頁面自己是寫入者（有 accept）時，關閉「留這台／留雲端」衝突選擇——
+// 兩台紀錄不一樣就各自保留：這台照常用這台的、雲端那份不動；不出選擇按鈕，resolve 一律拒絕。
+test('S34 有 accept 的頁面：衝突時不出選擇按鈕、resolve 拒絕、本機與雲端都不被蓋掉', async t => {
+  const clock = new Clock(), backend = server(clock);
+  const a = device(backend, {initial: {[KEY]: data(1)}});
+  t.after(() => a.api.destroy());
+  await a.api.ready; await a.api.enable();
+  const code = a.api.getState().code;
+  const b = device(backend, {canReplace: () => true, accept: (key, value) => { b.storage.setItem(key, value); return true; }});
+  t.after(() => b.api.destroy());
+  await b.api.ready; await b.api.join(code);
+  // 兩邊各自改：a 上傳 data(5)；b 本機改成 data(9)
+  a.storage.setItem(KEY, data(5)); await clock.advance(4000);
+  b.storage.setItem(KEY, data(9)); await clock.advance(4000);
+  const st = b.api.getState();
+  assert.equal(b.storage.getItem(KEY), data(9), '這台照常用這台的');
+  assert.equal(backend.store.record(code).data, data(5), '雲端那份不動');
+  const buttons = descendants(b.doc.container).filter((n) => n.tagName === 'BUTTON' && /留這台|留雲端/.test(n.textContent));
+  assert.equal(buttons.length, 0, '不出選擇按鈕');
+  assert.equal(await b.api.resolve(KEY, 'cloud'), false, 'resolve 拒絕');
+  assert.equal(b.storage.getItem(KEY), data(9));
+  assert.match(st.status, /不一樣|各自保留/, st.status);
+});
+
+test('S35 沒有 accept 的頁面（自然站）：衝突仍出選擇按鈕，行為與改前一致', async t => {
+  const {clock, backend, a, b, code} = await pair(t);
+  a.storage.setItem(KEY, data(5)); await clock.advance(4000);
+  b.storage.setItem(KEY, data(9)); await clock.advance(4000);
+  const buttons = descendants(b.doc.container).filter((n) => n.tagName === 'BUTTON' && /留這台|留雲端/.test(n.textContent));
+  assert.equal(buttons.length, 2);
+});
+
+test('S36 沒有 accept 的頁面：本機＝雲端但 baseline 舊時，照改前出衝突（相等捷徑只給有 accept 的頁面）', async t => {
+  const clock = new Clock(), backend = server(clock);
+  const a = device(backend, {initial: {[KEY]: data(1)}});
+  t.after(() => a.api.destroy());
+  await a.api.ready; await a.api.enable();
+  const code = a.api.getState().code;
+  const b = device(backend); t.after(() => b.api.destroy());
+  await b.api.ready; await b.api.join(code);
+  a.storage.setItem(KEY, data(7)); await clock.advance(4000);
+  b.storage.setItem(KEY, data(7)); b.api.destroy();
+  const b2 = device(backend, {storage: b.storage}); t.after(() => b2.api.destroy());
+  await b2.api.ready;
+  assert.equal(Object.keys(b2.api.getState().conflicts).length, 1, '自然站照改前：出衝突');
 });
