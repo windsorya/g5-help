@@ -81,6 +81,15 @@ details p{margin:0 0 10px}
 .subj{display:grid;gap:10px}
 .empty{font-size:15px;color:var(--muted)}
 .back{color:var(--pri);font-size:16px;justify-self:start;min-height:40px;display:inline-flex;align-items:center}
+/* 跨裝置同步面板（src/sync.js 產生，class 前綴 g5s-） */
+.g5s-panel{display:grid;gap:10px}
+.g5s-button{min-height:46px;padding:9px 16px;margin:4px 8px 4px 0;border:2px solid var(--line);border-radius:12px;background:var(--card);color:var(--ink);font-size:17px;cursor:pointer}
+.g5s-input,.g5s-link{box-sizing:border-box;max-width:100%;padding:10px;font-size:17px;border:2px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink)}
+.g5s-link{width:100%}
+.g5s-code{font-size:26px;font-weight:700;letter-spacing:.08em;font-variant-numeric:tabular-nums}
+.g5s-conflict{padding:14px;border:2px solid var(--sun);border-radius:12px;background:var(--sun-soft)}
+.g5s-notice{color:var(--bad)}
+.g5s-panel svg{width:180px;height:180px;background:#fff;padding:8px;border-radius:8px}
 .qtext{font-size:clamp(20px,3.4vw,24px);line-height:1.7;font-weight:700}
 /* 教學步驟 */
 .lesson{display:grid;gap:18px}
@@ -130,6 +139,7 @@ details p{margin:0 0 10px}
   <section id="home" style="display:grid;gap:18px">
     <div class="panel"><p style="margin:0">每一篇都是她說「看不懂」的那一題：跟著步驟自己動手做，做完再練幾題同類型的，練到會為止。不用重看整張考卷。</p></div>
     <div id="subjects" style="display:grid;gap:18px"></div>
+    <details id="syncBox"><summary>換電腦或 iPad 也能接著練（跨裝置同步）</summary><div id="g5sync"></div></details>
   </section>
 
   <div id="entry" hidden style="display:grid;gap:18px">
@@ -155,6 +165,8 @@ details p{margin:0 0 10px}
   </div>
 </div>
 
+<script src="qrcode.js"></script>
+<script src="sync.js"></script>
 <!--@INLINE src/frac.js-->
 <!--@INLINE src/hard.js-->
 <script>
@@ -679,5 +691,18 @@ $("#backHome").onclick = function(ev){ ev.preventDefault(); location.hash = ""; 
 window.addEventListener("hashchange", route);
 countdown(); route();
 window.G5HelpPage = {state:function(id){ return JSON.parse(JSON.stringify(DB.entries[id] || null)); }};
+})();
+</script>
+<script>
+// 跨裝置同步（家庭同步碼）：只同步本站自己的 g5help.v1；同步碼存在同網域 localStorage，自然站連過也算
+(function(){
+  if (!window.G5Sync) return;   // sync.js 載不到就照常本機使用
+  var queued = false;
+  window.G5Sync.init({
+    endpoint: "https://script.google.com/macros/s/AKfycbxwo08VVT5tSRf-DsQEoo1hMlCm1YytGTzj89BPtJ6YWjPieuKyAPbnWXjUKagBdL6l/exec",
+    keys: ["g5help.v1"], container: "#g5sync",
+    summarize: {"g5help.v1": function(j){ try { var x = JSON.parse(j), n = 0, m = 0; Object.keys(x.entries || {}).forEach(function(k){ n += x.entries[k].solved || 0; if (x.entries[k].mastered) m++; }); return "練習做完 " + n + " 題、學會 " + m + " 篇"; } catch (e) { return "（讀不懂的紀錄）"; } }},
+    onReplaced: function(){ if (!queued) { queued = true; setTimeout(function(){ location.reload(); }, 0); } }
+  });
 })();
 </script>

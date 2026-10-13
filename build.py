@@ -33,6 +33,10 @@ def main() -> None:
     body = inline((ROOT / "src" / "app.html").read_text(encoding="utf-8"))
     (ROOT / "index.html").write_text(HEAD + body + "</body></html>", encoding="utf-8")
     print(f"built index.html ({len(body)} chars)")
+    # 同步函式庫另外當獨立檔放在網站根目錄，自然站等其他站用 <script src> 載入同一份（不另抄一份）
+    for name in ("sync.js", "qrcode.js"):
+        (ROOT / name).write_text((ROOT / "src" / name).read_text(encoding="utf-8"), encoding="utf-8")
+    print("copied sync.js, qrcode.js")
 
 
 if __name__ == "__main__":
