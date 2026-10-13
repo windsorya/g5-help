@@ -139,6 +139,16 @@ details p{margin:0 0 10px}
   <section id="home" style="display:grid;gap:18px">
     <div class="panel"><p style="margin:0">每一篇都是她說「看不懂」的那一題：跟著步驟自己動手做，做完再練幾題同類型的，練到會為止。不用重看整張考卷。</p></div>
     <div id="subjects" style="display:grid;gap:18px"></div>
+    <details id="upBox"><summary>家長傳題目（她說看不懂的那一題）</summary>
+      <div style="display:grid;gap:12px" id="upForm">
+        <p class="small muted" style="margin:0">拍下那一題、選科目、寫一句她卡在哪。照片只存在家裡自己的 Google 試算表，不會放上網頁；做好的解說會出現在上面對應的科目裡。</p>
+        <label>科目 <select id="upSubj" style="font-size:17px;min-height:46px;padding:6px 10px;border:2px solid var(--line);border-radius:12px;background:var(--card)"></select></label>
+        <label>照片 <input type="file" id="upFile" accept="image/*" style="font-size:16px"></label>
+        <label for="upNote">哪一題、她說哪裡不懂</label>
+        <textarea id="upNote" maxlength="500" style="font-size:16px;min-height:80px;border:2px solid var(--line);border-radius:12px;padding:10px;background:var(--bg);color:var(--ink)" placeholder="例：右上角第 6 題②，她不知道怎麼通分"></textarea>
+        <div class="row"><button class="btn" type="button" id="upSend">送出</button><span class="small" id="upMsg" aria-live="polite"></span></div>
+      </div>
+    </details>
     <details id="syncBox"><summary>換電腦或 iPad 也能接著練（跨裝置同步）</summary><div id="g5sync"></div></details>
   </section>
 
@@ -889,6 +899,42 @@ window.G5HelpPage = {state:function(id){ return JSON.parse(JSON.stringify(DB.ent
     summarize: {"g5help.v1": function(j){ try { var x = JSON.parse(j), n = 0, m = 0; Object.keys(x.entries || {}).forEach(function(k){ n += x.entries[k].solved || 0; if (x.entries[k].mastered) m++; }); return "練習做完 " + n + " 題、學會 " + m + " 篇"; } catch (e) { return "（讀不懂的紀錄）"; } }},
     onReplaced: function(){ if (!queued) { queued = true; setTimeout(function(){ location.reload(); }, 0); } }
   });
+})();
+</script>
+<script>
+// 家長傳題目：照片在這台裝置先縮小（長邊 1600px、JPEG），送到家裡自己的 GAS（gas/inbox.js）；只有已開啟跨裝置同步的裝置能送
+(function(){
+  var EP = "https://script.google.com/macros/s/AKfycbxwo08VVT5tSRf-DsQEoo1hMlCm1YytGTzj89BPtJ6YWjPieuKyAPbnWXjUKagBdL6l/exec", $ = function(s){ return document.querySelector(s); };
+  $("#upSubj").innerHTML = ["國語","數學","自然","社會","英文","其他"].map(function(x){ return '<option>' + x + '</option>'; }).join("");
+  function msg(t, bad){ $("#upMsg").textContent = t; $("#upMsg").style.color = bad ? "var(--bad)" : "var(--leaf)"; }
+  function shrink(file){
+    return new Promise(function(ok, no){
+      var img = new Image(), url = URL.createObjectURL(file);
+      img.onload = function(){
+        var k = Math.min(1, 1600 / Math.max(img.width, img.height)), c = document.createElement("canvas");
+        c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+        c.getContext("2d").drawImage(img, 0, 0, c.width, c.height); URL.revokeObjectURL(url);
+        var q = 0.8, d = c.toDataURL("image/jpeg", q);
+        while (d.length > 850000 && q > 0.3) { q -= 0.1; d = c.toDataURL("image/jpeg", q); }
+        d.length > 850000 ? no(new Error("big")) : ok(d);
+      };
+      img.onerror = function(){ no(new Error("img")); }; img.src = url;
+    });
+  }
+  $("#upSend").onclick = function(){
+    var code = null; try { code = localStorage.getItem("g5sync.code"); } catch (e) {}
+    if (!code) return msg("請先在下面「跨裝置同步」開啟或加入同步，這台裝置才能送題目。", true);
+    var f = $("#upFile").files[0]; if (!f) return msg("請先選一張照片。", true);
+    var btn = this; btn.disabled = true; msg("照片處理中…");
+    shrink(f).then(function(img){
+      msg("送出中…");
+      return fetch(EP, {method:"POST", headers:{"Content-Type":"text/plain"}, credentials:"omit", body:JSON.stringify({op:"upload", code:code, subject:$("#upSubj").value, note:$("#upNote").value.slice(0,500), image:img})}).then(function(r){ return r.json(); });
+    }).then(function(r){
+      if (r && r.ok) { msg("送出了！做好的解說會出現在上面「" + $("#upSubj").value + "」那一科。"); $("#upFile").value = ""; $("#upNote").value = ""; }
+      else msg(r && r.err === "no-family" ? "這組同步碼在雲端還沒有紀錄，請先在這台裝置開啟同步一次。" : "沒有送成功，請稍後再試一次。", true);
+    }).catch(function(e){ msg(e && e.message === "big" ? "照片太大，請換一張或截圖成小一點再送。" : "沒有送成功（可能沒有網路），請稍後再試一次。", true); })
+    .then(function(){ btn.disabled = false; });
+  };
 })();
 </script>
 </body></html>
