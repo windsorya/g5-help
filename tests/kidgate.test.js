@@ -81,11 +81,12 @@ test("B18 「這步看不懂」的每個回饋（沒開同步／送出中／收�
 });
 
 test("B18 用 .textContent 寫的新回饋字串、沒有對應分支 ⇒ 完整性檢查要紅（不能只找 msg:）", () => {
-  // 偵測器自身的測試：只比「加了這一行」前後的差異；現行內容本身有幾筆提醒不影響（設計 D 降級：提醒不擋件，Codex 審 d4c6e4f）
-  const base = KT.appBranchProblems(SECT).length;
-  assert.ok(KT.appBranchProblems(SECT + '\n  msg.textContent = "新加的回饋，' + "很".repeat(100) + '。";\n').length > base, "新加 textContent 回饋");
-  assert.ok(KT.appBranchProblems(SECT + '\n  msg.textContent = ok ? "收到了！會換一個更好懂的說法" : "另一個新的回饋";\n').length > base, "三元運算的第二個字串也算一個分支");
-  assert.deepEqual(KT.appBranchProblems(SECT + "\n  el.textContent = msg;\n"), KT.appBranchProblems(SECT), "沒有字面字串的指定（交給別處的分支）不算");
+  // 偵測器自身的測試：只看「新加的那一行」有沒有被點名（提醒訊息會帶出該行原文），與現行內容本身有幾筆提醒、
+  // 改了哪一句完全脫鉤（設計 D 降級：提醒不擋件；Codex 審 d4c6e4f、2ac79de）
+  const named = (line, mark) => KT.appBranchProblems(SECT + "\n  " + line + "\n").some((p) => p.includes(mark));
+  assert.ok(named('msg.textContent = "測新加回饋甲，' + "很".repeat(100) + '。";', "測新加回饋甲"), "新加 textContent 回饋");
+  assert.ok(named('msg.textContent = ok ? "測新加回饋乙" : "測新加回饋丙";', "測新加回饋丙"), "三元運算的第二個字串也算一個分支");
+  assert.ok(!named("el.textContent = 測無字面變數;", "測無字面變數"), "沒有字面字串的指定（交給別處的分支）不算");
 });
 
 test("B18 第二分頁提示、取鎖被拒提示：列為採字案例；每句不超過 40 字", () => {
