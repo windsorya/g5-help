@@ -139,3 +139,13 @@ test('W03 電腦已取回（製作中）也能撤回；撤回後電腦遲到的 
   I.handleInbox(s, { op: 'ack', token: TOK, id: up2.id }, now);
   assert.equal(I.handleInbox(s, { op: 'withdraw', code: CODE, id: up2.id }, now).ok, true, 'fetched 也能撤回');
 });
+
+test('W04 已做好的題目：電腦遲到的 ack 不得把狀態打回 fetched，之後也不能撤回（Codex 審 81963ce）', () => {
+  const s = store(['h-' + CODE]);
+  const up = I.handleInbox(s, { op: 'upload', code: CODE, subject: '自然', note: 'n', image: IMG }, now);
+  I.handleInbox(s, { op: 'inbox', token: TOK }, now);
+  assert.equal(I.handleInbox(s, { op: 'done', token: TOK, id: up.id, url: 'https://windsorya.github.io/g5-help/#h/sci-q5-bangen' }, now).ok, true);
+  I.handleInbox(s, { op: 'ack', token: TOK, id: up.id }, now);
+  assert.equal(I.handleInbox(s, { op: 'mine', code: CODE }, now).items[0].status, 'done', '遲到的 ack 把做好了打回製作中');
+  assert.equal(I.handleInbox(s, { op: 'withdraw', code: CODE, id: up.id }, now).err, 'done');
+});

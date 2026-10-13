@@ -69,6 +69,7 @@ var G5Inbox = (function () {
       }
       if (!str(req.id)) { return {ok: false, err: 'bad-id'}; }
       if (was && was.status === 'withdrawn') { return {ok: true, withdrawn: true}; }   // 取題後、ack 前家長撤回：ack 不覆蓋撤回
+      if (was && was.status === 'done') { return {ok: true, done: true}; }   // 已做好：遲到的 ack 不把狀態打回製作中（否則又能被撤回；Codex 審 81963ce）
       return {ok: store.markFetched(req.id)};
     }
     return null;   // 不是傳題目的請求，交給同步核心
