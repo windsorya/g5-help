@@ -8,7 +8,7 @@
 }(typeof window !== 'undefined' ? window : (typeof globalThis !== 'undefined' ? globalThis : this), function (root) {
   'use strict';
   var ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
-  var KEYS = ['g5sci.v3', 'g5help.v1', 'g5math.v1', 'g5math.v2', 'g5chi.v1', 'g5soc.v1'];   // g5chi／g5soc：五上國語、社會站（GAS 白名單 f53bd54／@7）
+  var KEYS = ['g5sci.v3', 'g5help.v1', 'g5math.v1', 'g5math.v2', 'g5chi.v1', 'g5soc.v1', 'g5wrong.v1'];   // g5wrong：錯題複習站（2026-10-13）   // g5chi／g5soc：五上國語、社會站（GAS 白名單 f53bd54／@7）
   var CODE = 'g5sync.code';
   var META = 'g5sync.meta';
   var BAD_CODE = '同步碼須為 12 碼英文字母或數字，不含 0、O、1、I、L；可包含空白與連字號。';

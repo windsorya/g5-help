@@ -2,7 +2,7 @@
 var G5SyncCore = (function () {
   'use strict';
   var ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
-  var KEYS = ['g5sci.v3', 'g5help.v1', 'g5math.v1', 'g5math.v2', 'g5chi.v1', 'g5soc.v1'];   // g5chi／g5soc：五上國語、社會站（#1351，2026-10-13）
+  var KEYS = ['g5sci.v3', 'g5help.v1', 'g5math.v1', 'g5math.v2', 'g5chi.v1', 'g5soc.v1', 'g5wrong.v1'];   // g5wrong：錯題複習站（2026-10-13）   // g5chi／g5soc：五上國語、社會站（#1351，2026-10-13）
   var MAX_DATA = 900000;
   var CHUNK_SIZE = 45000;
 

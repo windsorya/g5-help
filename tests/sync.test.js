@@ -557,3 +557,9 @@ test('S40 有 accept 的頁面：雲端是別台裝置的內容（不是自己�
   assert.equal(backend.store.record(code).data, data(50), '別台的不能被蓋掉');
   assert.equal(b2.storage.getItem(KEY), data(60), '這台的也不能被蓋掉');
 });
+
+test('S42 錯題複習站的 key（g5wrong.v1）可以初始化（2026-10-13 律師交辦錯題複習）', async () => {
+  const doc = new Document(), storage = new Storage();
+  const api = G5Sync.init({container: doc.container, storage, fetch: async () => { throw Error('must not fetch'); }, endpoint: 'unused', keys: ['g5wrong.v1']});
+  try { await api.ready; assert.equal(api.getState().code, null); } finally { api.destroy(); }
+});

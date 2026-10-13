@@ -48,7 +48,7 @@ var G5Inbox = (function () {
       if (saved !== req.token) { return {ok: false, err: 'bad-token'}; }
       if (req.op === 'inbox') { store.setLastFetch(now()); return {ok: true, items: store.listNew()}; }
       if (req.op === 'done') {
-        if (!str(req.id) || !str(req.url) || !/^https:\/\/windsorya\.github\.io\/g5-help\/#h\/[\w-]+$/.test(req.url)) { return {ok: false, err: 'bad-done'}; }
+        if (!str(req.id) || !str(req.url) || !/^https:\/\/windsorya\.github\.io\/(?:g5-help\/#h|g5-wrong-review\/#w)\/[\w-]+$/.test(req.url)) { return {ok: false, err: 'bad-done'}; }
         return {ok: store.markDone(req.id, req.url, now())};
       }
       if (!str(req.id)) { return {ok: false, err: 'bad-id'}; }

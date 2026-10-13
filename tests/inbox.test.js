@@ -83,3 +83,12 @@ test('孩子按「這步看不懂」（交辦 #1319）：只收已開同步的�
   assert.equal(items[0].image, '');
   assert.match(items[0].note, /^【看不懂】sci-q5-bangen 第 2 步：板根長什麼樣子？/);
 });
+
+test('done 也收錯題複習站網址（#w/<題id>）；其他站或路徑仍拒絕', () => {
+  const s = store(['h-' + CODE]);
+  const up = I.handleInbox(s, { op: 'upload', code: CODE, subject: '數學', note: '【錯題】第 3 題', image: IMG }, now);
+  I.handleInbox(s, { op: 'inbox', token: TOK }, now);
+  assert.equal(I.handleInbox(s, { op: 'done', token: TOK, id: up.id, url: 'https://windsorya.github.io/g5-wrong-review/#w/m-1013-03' }, now).ok, true);
+  for (const bad of ['https://windsorya.github.io/g5-wrong-review/#h/x', 'https://windsorya.github.io/g5-wrong-review/evil#w/x', 'https://windsorya.github.io/g5-wrong-reviewx/#w/x'])
+    assert.equal(I.handleInbox(s, { op: 'done', token: TOK, id: up.id, url: bad }, now).err, 'bad-done', bad);
+});
