@@ -698,6 +698,25 @@ def flow_codex_r5(browser, label="Chromium"):
     check(f"{label} r5補 同一題的答對 handler 重播只計一次", db["solved"] == 1 and db["idx"] == 1 and len(db["log"]) == 1, {k: db[k] for k in ("solved", "idx")})
     ctx.close()
 
+def flow_confused(browser):
+    """交辦 #1319：每一步有「這步看不懂」；沒開同步給口頭說法；有同步碼就送 op=confused（攔下請求，不打真後端）。"""
+    ctx, pg, errors = open_page(browser, init=FIXTURE, url=HOME + "#h/t-guoyu")
+    pg.wait_for_function("window.G5HelpWriter && G5HelpWriter()")
+    pg.get_by_role("button", name="開始學").click()
+    btn = pg.locator(".lstep").first.locator("button[data-confused]")
+    check("#1319 每一步有「這步看不懂」按鈕", btn.count() == 1 and btn.is_visible())
+    btn.click()
+    check("#1319 沒開同步：請她口頭跟爸媽說第幾步", "第 1 步看不懂" in pg.locator(".lstep").first.inner_text())
+    sent = []
+    pg.route("**/macros/s/**", lambda route: (sent.append(route.request.post_data), route.fulfill(status=200, content_type="application/json", body='{"ok":true,"id":"c1"}')))
+    pg.evaluate("localStorage.setItem('g5sync.code','ABCDEFGHJKMN'); 0")
+    btn.click(); pg.wait_for_timeout(400)
+    body = json.loads(sent[0]) if sent else {}
+    check("#1319 有同步碼：送出 op=confused、篇 id、第 1 步", body.get("op") == "confused" and body.get("entry") == "t-guoyu" and body.get("step") == 1 and body.get("subject") == "國語", body)
+    check("#1319 送出後告訴她收到了", "收到了" in pg.locator(".lstep").first.inner_text())
+    check("#1319 沒有 JS 錯誤", not errors, errors)
+    ctx.close()
+
 def main():
     with sync_playwright() as p:
         cr = p.chromium.launch()
@@ -713,6 +732,7 @@ def main():
         flow_single_writer(cr, "Chromium")
         flow_codex_r4(cr)
         flow_codex_r5(cr)
+        flow_confused(cr)
         flow_home(cr)
         flow_migrate(cr)
         flow_steps(cr, "手機390", {"viewport": {"width": 390, "height": 844}, "is_mobile": True, "has_touch": True}, shots=True)
