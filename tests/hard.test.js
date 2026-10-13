@@ -75,3 +75,17 @@ test("測試用題目只在頁面先放 __G5_HARD_FIXTURE__ 時才併入（正�
   vm.runInNewContext(src, { window: plain });
   assert.equal(plain.G5Hard.LIST.length, H.LIST.length);
 });
+
+test("白話程度跟著年級：今天的年級、每一篇每一句都不超過該年級的句長上限", () => {
+  assert.equal(H.gradeAt(new Date("2026-10-13T12:00:00+08:00")), 5);
+  assert.equal(H.gradeAt(new Date("2027-07-31T12:00:00+08:00")), 5);
+  assert.equal(H.gradeAt(new Date("2027-08-01T12:00:00+08:00")), 6);
+  const lim = H.readingAt(new Date()).maxSentence;
+  const strip = (x) => String(x || "").replace(/<[^>]*>/g, "").replace(/&[a-z]+;/g, "");
+  H.LIST.filter((e) => e.kind === "steps").forEach((e) => {
+    const texts = [e.lead, e.answer].concat(e.steps.map((s) => s.say), e.steps.map((s) => s.check && s.check.ok), (e.practice || []).map((q) => q.q));
+    texts.forEach((t) => strip(t).split(/[。！？\n]|<br>/).forEach((sen) => {
+      assert.ok(sen.trim().length <= lim, e.id + " 有一句超過" + H.readingAt(new Date()).label + "句長上限 " + lim + " 字：" + sen.trim());
+    }));
+  });
+});

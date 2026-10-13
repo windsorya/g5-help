@@ -80,6 +80,12 @@
   if (root && root.__G5_HARD_FIXTURE__ && Array.isArray(root.__G5_HARD_FIXTURE__)) LIST = LIST.concat(root.__G5_HARD_FIXTURE__);
   function get(id) { for (var i = 0; i < LIST.length; i++) if (LIST[i].id === id) return LIST[i]; return null; }
   var SUBJECTS = ["國語", "數學", "自然", "社會", "英文", "其他"];
-  var api = { LIST: LIST, get: get, SUBJECTS: SUBJECTS, KINDS: ["frac-compare", "steps"] };
+  // 白話程度跟著年級走（2026-10-13 律師：「現在小五，就用小五生的白話易懂程度；之後小六，就用小六生的」）。
+  // 學年度 8/1 換年級：2026 學年（2026-08-01～2027-07-31）＝小五。每句上限是寫給孩子讀的長度，tests/hard.test.js 逐句檢查。
+  var GRADE_BASE = { schoolYear: 2026, grade: 5 };
+  var READING = { 5: { maxSentence: 40, label: "小五" }, 6: { maxSentence: 45, label: "小六" }, 7: { maxSentence: 50, label: "國一" }, 8: { maxSentence: 55, label: "國二" }, 9: { maxSentence: 60, label: "國三" } };
+  function gradeAt(d) { var y = d.getFullYear() - (d.getMonth() < 7 ? 1 : 0); return GRADE_BASE.grade + (y - GRADE_BASE.schoolYear); }
+  function readingAt(d) { var g = gradeAt(d); return READING[g] || READING[9]; }
+  var api = { LIST: LIST, get: get, SUBJECTS: SUBJECTS, KINDS: ["frac-compare", "steps"], gradeAt: gradeAt, readingAt: readingAt, READING: READING };
   if (typeof module !== "undefined" && module.exports) module.exports = api; else root.G5Hard = api;
 })(typeof window !== "undefined" ? window : this);
