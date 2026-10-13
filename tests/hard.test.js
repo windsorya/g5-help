@@ -39,10 +39,17 @@ test("每一篇：id 唯一、科目與格式合法、日期與出處齊全、�
       [e.a, e.b].forEach((f) => assert.ok(Number.isInteger(f.n) && Number.isInteger(f.d) && f.n > 0 && f.d > 0));
       if (e.prior) assert.ok(e.prior.q && e.prior.ok && e.prior.hint);
     }
+    // 比照自然科的設計（律師 2026-10-11「白話、圖多、附影片」；2026-10-13 問「難題解說也有秉持嗎」——板根那篇漏圖漏影片）
+    assert.ok((e.videos || []).length >= 1 || (typeof e.noVideoReason === "string" && e.noVideoReason.length >= 20),
+      e.id + " 要附驗證過的影片；真的找不到要在 noVideoReason 寫找過哪些、為何不合格");
     if (e.kind === "steps") {
       assert.ok(e.question && e.answer, e.id + " 要有題目與答案");
       assert.ok(Array.isArray(e.steps) && e.steps.length >= 1);
-      e.steps.forEach((s, i) => { assert.ok(s.title && s.say); if (s.check) checkChoice(s.check, e.id + " 第 " + (i + 1) + " 步"); });
+      e.steps.forEach((s, i) => {
+        assert.ok(s.title && s.say);
+        assert.ok(typeof s.fig === "string" && s.fig.trim().startsWith("<svg") && /aria-label="[^"]{4,}"/.test(s.fig), e.id + " 第 " + (i + 1) + " 步要配一張圖（一格一圖一句話），且要有 aria-label");
+        if (s.check) checkChoice(s.check, e.id + " 第 " + (i + 1) + " 步");
+      });
       (e.practice || []).forEach((q, i) => { assert.ok(q.q); checkChoice(q, e.id + " 練習 " + (i + 1)); });
     }
   });
