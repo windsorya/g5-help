@@ -180,6 +180,7 @@ details p{margin:0 0 10px}
 <script src="sync.js"></script>
 <!--@INLINE src/frac.js-->
 <!--@INLINE src/hard.js-->
+<!--@INLINE src/upprogress.js-->
 <script>
 (function(){
 "use strict";
@@ -355,9 +356,22 @@ function numsAsk(body, q, items, onOk){
   return box;
 }
 function stepCard(n, title){
-  var s = add($("#lesson"), '<section class="lstep" data-step="' + n + '"><div class="lhead"><span class="n">' + n + '</span><h2>' + title + '</h2></div><div class="lbody"></div></section>');
+  var s = add($("#lesson"), '<section class="lstep" data-step="' + n + '"><div class="lhead"><span class="n">' + n + '</span><h2>' + title + '</h2></div><div class="lbody"></div><div class="row"><button class="btn ghost sm" type="button" data-confused>這步看不懂</button><span class="small muted" data-cmsg></span></div></section>');
+  $("button[data-confused]", s).onclick = function(){ confused(this, n, title); };
   reveal(s);
   return $(".lbody", s);
+}
+// 孩子按「這步看不懂」→ 送到家裡的 GAS 佇列（交辦 #1319：孩子本人的真實回饋才是白話程度的最終判準），電腦取回後據此改寫那一步
+var HELP_EP = "https://script.google.com/macros/s/AKfycbxwo08VVT5tSRf-DsQEoo1hMlCm1YytGTzj89BPtJ6YWjPieuKyAPbnWXjUKagBdL6l/exec";
+function confused(btn, n, title){
+  var msg = btn.nextElementSibling, code = null, id = E && E.id, subj = E && E.subject;
+  try { code = localStorage.getItem("g5sync.code"); } catch (e) {}
+  if (!code) { msg.textContent = "這台還沒開同步，請跟爸爸媽媽說：第 " + n + " 步看不懂。"; return; }
+  btn.disabled = true; msg.textContent = "送出中…";
+  fetch(HELP_EP, {method:"POST", headers:{"Content-Type":"text/plain"}, credentials:"omit", body:JSON.stringify({op:"confused", code:code, subject:subj, entry:id, step:n, title:String(title).replace(/<[^>]*>/g, "").slice(0, 200)})})
+    .then(function(r){ return r.json(); })
+    .then(function(r){ msg.textContent = r && r.ok ? "收到了！會換一個更好懂的說法。先試試看下一步。" : "沒送成功，請跟爸爸媽媽說：第 " + n + " 步看不懂。"; if (!(r && r.ok)) btn.disabled = false; })
+    .catch(function(){ msg.textContent = "沒送成功（可能沒有網路），請跟爸爸媽媽說：第 " + n + " 步看不懂。"; btn.disabled = false; });
 }
 
 // ---------- 題目列 ----------
@@ -798,8 +812,9 @@ window.G5HelpPage = {state:function(id){ return JSON.parse(JSON.stringify(DB.ent
       $("#upHealth").innerHTML = ago === null ? "電腦還沒取過題目。" : ago <= 20 ? "電腦運作正常（上次取題 " + hhmm(r.lastFetch) + "，每 10 分鐘取一次）。"
         : '<span style="color:var(--bad)">電腦已經 ' + ago + ' 分鐘沒取題（上次 ' + hhmm(r.lastFetch) + '）：可能關機、睡眠或故障，題目會等電腦開機後再處理。</span>';
       $("#upList").innerHTML = (r.items || []).length ? r.items.map(function(it){
-        var st = it.status === "done" ? '<a href="' + it.url + '">做好了，點這裡看解說</a>' : it.status === "fetched" ? "已收到，解說製作中（Claude 開著時約 10–30 分鐘）" : "已送出，等電腦取回（最多 10 分鐘）";
-        var pct = it.status === "done" ? 100 : it.status === "fetched" ? 66 : 33;   // 已送出 33%、製作中 66%、做好了 100%
+        // 進度隨時間增加＋預估幾點做好（交辦 #1320；src/upprogress.js）；清單打開時每 60 秒重抓一次
+        var pv = window.G5UpProgress.view(it, r.items, r.lastFetch, Date.now()), pct = pv.pct;
+        var st = it.status === "done" ? '<a href="' + it.url + '">做好了，點這裡看解說</a>' : pv.text;
         var barH = '<div role="progressbar" aria-valuenow="' + pct + '" aria-valuemin="0" aria-valuemax="100" style="height:10px;border-radius:99px;background:var(--line-soft);overflow:hidden;margin:4px 0"><i style="display:block;height:100%;width:' + pct + '%;background:' + (pct === 100 ? "var(--leaf)" : "var(--pri)") + '"></i></div><span class="meta">進度 ' + pct + '%</span>';
         return '<div class="hcard"><b>' + it.subject + '・' + String(it.note || "").replace(/[<>&]/g, "") + '</b><span class="meta">' + hhmm(it.time) + ' 送出</span>' + barH + '<span class="st' + (it.status === "done" ? " done" : "") + '">' + st + '</span></div>';
       }).join("") : '<span class="empty">還沒有傳過題目。</span>';

@@ -69,3 +69,17 @@ test('進度：mine 看自己傳的題目狀態與電腦上次取題時間；don
   assert.equal(I.handleInbox(s, { op: 'mine', code: 'abc' }, now).err, 'bad-code');
   assert.equal(I.handleInbox(s, { op: 'mine', code: 'ZZZZZZZZZZZZ' }, now).items.length, 0, '別家看不到');
 });
+
+test('孩子按「這步看不懂」（交辦 #1319）：只收已開同步的家庭碼；不帶照片；進同一個待處理佇列', () => {
+  const s = store(['h-' + CODE]);
+  const r = I.handleInbox(s, { op: 'confused', code: CODE, subject: '自然', entry: 'sci-q5-bangen', step: 2, title: '板根長什麼樣子？' }, now);
+  assert.equal(r.ok, true);
+  assert.equal(I.handleInbox(s, { op: 'confused', code: 'ZZZZZZZZZZZZ', subject: '自然', entry: 'x', step: 1, title: 't' }, now).err, 'no-family');
+  assert.equal(I.handleInbox(s, { op: 'confused', code: CODE, subject: '自然', entry: '<b>', step: 1, title: 't' }, now).err, 'bad-entry');
+  assert.equal(I.handleInbox(s, { op: 'confused', code: CODE, subject: '自然', entry: 'x', step: 0, title: 't' }, now).err, 'bad-step');
+  assert.equal(I.handleInbox(s, { op: 'confused', code: CODE, subject: '自然', entry: 'x', step: 1, title: 'x'.repeat(201) }, now).err, 'bad-note');
+  const items = I.handleInbox(s, { op: 'inbox', token: TOK }, now).items;
+  assert.equal(items.length, 1);
+  assert.equal(items[0].image, '');
+  assert.match(items[0].note, /^【看不懂】sci-q5-bangen 第 2 步：板根長什麼樣子？/);
+});

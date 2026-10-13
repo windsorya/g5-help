@@ -89,3 +89,28 @@ test("白話程度跟著年級：今天的年級、每一篇每一句都不超�
     }));
   });
 });
+
+// 用詞難度（交辦 #1319，2026-10-13 律師問「只檢查句長、用詞靠我注意，這機制合理嗎」）：
+// 句長只是代理指標；看不懂多半卡在詞。三道：①難詞第一次出現就要附白話（本測試）②第二個模型依年級審過（readReview）
+// ③孩子按「這步看不懂」的真實回饋（app.html → GAS Inbox）。①擋得住「已知的難詞」，擋不住沒列進表的詞 ⇒ 靠②③補。
+test("難詞第一次出現就要附白話；每篇都要有第二個模型的年級閱讀審查紀錄", () => {
+  const strip = (x) => String(x || "").replace(/<[^>]*>/g, "").replace(/&[a-z]+;/g, "");
+  const glossed = (text, w, at) => {
+    const after = text.slice(at + w.length, at + w.length + 1), before = text.slice(Math.max(0, at - 1), at), around = text.slice(Math.max(0, at - 3), at);
+    return after === "（" || (before === "（" && text.slice(at + w.length, at + w.length + 1) === "）") || /叫做?「$/.test(around) || /叫「$/.test(around);
+  };
+  H.LIST.filter((e) => e.kind === "steps").forEach((e) => {
+    assert.ok(e.words && typeof e.words === "object" && !Array.isArray(e.words), e.id + " 要列出 words（本篇用到的難詞→白話；真的沒有就寫 {}）");
+    const words = Object.keys(H.HARD_WORDS).concat(Object.keys(e.words));
+    // 依孩子讀到的順序串起來；題目原文（question／ask）照抄試卷，不算我們寫的字
+    const body = [e.lead].concat(...e.steps.map((s) => [s.say, s.check && s.check.q, s.check && s.check.opts.join("／"), s.check && s.check.ok]), e.answer, (e.practice || []).map((q) => q.q + "／" + q.opts.join("／"))).map(strip).join("\n");
+    words.forEach((w) => {
+      const at = body.indexOf(w);
+      if (at < 0) return;
+      assert.ok(glossed(body, w, at), e.id + " 的難詞「" + w + "」第一次出現沒有附白話（寫成「" + w + "（白話）」或「（" + w + "）」或「叫「" + w + "」」）：…" + body.slice(Math.max(0, at - 12), at + w.length + 8) + "…");
+    });
+    const r = e.readReview;
+    assert.ok(r && typeof r.by === "string" && r.by && /^\d{4}-\d{2}-\d{2}$/.test(r.date) && r.grade === H.gradeAt(new Date(r.date + "T12:00:00+08:00")) && Array.isArray(r.fixed),
+      e.id + " 要有 readReview {by: 審查模型, date, grade: 當天年級, fixed: [依審查改了哪些詞句]}——上線前請第二個模型依年級列出看不懂的詞句");
+  });
+});

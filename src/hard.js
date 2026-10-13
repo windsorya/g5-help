@@ -37,28 +37,32 @@
       source: "植物世界練習卷・選擇題第 5 題", title: "銀葉樹的板根是什麼？", tag: "板根和氣生根怎麼分",
       ask: "為了適應環境，銀葉樹發展出「板根」。關於板根，哪些敘述正確？",
       question: "銀葉樹的「板根」，下面哪些說法正確？<br>(1) 外形細細長長的，很像鬍鬚<br>(2) 突出地面，並呈現翼狀三角形<br>(3) 可以增加抓地面積，讓植物穩固生長<br>(4) 主要功能是長出繁殖用的新芽",
-      lead: "先弄清楚板根長在哪、長什麼樣子、有什麼用，再回來一個一個判斷。",
+      lead: "先弄清楚板根（突出地面的根）長在哪、長什麼樣子、有什麼用。再回來一個一個判斷。",
       steps: [
         { title: "板根長在哪裡？",
-          say: "大部分的根都埋在土裡看不到。銀葉樹不一樣：它的根有一部分<b>長出地面</b>，一片一片的，像立起來的木板，所以叫「板根」。",
+          say: "大部分的根都埋在土裡看不到。銀葉樹（長在海邊的一種大樹）不一樣。它的根有一部分<b>長出地面</b>，一片一片的，像立起來的木板，所以叫「板根」。",
           fig: '<svg viewBox="0 0 320 170" role="img" aria-label="大樹底部有幾片三角形的板根突出地面"><rect x="0" y="130" width="320" height="40" fill="var(--soil)" opacity=".35"/><rect x="146" y="20" width="28" height="112" fill="var(--soil)"/><circle cx="160" cy="28" r="44" fill="var(--grass)"/><polygon points="146,80 96,132 146,132" fill="var(--soil)" opacity=".85"/><polygon points="174,80 228,132 174,132" fill="var(--soil)" opacity=".85"/><polygon points="155,95 130,132 160,132" fill="var(--soil)" opacity=".6"/><text x="70" y="160" font-size="14" fill="var(--ink)">板根：突出地面、像三角形的翅膀</text></svg>',
           check: { q: "板根長在哪裡？", opts: ["全部埋在土裡看不到", "有一部分突出地面，看得到"], a: 1,
                    why: ["一般的根埋在土裡；板根特別的地方，就是突出地面。", ""], ok: "對！板根突出地面，看得到。" } },
         { title: "板根長什麼樣子？",
-          say: "板根從樹幹底部往四周伸出去，又扁又寬，從旁邊看像<b>三角形的翅膀</b>（翼狀）。<br>細細長長、像鬍鬚一樣從樹枝垂下來的，是<b>榕樹的氣生根</b>，不是板根。",
+          say: "板根從樹幹底部往四周伸出去，又扁又寬，從旁邊看像<b>三角形的翅膀</b>（翼狀）。<br>細細長長、像鬍鬚一樣從樹枝垂下來的，是<b>榕樹的氣生根</b>（長在空氣中的根），不是板根。",
           check: { q: "哪一個是板根的樣子？", opts: ["細細長長，像鬍鬚垂下來", "又扁又寬，像三角形的翅膀"], a: 1,
                    why: ["像鬍鬚垂下來的是榕樹的氣生根。", ""], ok: "對！所以 (1) 說的「像鬍鬚」是錯的。" },
           fig: '<svg viewBox="0 0 320 170" role="img" aria-label="左邊榕樹的氣生根從樹枝垂下來像鬍鬚，右邊銀葉樹的板根在地面像三角形翅膀"><rect x="0" y="140" width="320" height="30" fill="var(--soil)" opacity=".3"/><rect x="66" y="40" width="16" height="102" fill="var(--soil)"/><rect x="74" y="40" width="70" height="8" fill="var(--soil)"/><circle cx="90" cy="34" r="34" fill="var(--grass)"/>' + [92,104,116,128,138].map(function(x){ return '<line x1="' + x + '" y1="48" x2="' + x + '" y2="' + (96 + (x % 3) * 8) + '" stroke="var(--soil)" stroke-width="2"/>'; }).join("") + '<text x="22" y="164" font-size="12" fill="var(--ink)">榕樹：氣生根（像鬍鬚）</text><rect x="236" y="40" width="16" height="102" fill="var(--soil)"/><circle cx="244" cy="34" r="34" fill="var(--grass)"/><polygon points="236,96 200,142 236,142" fill="var(--soil)"/><polygon points="252,96 290,142 252,142" fill="var(--soil)"/><text x="180" y="164" font-size="12" fill="var(--ink)">銀葉樹：板根（像翅膀）</text></svg>' },
         { title: "板根有什麼用？",
-          say: "銀葉樹常長在海邊、河口，土又軟又濕，風也大。板根像一片片撐住大樹的支架，讓樹<b>抓住地面的面積變大</b>，就站得穩、不容易倒。<br>繁殖（生出新的植物）靠的是花、果實和種子，不是板根。",
-          check: { q: "板根主要幫銀葉樹做什麼？", opts: ["長出新芽來繁殖", "增加抓地面積，讓樹站穩"], a: 1,
+          say: "銀葉樹常長在海邊、河口，土又軟又濕，風也大。板根像撐住大樹的支架，向四周伸得又寬又廣，<b>幫大樹抓住更多地面</b>，就站得穩、不容易倒。<br>繁殖（生出新的植物）靠的是花、果實和種子，不是板根。",
+          check: { q: "板根主要幫銀葉樹做什麼？", opts: ["長出新芽來繁殖", "幫大樹抓住更多地面，讓樹站穩"], a: 1,
                    why: ["繁殖靠花、果實和種子；板根是幫忙站穩的。", ""], ok: "對！所以 (3) 正確、(4) 錯誤。" },
           fig: '<svg viewBox="0 0 320 170" role="img" aria-label="海邊軟泥上的銀葉樹，強風吹來，板根撐住樹讓它站穩"><rect x="0" y="132" width="320" height="38" fill="var(--waterfill)" opacity=".6"/><rect x="0" y="128" width="320" height="10" fill="var(--soil)" opacity=".4"/><rect x="186" y="30" width="18" height="100" fill="var(--soil)"/><circle cx="195" cy="28" r="32" fill="var(--grass)"/><polygon points="186,82 132,132 186,132" fill="var(--soil)"/><polygon points="204,82 262,132 204,132" fill="var(--soil)"/><line x1="20" y1="60" x2="110" y2="60" stroke="var(--pri)" stroke-width="3"/><polygon points="110,54 122,60 110,66" fill="var(--pri)"/><line x1="20" y1="84" x2="100" y2="84" stroke="var(--pri)" stroke-width="3"/><polygon points="100,78 112,84 100,90" fill="var(--pri)"/><text x="20" y="48" font-size="13" fill="var(--ink)">強風</text><text x="128" y="160" font-size="13" fill="var(--ink)">板根抓住地面的面積變大 → 站穩</text></svg>' },
         { title: "回到題目，一個一個看",
-          say: "(1) 像鬍鬚 → 那是榕樹的氣生根，<b>錯</b>。<br>(2) 突出地面、翼狀三角形 → <b>對</b>。<br>(3) 增加抓地面積、穩固生長 → <b>對</b>。<br>(4) 長出繁殖用的新芽 → 板根不負責繁殖，<b>錯</b>。",
+          say: "(1) 像鬍鬚 → 那是榕樹的氣生根，<b>錯</b>。<br>(2) 突出地面、翼狀三角形 → <b>對</b>。<br>(3) 增加抓地面積（抓住更多地面）、穩固生長（站穩）→ <b>對</b>。<br>(4) 長出繁殖用的新芽 → 板根不負責繁殖，<b>錯</b>。",
           fig: '<svg viewBox="0 0 320 150" role="img" aria-label="四個選項的對錯：1錯、2對、3對、4錯"><g font-size="15" fill="var(--ink)"><text x="20" y="30">(1) 像鬍鬚</text><text x="20" y="62">(2) 突出地面、三角形</text><text x="20" y="94">(3) 增加抓地面積、站穩</text><text x="20" y="126">(4) 長新芽來繁殖</text></g><g font-size="20" font-weight="700"><text x="260" y="30" fill="var(--bad)">錯</text><text x="260" y="62" fill="var(--leaf)">對</text><text x="260" y="94" fill="var(--leaf)">對</text><text x="260" y="126" fill="var(--bad)">錯</text></g></svg>' }
       ],
       answer: "在 (2)、(3) 打ˇ。",
+      // 本篇難詞（第一次出現要附白話；tests/hard.test.js 檢查）
+      words: { "銀葉樹": "長在海邊的一種大樹", "抓地面積": "根抓住地面的範圍" },
+      // 第二個模型依年級審閱讀難度（交辦 #1319）：Codex 列出 4 處，下面是依它改的
+      readReview: { by: "codex", date: "2026-10-13", grade: 5, fixed: ["翼狀：已在「三角形的翅膀（翼狀）」先講白話", "抓住地面的面積變大→幫大樹抓住更多地面", "增加抓地面積→加括號（抓住更多地面）；確認題選項改成白話", "穩固生長→加括號（站穩）"] },
       write: "( )(1)　(ˇ)(2)　(ˇ)(3)　( )(4)",
       practice: [
         { q: "榕樹從樹枝垂下來、細細長長的根，叫做什麼？", opts: ["板根", "氣生根"], a: 1, why: ["板根是突出地面、像三角形翅膀的根。", ""] },
@@ -82,10 +86,14 @@
   var SUBJECTS = ["國語", "數學", "自然", "社會", "英文", "其他"];
   // 白話程度跟著年級走（2026-10-13 律師：「現在小五，就用小五生的白話易懂程度；之後小六，就用小六生的」）。
   // 學年度 8/1 換年級：2026 學年（2026-08-01～2027-07-31）＝小五。每句上限是寫給孩子讀的長度，tests/hard.test.js 逐句檢查。
+  // 用詞難度（交辦 #1319）：句長只是代理指標，看不懂多半卡在詞。下面是「超出小五課本、第一次出現就要附白話」的詞；
+  // 每篇另在 words 列出本篇自己的難詞。tests/hard.test.js 檢查第一次出現時寫成「詞（白話）」「（詞）」或「叫「詞」」。
+  // 這張表只擋得住列進來的詞；沒列到的靠 readReview（第二個模型依年級審）與孩子按「這步看不懂」補。
+  var HARD_WORDS = { "翼狀": "像翅膀的形狀", "氣生根": "長在空氣中的根", "板根": "突出地面、像木板的根", "繁殖": "生出新的植物或動物", "蒸散": "水從葉子變成水蒸氣跑出去", "光合作用": "植物用陽光把水和二氧化碳做成養分", "最小公倍數": "兩個數共同倍數裡最小的那個" };
   var GRADE_BASE = { schoolYear: 2026, grade: 5 };
   var READING = { 5: { maxSentence: 40, label: "小五" }, 6: { maxSentence: 45, label: "小六" }, 7: { maxSentence: 50, label: "國一" }, 8: { maxSentence: 55, label: "國二" }, 9: { maxSentence: 60, label: "國三" } };
   function gradeAt(d) { var y = d.getFullYear() - (d.getMonth() < 7 ? 1 : 0); return GRADE_BASE.grade + (y - GRADE_BASE.schoolYear); }
   function readingAt(d) { var g = gradeAt(d); return READING[g] || READING[9]; }
-  var api = { LIST: LIST, get: get, SUBJECTS: SUBJECTS, KINDS: ["frac-compare", "steps"], gradeAt: gradeAt, readingAt: readingAt, READING: READING };
+  var api = { LIST: LIST, get: get, SUBJECTS: SUBJECTS, KINDS: ["frac-compare", "steps"], gradeAt: gradeAt, readingAt: readingAt, READING: READING, HARD_WORDS: HARD_WORDS };
   if (typeof module !== "undefined" && module.exports) module.exports = api; else root.G5Hard = api;
 })(typeof window !== "undefined" ? window : this);

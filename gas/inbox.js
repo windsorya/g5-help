@@ -23,6 +23,19 @@ var G5Inbox = (function () {
       store.addUpload({id: id, time: now(), subject: req.subject, note: req.note, codeHash: hash, image: req.image});
       return {ok: true, id: id};
     }
+    if (req.op === 'confused') {
+      // 孩子在某一步按「這步看不懂」（交辦 #1319）：沒有照片，記成一筆待處理，本機取題後據此改寫那一步
+      if (!str(req.code) || !/^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{12}$/.test(req.code)) { return {ok: false, err: 'bad-code'}; }
+      if (SUBJECTS.indexOf(req.subject) < 0) { return {ok: false, err: 'bad-subject'}; }
+      if (!str(req.entry) || !/^[\w-]{1,60}$/.test(req.entry)) { return {ok: false, err: 'bad-entry'}; }
+      if (typeof req.step !== 'number' || req.step < 1 || req.step > 99 || Math.floor(req.step) !== req.step) { return {ok: false, err: 'bad-step'}; }
+      if (!str(req.title) || req.title.length > 200) { return {ok: false, err: 'bad-note'}; }
+      var h2 = store.hash(req.code);
+      if (!store.familyExists(h2)) { return {ok: false, err: 'no-family'}; }
+      var cid = 'c' + now() + '-' + Math.floor(Math.random() * 1e6);
+      store.addUpload({id: cid, time: now(), subject: req.subject, note: '【看不懂】' + req.entry + ' 第 ' + req.step + ' 步：' + req.title, codeHash: h2, image: ''});
+      return {ok: true, id: cid};
+    }
     if (req.op === 'mine') {
       // 網頁看自己傳的題目進度：new＝等電腦取回、fetched＝製作中、done＝做好了（附連結）；也回電腦上次取題時間（判斷有無故障）
       if (!str(req.code) || !/^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{12}$/.test(req.code)) { return {ok: false, err: 'bad-code'}; }
@@ -36,12 +49,21 @@ var G5Inbox = (function () {
       if (req.op === 'inbox') { store.setLastFetch(now()); return {ok: true, items: store.listNew()}; }
       if (req.op === 'done') {
         if (!str(req.id) || !str(req.url) || !/^https:\/\/windsorya\.github\.io\/g5-help\/#h\/[\w-]+$/.test(req.url)) { return {ok: false, err: 'bad-done'}; }
-        return {ok: store.markDone(req.id, req.url)};
+        return {ok: store.markDone(req.id, req.url, now())};
       }
       if (!str(req.id)) { return {ok: false, err: 'bad-id'}; }
       return {ok: store.markFetched(req.id)};
     }
     return null;   // 不是傳題目的請求，交給同步核心
+  }
+  // 狀態欄：new／fetched／done@完成時間:網址（2026-10-13 起記完成時間，給網頁估「還要等多久」；舊格式 done:網址 照讀）
+  function doneCell(url, t) { return 'done@' + t + ':' + url; }
+  function parseStatus(st) {
+    st = String(st);
+    var m = /^done@(\d+):(.*)$/.exec(st);
+    if (m) { return {status: 'done', url: m[2], doneAt: Number(m[1])}; }
+    if (st.indexOf('done:') === 0) { return {status: 'done', url: st.slice(5), doneAt: 0}; }
+    return {status: st, url: '', doneAt: 0};
   }
   function toCells(u) {
     var parts = [];
@@ -53,7 +75,7 @@ var G5Inbox = (function () {
     for (var i = 0; i < n; i += 1) { img += String(c[7 + i]).slice(1); }
     return {id: c[0], time: c[1], subject: c[2], note: String(c[3]).slice(1), image: img};
   }
-  return {handleInbox: handleInbox, toCells: toCells, fromCells: fromCells, SUBJECTS: SUBJECTS, MAX_IMAGE: MAX_IMAGE, CHUNK: CHUNK};
+  return {handleInbox: handleInbox, doneCell: doneCell, parseStatus: parseStatus, toCells: toCells, fromCells: fromCells, SUBJECTS: SUBJECTS, MAX_IMAGE: MAX_IMAGE, CHUNK: CHUNK};
 })();
 if (typeof module !== 'undefined' && module.exports) { module.exports = G5Inbox; }
 
@@ -91,15 +113,15 @@ function g5InboxStore() {
       var s = inbox(), n = s.getLastRow();
       if (n < 1) { return []; }
       return s.getRange(1, 1, n, 6).getValues().filter(function (r) { return r[4] === hash; }).map(function (r) {
-        var st = String(r[5]), done = st.indexOf('done:') === 0;
-        return {id: r[0], time: r[1], subject: r[2], note: String(r[3]).slice(1, 41), status: done ? 'done' : st, url: done ? st.slice(5) : ''};
+        var p = G5Inbox.parseStatus(r[5]);
+        return {id: r[0], time: r[1], subject: r[2], note: String(r[3]).slice(1, 41), status: p.status, url: p.url, doneAt: p.doneAt};
       }).reverse().slice(0, 20);
     },
-    markDone: function (id, url) {
+    markDone: function (id, url, t) {
       var s = inbox(), n = s.getLastRow();
       if (n < 1) { return false; }
       var ids = s.getRange(1, 1, n, 1).getValues();
-      for (var i = 0; i < ids.length; i += 1) { if (ids[i][0] === id) { s.getRange(i + 1, 6).setValue('done:' + url); SpreadsheetApp.flush(); return true; } }
+      for (var i = 0; i < ids.length; i += 1) { if (ids[i][0] === id) { s.getRange(i + 1, 6).setValue(G5Inbox.doneCell(url, t)); SpreadsheetApp.flush(); return true; } }
       return false;
     },
     getLastFetch: function () { return Number(props.getProperty('INBOX_LAST_FETCH') || 0); },
