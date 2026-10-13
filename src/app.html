@@ -222,7 +222,7 @@ function bar(n, d, o){
   return '<svg class="fbar" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="' + esc(o.label || ("切成 " + d + " 格，塗了 " + n + " 格")) + '">' + s + '</svg>';
 }
 
-// ---------- 存檔：g5help.v1＝{v:1, entries:{篇id: 那一篇的教學與練習紀錄}, hidden:{篇id: 隱藏時間}}；不碰自然複習的 g5sci.v3 ----------
+// ---------- 存檔：g5help.v1＝{v:1, entries:{篇id: 那一篇的教學與練習紀錄}, hidden:{篇id: 隱藏時間}, deleted:{篇id: 刪除時間}}；不碰自然複習的 g5sci.v3 ----------
 // 格式的讀、清洗、寫在 src/helpdoc.js（node 測試 tests/helpdoc.test.js 用同一份）。
 var KEY = "g5help.v1", DOC = window.G5HelpDoc, fresh = DOC.fresh, clean1 = DOC.clean1, own = DOC.own;
 function noHidden(){ return Object.create(null); }
@@ -240,7 +240,7 @@ function readDisk(){
   var raw, oldRaw;
   try { raw = localStorage.getItem(KEY); } catch (e) { return {ok:false}; }
   var doc = raw === null ? null : DOC.parse(raw);
-  if (doc) return {ok:true, entries:doc.entries, hidden:doc.hidden, broken:null};
+  if (doc) return {ok:true, entries:doc.entries, hidden:doc.hidden, deleted:doc.deleted, broken:null};
   try { oldRaw = localStorage.getItem("g5math.v1"); } catch (e) { return {ok:false}; }   // 舊 key 讀不到也算讀取失敗（Codex 第 5 輪必修 1）
   var es = Object.create(null);
   try {
@@ -248,9 +248,9 @@ function readDisk(){
     var old = JSON.parse(oldRaw || "null");
     if (old && old.v === 1) es["p38-6-2"] = clean1(old);
   } catch (e) {}
-  return {ok:true, entries:es, hidden:noHidden(), broken:raw};   // raw 為 null＝第一次用；非 null＝壞資料待備份
+  return {ok:true, entries:es, hidden:noHidden(), deleted:noHidden(), broken:raw};   // raw 為 null＝第一次用；非 null＝壞資料待備份
 }
-function loadDB(){ var d = readDisk(); return {v:1, entries:d.ok ? d.entries : Object.create(null), hidden:d.ok ? d.hidden : noHidden(), readOk:d.ok}; }
+function loadDB(){ var d = readDisk(); return {v:1, entries:d.ok ? d.entries : Object.create(null), hidden:d.ok ? d.hidden : noHidden(), deleted:d.ok ? d.deleted : noHidden(), readOk:d.ok}; }
 var DB = loadDB(), st = null, NOTICE = "", GEN = 0;
 function stateOf(id){ if (!own(DB.entries, id)) DB.entries[id] = fresh(); return DB.entries[id]; }
 function dirtyCount(){ return Object.keys(DIRTY).length; }
@@ -277,7 +277,7 @@ function save(){
   var out = Object.create(null);
   if (!WIPE) Object.keys(d.entries).forEach(function(id){ out[id] = d.entries[id]; });   // 磁碟上有、記憶體沒有的篇（例如搬家來的）照留；剛清除全部時不併
   Object.keys(DB.entries).forEach(function(id){ out[id] = DB.entries[id]; });   // 記憶體是唯一真相
-  try { localStorage.setItem(KEY, DOC.serialize(out, DB.hidden)); } catch (e) { return saveFailed(); }   // 隱藏清單也是記憶體這份
+  try { localStorage.setItem(KEY, DOC.serialize(out, DB.hidden, DB.deleted)); } catch (e) { return saveFailed(); }   // 隱藏、刪除清單也是記憶體這份
   Object.keys(out).forEach(function(id){ if (!own(DB.entries, id)) DB.entries[id] = out[id]; });
   DIRTY = Object.create(null); WIPE = false;
   if (RETRY) { clearTimeout(RETRY); RETRY = null; }
@@ -293,7 +293,7 @@ function retryRead(){
   if (!WRITER || READY) return;   // 已經讀成功：舊的「再讀一次」重播不能把記憶體換回磁碟版（Codex 第 6 輪）
   var d = readDisk();
   if (!d.ok) { NOTICE = "還是讀不到，請稍後再試，或重新整理這一頁。"; route(); return; }
-  DB = {v:1, entries:d.entries, hidden:d.hidden, readOk:true}; READY = true; route();
+  DB = {v:1, entries:d.entries, hidden:d.hidden, deleted:d.deleted, readOk:true}; READY = true; route();
 }
 // 雲端有較新的紀錄：只在首頁、沒有未存進度時換上；換上＝寫進主 key、重畫首頁，不 reload（Codex 第 5 輪必修 2）
 function canReplace(key){ return key === KEY && WRITER && READY && !E && !dirtyCount(); }
@@ -301,7 +301,7 @@ function applyRemote(key, raw){
   if (!canReplace(key)) return false;
   var doc = DOC.parse(raw); if (!doc) return false;
   try { localStorage.setItem(KEY, raw); } catch (e) { return false; }   // 沒寫進去＝磁碟沒變，記憶體也不換
-  GEN++; ARM = null; DB = {v:1, entries:doc.entries, hidden:doc.hidden, readOk:true}; drawHome();   // 寫進去了就一定採用：記憶體與磁碟一致（Codex 第 6 輪必修 1）；隱藏清單跟著換
+  GEN++; ARM = null; DB = {v:1, entries:doc.entries, hidden:doc.hidden, deleted:doc.deleted, readOk:true}; drawHome();   // 寫進去了就一定採用：記憶體與磁碟一致（Codex 第 6 輪必修 1）；隱藏清單跟著換
   var back; try { back = localStorage.getItem(KEY); } catch (e) { back = null; }
   return back === raw;   // 讀回失敗只告訴 sync「下次再確認」，sync 下一輪看到本機＝雲端會只補 baseline
 }
@@ -711,7 +711,10 @@ function statusOf(id){ var s = DB.entries[id]; return !s ? "還沒看" : s.maste
 //   首頁每篇「隱藏這篇」（可恢復，不刪內容與紀錄）、家長設定「清除全部作答紀錄」。都是兩段式：第一次按只出現「確定…？」與「取消」，
 //   5 秒沒再按自動取消；不用 confirm()。改的都是記憶體 DB，再走同一個 save()（唯讀分頁、還沒讀成功的分頁不出按鈕）。
 //   清除不清隱藏清單（另有「恢復全部隱藏的篇」）：隱藏是家長整理清單，作答紀錄是孩子的進度，兩件事分開。
-var ARM = null, ARM_T = null, SET_MSG = "";   // ARM＝{kind:"hide", id} 或 {kind:"clear"}
+//   「已隱藏」清單每篇另有「刪除」（2026-10-14 律師：「請幫我增加刪除題目按鈕」）：同樣兩段式；刪掉＝那篇紀錄歸零、
+//   首頁與已隱藏清單都不再列、沒有恢復鈕（「恢復全部隱藏的篇」也不會帶回）。紀錄歸零用 fresh() 蓋過，不用 delete：
+//   save() 會把磁碟上有、記憶體沒有的篇併回來，delete 掉的舊紀錄會被併回去。
+var ARM = null, ARM_T = null, SET_MSG = "";   // ARM＝{kind:"hide", id}、{kind:"del", id} 或 {kind:"clear"}
 function canEdit(){ return WRITER && READY; }
 function redrawHome(focusSel){
   if (E) return;
@@ -726,13 +729,20 @@ function arm(a, focusSel){
 }
 function homeSave(tag){ DIRTY[tag] = true; save(); }
 function setHidden(h){ DB.hidden = h; arm(null); homeSave("#hidden"); }
+function deleteEntry(id){
+  var r = DOC.remove(hidOf(), delOf(), id, Date.now());
+  DB.hidden = r.hidden; DB.deleted = r.deleted;
+  if (own(DB.entries, id)) DB.entries[id] = fresh();
+  arm(null); homeSave("#deleted");
+}
 function clearAllRecords(){
-  var c = DOC.cleared(DB.hidden);
+  var c = DOC.cleared(DB.hidden, DB.deleted);
   DB.entries = c.entries; WIPE = true;
   arm(null); SET_MSG = "清好了，每一篇都回到「還沒看」。";
   homeSave("#clear"); redrawHome("#clearAll");
 }
 function hidOf(){ return DB.hidden || noHidden(); }
+function delOf(){ return DB.deleted || noHidden(); }
 function cardHtml(e, can){
   var t = statusOf(e.id), armed = ARM && ARM.kind === "hide" && ARM.id === e.id;
   var act = !can ? "" : '<div class="row hact">' + (armed ?
@@ -741,18 +751,21 @@ function cardHtml(e, can){
   return '<div class="hwrap"><a class="hcard" href="#h/' + e.id + '"><b>' + esc(e.title) + '</b><span class="meta">' + esc(e.source) + (e.tag ? "・" + esc(e.tag) : "") + '・' + e.date.slice(5).replace("-", "/") + '</span><span class="st' + (t === "學會了" ? " done" : "") + '">' + t + '</span></a>' + act + '</div>';
 }
 function hiddenHtml(can, open){
-  var hs = DOC.hiddenIn(hidOf(), H.LIST);
+  var hs = DOC.hiddenIn(hidOf(), H.LIST, delOf());
   if (!hs.length) return "";
   return '<details id="hidBox"' + (open ? " open" : "") + '><summary>顯示已隱藏的 ' + hs.length + ' 篇</summary>' +
-    '<p class="small muted">藏起來的篇不會刪掉，按「恢復」就會回到上面。</p><div class="hlist">' + hs.map(function(e){
+    '<p class="small muted">藏起來的篇不會刪掉，按「恢復」就會回到上面。按「刪除」會連作答紀錄一起刪掉，不能恢復。</p><div class="hlist">' + hs.map(function(e){
+      var armed = ARM && ARM.kind === "del" && ARM.id === e.id;
       return '<div class="hrow" data-hid-row><span><b>' + esc(e.title) + '</b><span class="small muted">（' + esc(e.subject) + '）</span></span>' +
-        (can ? '<button class="btn ghost sm" type="button" data-unhide="' + e.id + '">恢復</button>' : '') + '</div>';
+        (!can ? '' : '<span class="row hact">' + (armed ?
+          '<button class="btn sm warn" type="button" data-del="' + e.id + '">確定刪除？</button><button class="btn ghost sm" type="button" data-undel>取消</button>' :
+          '<button class="btn ghost sm" type="button" data-unhide="' + e.id + '">恢復</button><button class="btn ghost sm quiet" type="button" data-del="' + e.id + '">刪除</button>') + '</span>') + '</div>';
     }).join("") + '</div></details>';
 }
 function drawSet(){
   var S = $("#setBody"); if (!S) return;
   if (!canEdit()) { S.innerHTML = '<p class="small muted">這一頁現在不能改設定。可能另一個分頁開著，或紀錄還沒讀到。</p>'; return; }
-  var armed = ARM && ARM.kind === "clear", nh = DOC.hiddenIn(hidOf(), H.LIST).length;
+  var armed = ARM && ARM.kind === "clear", nh = DOC.hiddenIn(hidOf(), H.LIST, delOf()).length;
   S.innerHTML = '<p class="small">清除這台的全部作答紀錄，每一篇都會回到「還沒看」。</p>' +
     '<p class="small muted">隱藏的篇不會跟著清掉。有開同步的話，別台也會跟著清掉。</p>' +
     '<div class="row"><button class="btn sm ' + (armed ? "warn" : "ghost") + '" type="button" id="clearAll">' + (armed ? "確定清除？" : "清除全部作答紀錄") + '</button>' +
@@ -761,12 +774,12 @@ function drawSet(){
     (nh ? '<div class="row"><button class="btn ghost sm" type="button" id="unhideAll">恢復全部隱藏的篇（' + nh + ' 篇）</button></div>' : '');
   $("#clearAll").onclick = guard(function(){ if (ARM && ARM.kind === "clear") clearAllRecords(); else arm({kind:"clear"}, "#clearAll"); });
   $("#clearNo").onclick = guard(function(){ arm(null, "#clearAll"); });
-  if (nh) $("#unhideAll").onclick = guard(function(){ setHidden(noHidden()); });
+  if (nh) $("#unhideAll").onclick = guard(function(){ setHidden(DOC.unhideAll(hidOf(), delOf())); });
 }
 function drawHome(){
-  var can = canEdit(), hb = $("#hidBox"), open = !!(hb && hb.open), hid = hidOf();
+  var can = canEdit(), hb = $("#hidBox"), open = !!(hb && hb.open), hid = hidOf(), dl = delOf();
   $("#subjects").innerHTML = H.SUBJECTS.map(function(sj){
-    var all = H.LIST.filter(function(e){ return e.subject === sj; }), es = all.filter(function(e){ return !DOC.isHidden(hid, e.id); }).slice().reverse();
+    var all = H.LIST.filter(function(e){ return e.subject === sj && !DOC.isHidden(dl, e.id); }), es = all.filter(function(e){ return !DOC.isHidden(hid, e.id); }).slice().reverse();
     return '<section class="subj" data-subj="' + sj + '"><div class="sect-t">' + sj + '</div>' + (es.length ? '<div class="hlist">' + es.map(function(e){ return cardHtml(e, can); }).join("") + '</div>' :
       '<span class="empty">' + (all.length ? "這一科的篇都先藏起來了。" : "還沒有題目。") + '</span>') + '</section>';
   }).join("") + hiddenHtml(can, open);
@@ -778,6 +791,12 @@ function drawHome(){
     }); });
     each($("#subjects").querySelectorAll("button[data-unarm]"), function(b){ b.onclick = guard(function(){ var id = ARM && ARM.id; arm(null, id ? 'button[data-hide="' + id + '"]' : null); }); });
     each($("#subjects").querySelectorAll("button[data-unhide]"), function(b){ b.onclick = guard(function(){ setHidden(DOC.unhide(hidOf(), b.getAttribute("data-unhide"))); }); });
+    each($("#subjects").querySelectorAll("button[data-del]"), function(b){ b.onclick = guard(function(){
+      var id = b.getAttribute("data-del");
+      if (ARM && ARM.kind === "del" && ARM.id === id) deleteEntry(id);
+      else arm({kind:"del", id:id}, 'button[data-del="' + id + '"]');
+    }); });
+    each($("#subjects").querySelectorAll("button[data-undel]"), function(b){ b.onclick = guard(function(){ var id = ARM && ARM.id; arm(null, id ? 'button[data-del="' + id + '"]' : null); }); });
   }
   drawSet();
 }

@@ -839,6 +839,45 @@ def flow_hide(browser, label="Chromium"):
     ctx.close()
 
 
+def card_count(pg, sel):
+    return pg.locator(sel + " .hcard").count()
+
+
+def flow_delete(browser, label="Chromium"):
+    """「已隱藏」清單每篇「刪除」（2026-10-14 律師要求）：兩段式、刪掉＝紀錄歸零＋首頁與已隱藏清單都不列、恢復全部也不帶回。"""
+    seed = ("if(!sessionStorage.getItem('d')){sessionStorage.setItem('d','1');localStorage.setItem('g5help.v1',JSON.stringify({v:1,entries:{'t-guoyu':{lessonDone:true,solved:2,idx:2,r:1}},hidden:{'t-guoyu':5,'p38-6-2':6}}));}")
+    ctx, pg, errors = open_page(browser, init=FIXTURE + seed, url=HOME)
+    pg.wait_for_function("window.G5HelpWriter && G5HelpWriter()")
+    G = '.subj[data-subj="國語"]'
+    pg.locator("#hidBox summary").click()
+    row = pg.locator('#hidBox [data-hid-row]', has_text="測試：成語填空")
+    dbtn = pg.locator('button[data-del="t-guoyu"]')
+    check(f"{label} 刪除D1 已隱藏清單每篇都有「恢復」和「刪除」", row.get_by_role("button", name="恢復").is_visible() and dbtn.inner_text() == "刪除" and pg.locator('button[data-del="p38-6-2"]').count() == 1)
+    dbtn.click()
+    check(f"{label} 刪除D2 按一次只變成「確定刪除？」＋「取消」，還沒刪、也沒寫檔",
+          dbtn.inner_text() == "確定刪除？" and pg.locator("#hidBox button[data-undel]").is_visible() and not db_of(pg).get("deleted"), (dbtn.inner_text(), db_of(pg)))
+    pg.locator("#hidBox button[data-undel]").click()
+    check(f"{label} 刪除D3 按「取消」回到「刪除」，沒有刪", dbtn.inner_text() == "刪除" and not db_of(pg).get("deleted"))
+    dbtn.click(); pg.wait_for_timeout(5600)
+    check(f"{label} 刪除D4 5 秒沒再按：自動回到「刪除」", dbtn.inner_text() == "刪除", dbtn.inner_text())
+    dbtn.click(); dbtn.click()
+    d = db_of(pg)
+    check(f"{label} 刪除D5 確定後：已隱藏剩 1 篇、國語那科說「還沒有題目」",
+          pg.locator("#hidBox summary").inner_text() == "顯示已隱藏的 1 篇" and "還沒有題目" in pg.locator(G).inner_text(), (pg.locator("#hidBox summary").inner_text(), pg.locator(G).inner_text()))
+    check(f"{label} 刪除D6 存檔：deleted 記這篇、hidden 仍留這篇、作答紀錄歸零",
+          isinstance(d.get("deleted", {}).get("t-guoyu"), int) and d["hidden"].get("t-guoyu") == 5 and d["entries"]["t-guoyu"]["solved"] == 0 and d["entries"]["t-guoyu"]["lessonDone"] is False, d)
+    pg.reload(); pg.wait_for_function("window.G5HelpWriter && G5HelpWriter()")
+    check(f"{label} 刪除D7 重新整理後仍刪掉、紀錄沒被舊資料併回來", card_count(pg, G) == 0 and db_of(pg)["entries"]["t-guoyu"]["solved"] == 0, db_of(pg))
+    pg.locator("#setBox summary").click(); pg.locator("#unhideAll").click()
+    d = db_of(pg)
+    check(f"{label} 刪除D8 「恢復全部隱藏的篇」只帶回數學那篇，刪掉的不回來",
+          card_count(pg, '.subj[data-subj="數學"]') == 1 and card_count(pg, G) == 0 and pg.locator("#hidBox").count() == 0 and list(d["hidden"].keys()) == ["t-guoyu"], d)
+    txt = pg.locator("#home").inner_text()
+    check(f"{label} 刪除D9 新字每句不超過 40 字", not sentences_over(txt), sentences_over(txt))
+    check(f"{label} 刪除 沒有 JS 錯誤", not errors, errors)
+    ctx.close()
+
+
 def flow_clear(browser, label="Chromium"):
     """家長設定「清除全部作答紀錄」：兩段式確認、走同一個 save()；隱藏清單不清（另有「恢復全部隱藏的篇」）；舊 g5math.v1 不會被搬回來。"""
     old = {"v": 1, "lessonDone": True, "idx": 2, "seed": 7, "streak": 2, "clean": 2, "solved": 2, "mastered": False, "log": [], "cur": None}
@@ -1028,6 +1067,7 @@ def main():
         flow_steps(cr, "手機390", {"viewport": {"width": 390, "height": 844}, "is_mobile": True, "has_touch": True}, shots=True)
         flow_dark(cr)
         flow_hide(cr)
+        flow_delete(cr)
         flow_clear(cr)
         flow_hide_sync(cr)
         flow_withdraw(cr)
@@ -1040,6 +1080,7 @@ def main():
         flow_codex_r5(wk, "WebKit")
         flow_codex_r6(wk, "WebKit")
         flow_hide(wk, "WebKit")
+        flow_delete(wk, "WebKit")
         flow_clear(wk, "WebKit")
         if BASE.startswith("https:"):
             flow_video_live(wk, "線上iPad", ipad)

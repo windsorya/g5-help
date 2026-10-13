@@ -4,6 +4,9 @@
 //   只是不列在首頁，不刪任何篇的內容與作答紀錄；跟著 g5help.v1 一起跨裝置同步。舊存檔沒有這個欄位＝全不隱藏。
 //   版本號維持 1：舊版頁面讀到 hidden 會略過（不當壞資料），存檔時會掉這個欄位——只影響還開著舊版的分頁，列為剩餘風險。
 // 讀不懂的 hidden（陣列、字串、壞 id、壞時間）只丟掉那一部分，不拖垮整份存檔。
+// deleted?:{篇id: 刪除時間(ms)}（2026-10-14 律師：「請幫我增加刪除題目按鈕」）：在「已隱藏」清單按「刪除」的篇。
+//   刪除＝那一篇的作答紀錄歸零、從首頁與「已隱藏」清單都拿掉、沒有恢復鈕（篇的內容在網站程式裡，要找回請交辦）。
+//   刪除時 hidden 那筆照留：舊版頁面看不懂 deleted，至少仍當隱藏的篇（不會跳回首頁）。格式規則同 hidden。
 (function (root) {
   "use strict";
   var ID = /^[\w-]{1,60}$/;   // 篇 id 與 hard.js、GAS confused 的 entry 同一規則
@@ -37,7 +40,7 @@
       if (!x || x.v !== 1 || !x.entries || typeof x.entries !== "object" || Array.isArray(x.entries)) return null;
       var out = Object.create(null);
       Object.keys(x.entries).forEach(function (id) { out[id] = clean1(x.entries[id]); });
-      return {entries: out, hidden: cleanHidden(x.hidden)};
+      return {entries: out, hidden: cleanHidden(x.hidden), deleted: cleanHidden(x.deleted)};
     } catch (e) { return null; }
   }
   // 用 defineProperty 一筆一筆定義：id 叫 __proto__ 也是普通欄位，JSON.stringify 照樣寫出（Codex 審 81963cee：原本 p[k]= 會吞掉 __proto__）
@@ -46,16 +49,30 @@
     Object.keys(o || {}).forEach(function (k) { Object.defineProperty(p, k, {value: o[k], enumerable: true, writable: true, configurable: true}); });
     return p;
   }
-  function serialize(entries, hidden) { return JSON.stringify({v: 1, entries: plain(entries), hidden: plain(hidden)}); }
+  function serialize(entries, hidden, deleted) { return JSON.stringify({v: 1, entries: plain(entries), hidden: plain(hidden), deleted: plain(deleted)}); }
   function hide(hidden, id, t) {
     if (!ID.test(id) || !stamp(t)) throw new Error("bad-hide");
     var out = cleanHidden(plain(hidden)); out[id] = t; return out;
   }
   function unhide(hidden, id) { var out = cleanHidden(plain(hidden)); delete out[id]; return out; }
   function isHidden(hidden, id) { return !!hidden && own(hidden, id) && stamp(hidden[id]); }
-  function hiddenIn(hidden, list) { return (list || []).filter(function (e) { return isHidden(hidden, e.id); }); }
-  // 清除全部作答紀錄：每一篇回到空白（之後打開時才用 fresh() 建）；隱藏清單照留（另有「恢復全部隱藏的篇」）
-  function cleared(hidden) { return {entries: Object.create(null), hidden: cleanHidden(plain(hidden))}; }
-  var api = {fresh: fresh, clean1: clean1, parse: parse, serialize: serialize, cleanHidden: cleanHidden, hide: hide, unhide: unhide, isHidden: isHidden, hiddenIn: hiddenIn, cleared: cleared, own: own};
+  // 「已隱藏」清單只列隱藏、沒刪掉的篇
+  function hiddenIn(hidden, list, deleted) { return (list || []).filter(function (e) { return isHidden(hidden, e.id) && !isHidden(deleted, e.id); }); }
+  // 刪除一篇：回傳新的 {hidden, deleted}（hidden 那筆也記上，舊版頁面才會繼續藏著）；不改原物件
+  function remove(hidden, deleted, id, t) {
+    if (!ID.test(id) || !stamp(t)) throw new Error("bad-delete");
+    var h = cleanHidden(plain(hidden)), d = cleanHidden(plain(deleted));
+    if (!stamp(h[id])) h[id] = t;
+    d[id] = t; return {hidden: h, deleted: d};
+  }
+  // 恢復全部隱藏的篇：刪掉的篇不跟著回來（只留它們在 hidden 裡的那筆）
+  function unhideAll(hidden, deleted) {
+    var h = cleanHidden(plain(hidden)), out = Object.create(null);
+    Object.keys(cleanHidden(plain(deleted))).forEach(function (id) { out[id] = stamp(h[id]) ? h[id] : deleted[id]; });
+    return out;
+  }
+  // 清除全部作答紀錄：每一篇回到空白（之後打開時才用 fresh() 建）；隱藏與刪除清單照留（另有「恢復全部隱藏的篇」）
+  function cleared(hidden, deleted) { return {entries: Object.create(null), hidden: cleanHidden(plain(hidden)), deleted: cleanHidden(plain(deleted))}; }
+  var api = {fresh: fresh, clean1: clean1, parse: parse, serialize: serialize, cleanHidden: cleanHidden, hide: hide, unhide: unhide, isHidden: isHidden, hiddenIn: hiddenIn, remove: remove, unhideAll: unhideAll, cleared: cleared, own: own};
   if (typeof module !== "undefined" && module.exports) module.exports = api; else root.G5HelpDoc = api;
 })(typeof window !== "undefined" ? window : this);

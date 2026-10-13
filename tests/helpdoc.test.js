@@ -91,3 +91,35 @@ test("H08 原有欄位清洗不變（從 app.html 搬進 helpdoc.js，行為與�
   assert.equal(d.entries.y.idx, 0);
   assert.equal(Object.getPrototypeOf(d.entries), null, "entries 不能撞內建屬性");
 });
+
+// 刪除（2026-10-14 律師：「請幫我增加刪除題目按鈕」）
+test("H10 舊存檔沒有 deleted ⇒ 讀成空；壞掉的 deleted 只丟那部分", () => {
+  assert.deepEqual(plain(D.parse(OLD).deleted), {});
+  const d = D.parse('{"v":1,"entries":{},"deleted":{"ok-1":9,"<b>":1,"neg":-1}}');
+  assert.deepEqual(plain(d.deleted), {"ok-1": 9});
+  assert.deepEqual(plain(D.parse('{"v":1,"entries":{},"deleted":[1]}').deleted), {});
+});
+
+test("H11 remove：記進 deleted，hidden 也留一筆（舊版頁面仍藏著）；不改原物件；往返不掉", () => {
+  const h0 = {}, d0 = {};
+  const r = D.remove(h0, d0, "sci-q5-bangen", 77);
+  assert.equal(r.deleted["sci-q5-bangen"], 77);
+  assert.equal(r.hidden["sci-q5-bangen"], 77);
+  assert.deepEqual(plain(h0), {}); assert.deepEqual(plain(d0), {});
+  const r2 = D.remove({"sci-q5-bangen": 5}, {}, "sci-q5-bangen", 77);
+  assert.equal(r2.hidden["sci-q5-bangen"], 5, "原本的隱藏時間照留");
+  const back = D.parse(D.serialize({}, r.hidden, r.deleted));
+  assert.equal(back.deleted["sci-q5-bangen"], 77);
+  assert.throws(() => D.remove({}, {}, "<b>", 1));
+});
+
+test("H12 刪掉的篇不算進「已隱藏」；恢復全部不會帶回刪掉的篇；清除全部紀錄不清 deleted", () => {
+  const list = [{id: "a"}, {id: "b"}];
+  const r = D.remove({a: 1, b: 2}, {}, "b", 3);
+  assert.deepEqual(D.hiddenIn(r.hidden, list, r.deleted).map((e) => e.id), ["a"]);
+  const u = D.unhideAll(r.hidden, r.deleted);
+  assert.deepEqual(plain(u), {b: 2}, "只留刪掉那篇的隱藏");
+  assert.deepEqual(D.hiddenIn(u, list, r.deleted), []);
+  const c = D.cleared(r.hidden, r.deleted);
+  assert.equal(c.deleted.b, 3);
+});
