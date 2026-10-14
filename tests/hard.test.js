@@ -8,6 +8,7 @@ const path = require("path");
 const vm = require("vm");
 const H = require("../src/hard.js");
 const F = require("../src/frac.js");
+const DOC = require("../src/helpdoc.js");
 
 const EMOJI = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u;   // 介面禁 emoji
 
@@ -23,6 +24,8 @@ test("每一篇：id 唯一、科目與格式合法、日期與出處齊全、�
   assert.ok(H.LIST.length >= 1);
   H.LIST.forEach((e) => {
     assert.match(e.id, /^[\w-]+$/);
+    // 刪除標記存成 hidden 的 "_del_"+id（src/helpdoc.js）：篇 id 最長 55 字、不得以 _del_ 開頭（Codex 審 6dd8b14）
+    assert.ok(DOC.postIdOk(e.id), e.id + " 篇 id 要 1–55 字、只用英數底線連字號、不得以 _del_ 開頭");
     assert.ok(!["constructor", "__proto__", "prototype", "hasOwnProperty", "toString", "valueOf"].includes(e.id), e.id + " 不能用物件內建屬性名當 id（Codex 2026-10-13 必修 5）");
     assert.ok(!ids.has(e.id), "重複 id " + e.id);
     ids.add(e.id);

@@ -150,6 +150,15 @@ test("H14 存檔格式：hidden 裡是 _del_ 標記、沒有另開 deleted 欄�
   assert.deepEqual(plain(D.parse('{"v":1,"entries":{},"hidden":{"_del_":5}}').deleted), {}, "只有前綴沒有 id 的標記丟掉");
 });
 
+test("H16 篇 id 規則 postIdOk：55 字以內、不以 _del_ 開頭；不合規則的 _del_ 標記與舊 deleted 欄位不採（Codex 審 6dd8b14）", () => {
+  assert.ok(D.postIdOk("p38-6-2") && D.postIdOk("x".repeat(55)));
+  assert.ok(!D.postIdOk("x".repeat(56)) && !D.postIdOk("_del_p38-6-2") && !D.postIdOk("") && !D.postIdOk("<b>"));
+  const d = D.parse(JSON.stringify({v: 1, entries: {}, hidden: {["_del_" + "x".repeat(55)]: 1, "_del__del_a": 2}, deleted: {["y".repeat(56)]: 3, ok: 4}}));
+  assert.deepEqual(Object.keys(d.deleted).sort(), ["ok", "x".repeat(55)].sort());
+  const r = D.remove({}, {}, "x".repeat(55), 9);
+  assert.equal(D.parse(D.serialize({}, r.hidden, r.deleted)).deleted["x".repeat(55)], 9, "55 字的篇刪除存得住");
+});
+
 test("H15 6495640 寫過的 deleted 欄位照樣讀得懂，下次存檔改成 _del_ 標記", () => {
   const d = D.parse('{"v":1,"entries":{},"hidden":{"x":1},"deleted":{"x":2}}');
   assert.equal(d.deleted.x, 2);
