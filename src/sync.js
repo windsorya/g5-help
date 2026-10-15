@@ -1,5 +1,9 @@
 /* ES5 syntax; requires native Promise/fetch (or the supplied fetch function).
  * Progress documents are opaque strings. No field-level merging is performed.
+ * #2164／#2189（2026-10-15 律師：「應該要以最新的複習進度為準，通常會是練習題目比較最多的那一次記錄」）：
+ *   兩份不一樣時不再要人二選一（autoResolve，預設開）——留「練過題數」多的那份，少的那份照舊 backup() 留在這台；
+ *   iPad 主畫面圖示與 Safari 存檔分開（WebKit 181849），所以沒同步碼的環境一打開就自動開同步（autoEnable，預設開），
+ *   還沒跟家人連上時頁首常駐橫幅，可貼整條連結加入。
  */
 (function (root, factory) {
   var api = factory(root);
@@ -64,6 +68,31 @@
     var code = String(value || '').replace(/[\s-]/g, '').toUpperCase();
     return code.length === 12 && /^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]+$/.test(code) ? code : null;
   }
+  // 輸入框也收整條連結（同台 iPad 從 Safari「複製連結」貼進主畫面 App 是最自然的做法）：取 #sync= 後面那段
+  function codeFromInput(value) {
+    var s = String(value || ''), m = /[#&?]sync=([^&#\s]*)/.exec(s);
+    if (m) { try { s = decodeURIComponent(m[1]); } catch (ignore) { return null; } }
+    return normalizeCode(s);
+  }
+  // 「練過題數」：各站存檔都把每次作答記在名為 log 的陣列裡（自然／數學／國語／社會＝頂層 log；難題站＝entries[*].log；
+  // 錯題站＝it[*].log）⇒ 數全部 log 陣列的長度。次要比較：cards[*].seen 加總（log 有上限時用）。讀不懂＝null（不自動選）。
+  function practiceScore(data) {
+    if (typeof data !== 'string') { return null; }
+    var doc;
+    try { doc = JSON.parse(data); } catch (ignore) { return null; }
+    var answers = 0, seen = 0;
+    (function walk(node, depth) {
+      if (!node || typeof node !== 'object' || depth > 5) { return; }
+      var names = Object.keys(node);
+      for (var i = 0; i < names.length; i += 1) {
+        var v = node[names[i]];
+        if (names[i] === 'log' && Array.isArray(v)) { answers += v.length; }
+        else if (names[i] === 'seen' && typeof v === 'number' && isFinite(v) && v > 0) { seen += v; }
+        else if (v && typeof v === 'object') { walk(v, depth + 1); }
+      }
+    }(doc, 0));
+    return [answers, seen];
+  }
   function error(kind) { var e = new Error(kind); e.kind = kind; return e; }
   function integer(n) { return typeof n === 'number' && isFinite(n) && Math.floor(n) === n && n >= 0 && n < 9007199254740991; }
   function pad(n) { return ('0' + n).slice(-2); }
@@ -103,6 +132,30 @@
     // baseline 與 pending 放在同一筆，一次 setItem 原子替換；寫完一定讀回核對，失敗就不送（A15）。
     // 回應遺失時不再猜「雲端是不是我送過的某一份」（舊版記憶體 sent 清單，重開頁就不見）——一律拿雲端跟 pending 比（recover）。
     var CKPT = 'g5sync.ckpt.';
+    var AUTO = 'g5sync.auto';   // 值＝自動建立、還沒跟家人連上的那組碼；join() 加入家庭碼後刪掉
+    var autoResolve = options.autoResolve !== false, autoEnable = options.autoEnable !== false;
+    // 本機開關 g5sync.noauto='1'：這台不自動開同步（e2e 用來驗「沒開同步」與手動開啟那條路——自動開失敗時仍會走到；家長要手動也可用）
+    try { if (storage && storage.getItem('g5sync.noauto') === '1') { autoEnable = false; } } catch (ignoreNoAuto) { /* 讀不到就照預設 */ }
+    // 自動化測試的瀏覽器（navigator.webdriver＝true，W3C WebDriver 規範；Playwright chromium／webkit 2026-10-15 實測皆 true）不自動開：
+    // 四站共 12 支 e2e 沒攔 GAS，自動開會每跑一次就在家長的「G5 家庭同步」試算表寫一列。真的 iPad／iPhone 這個值是 false。
+    try { if (root.navigator && root.navigator.webdriver === true) { autoEnable = false; } } catch (ignoreWebdriver) { /* 照預設 */ }
+    // 律師判準：留練過題數多的那份；題數一樣比 seen；再一樣留這台（她眼前這份）。讀不懂任一份＝不猜，退回原本的顯示
+    function pick(key, local, cloudData) {
+      if (local === cloudData) { return 'same'; }
+      if (local === null) { return 'cloud'; }
+      if (cloudData === null) { return 'local'; }
+      var a, c;
+      if (options.score && typeof options.score[key] === 'function') {
+        try { a = [Number(options.score[key](local)), 0]; c = [Number(options.score[key](cloudData)), 0]; } catch (ignore) { return null; }
+        if (!isFinite(a[0]) || !isFinite(c[0])) { return null; }
+      } else {
+        a = practiceScore(local); c = practiceScore(cloudData);
+        if (!a || !c) { return null; }
+      }
+      if (a[0] !== c[0]) { return a[0] > c[0] ? 'local' : 'cloud'; }
+      if (a[1] !== c[1]) { return a[1] > c[1] ? 'local' : 'cloud'; }
+      return 'local';
+    }
 
     function read(key) {
       if (!storage) { throw error('storage'); }
@@ -233,6 +286,41 @@
       return href.split('#')[0] + '#sync=' + (code || '');
     }
     function clear(node) { while (node.firstChild) { node.removeChild(node.firstChild); } }
+    function isAuto() { try { return !!code && storage && storage.getItem(AUTO) === code; } catch (ignore) { return false; } }
+    function joinForm(parent, hidden) {
+      var form = el('form', 'join'); form.hidden = hidden;
+      var label = el('label', 'label', '同步碼或同步連結');
+      var input = el('input', 'input'); input.type = 'text'; input.maxLength = 400;
+      input.autocomplete = 'off'; input.spellcheck = false; input.style.minHeight = '44px';
+      input.setAttribute('autocapitalize', 'characters'); input.setAttribute('aria-label', '同步碼');
+      label.appendChild(input); form.appendChild(label);
+      form.appendChild(el('p', 'hint', BAD_CODE + '也可以直接貼上「複製連結」得到的整條網址。'));
+      form.appendChild(button('加入同步', function () { join(input.value); }));
+      form.addEventListener('submit', function (event) { event.preventDefault(); join(input.value); });
+      parent.appendChild(form);
+      if (parent === view.panel) { view.join = form; view.input = input; }
+      return input;
+    }
+    // 頁首常駐提醒（主畫面圖示開的 App 與 Safari 存檔分開；沒連上家人時她練的只在這台＋這組自動碼）
+    var banner = null;
+    function updateBanner() {
+      var body = doc && doc.body;
+      if (!body || typeof body.insertBefore !== 'function') { return; }
+      if (!isAuto()) { if (banner && banner.parentNode) { banner.parentNode.removeChild(banner); } banner = null; return; }
+      if (banner) { return; }
+      banner = el('div', 'banner');
+      banner.setAttribute('role', 'region'); banner.setAttribute('aria-label', '跨裝置同步提醒');
+      banner.style.cssText = 'position:sticky;top:0;z-index:50;background:#fff4d6;color:#4a3500;border-bottom:2px solid #e0b100;padding:10px 14px;font-size:16px;line-height:1.5';
+      banner.appendChild(el('p', 'banner-text', '這台還沒跟家裡其他裝置連起來，進度已經先存到雲端。請爸媽在另一台按「複製連結」，貼到下面。連起來後，會留練得比較多的那份。'));
+      var row = el('div', 'banner-row'); row.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap';
+      var input = el('input', 'banner-input'); input.type = 'text'; input.maxLength = 400; input.autocomplete = 'off';
+      input.setAttribute('aria-label', '同步碼或同步連結'); input.setAttribute('placeholder', '貼上同步連結或 12 碼同步碼');
+      input.style.cssText = 'flex:1 1 220px;min-height:44px;font-size:16px';
+      row.appendChild(input);
+      row.appendChild(button('連起來', function () { join(input.value); }));
+      banner.appendChild(row);
+      body.insertBefore(banner, body.firstChild || null);
+    }
     function buildView() {
       clear(container);
       var panel = el('section', 'panel');
@@ -243,16 +331,7 @@
         panel.appendChild(button('輸入同步碼（已在別台開過）', function () {
           view.join.hidden = false; view.input.focus();
         }));
-        var form = el('form', 'join'); form.hidden = true;
-        var label = el('label', 'label', '同步碼');
-        var input = el('input', 'input'); input.type = 'text'; input.maxLength = 80;
-        input.autocomplete = 'off'; input.spellcheck = false; input.style.minHeight = '44px';
-        input.setAttribute('autocapitalize', 'characters'); input.setAttribute('aria-label', '同步碼');
-        label.appendChild(input); form.appendChild(label);
-        form.appendChild(el('p', 'hint', BAD_CODE));
-        form.appendChild(button('加入同步', function () { join(input.value); }));
-        form.addEventListener('submit', function (event) { event.preventDefault(); join(input.value); });
-        panel.appendChild(form); view.join = form; view.input = input;
+        joinForm(panel, true);
       } else {
         panel.appendChild(el('p', 'code', code.match(/.{4}/g).join('-')));
         var qrBox = el('div', 'qr');
@@ -276,6 +355,11 @@
           } else { share.focus(); share.select(); notice = '請複製已選取的連結。'; render(); }
         }));
         panel.appendChild(button('這台停止同步', function () { stop(); }));
+        if (isAuto()) {
+          panel.appendChild(el('p', 'auto-hint', '這台的進度已自動備份到雲端，但還沒跟家裡其他裝置連起來。'));
+          panel.appendChild(button('輸入家裡的同步碼（已在別台開過）', function () { view.join.hidden = false; view.input.focus(); }));
+          joinForm(panel, true);
+        }
       }
       view.status = el('p', 'status'); view.status.setAttribute('role', 'status'); view.status.setAttribute('aria-live', 'polite');
       view.notice = el('p', 'notice'); view.notice.setAttribute('role', 'alert');
@@ -285,7 +369,8 @@
     }
     function render() {
       if (destroyed) { return; }
-      if (viewCode !== code || !view.panel) { buildView(); }
+      try { updateBanner(); } catch (ignoreBanner) { /* 提醒畫不出來不影響同步 */ }
+      if (viewCode !== code || !view.panel || view.auto !== isAuto()) { buildView(); view.auto = isAuto(); }
       view.status.textContent = status; view.notice.textContent = notice;
       var signature = keys.map(function (key) {
         if (!conflicts[key]) { return ''; }
@@ -382,6 +467,7 @@
       } else { write(key, cloud.data); }
       if (read(key) !== cloud.data) { throw error('storage'); }
       delete deferred[key];
+      connected();   // 換上了別台寫進雲端的進度＝已經有家人連上這組碼
       replaced.push(key); // Notify even if persisting the following metadata fails.
       saveBaseline(key, cloud.rev, cloud.data, cloud.updated);
       delete conflicts[key];
@@ -392,7 +478,7 @@
       if (chosenCloud) { backup(key, chosenCloud.data); }
       return request({op: 'put', key: key, rev: rev, data: data}, token).then(function (r) {
         assertActive(token);
-        if (r.err === 'conflict') { showConflict(key, r); return; }
+        if (r.err === 'conflict') { if (autoResolve) { return settle(key, r, token); } showConflict(key, r); return; }
         // The baseline is the exact request payload, never a newer local edit.
         saveBaseline(key, r.rev, data, r.updated);
         delete conflicts[key];
@@ -451,27 +537,57 @@
         }
         // 下一號是別的內容＝另一台寫的（真正分歧）；其他（倒退、跳號、同號不同內容）＝無法確認。都各自保留、不覆蓋（A12、A14）
         // baseline 是舊版遷移來的（legacy）：舊版送出不留 pending，下一號可能是同一台舊版的延遲請求 ⇒ 也是無法確認（A16，Codex 審 b0b24f1）
-        showConflict(key, cloud, (b && b.legacy === true) || !(cloud.rev === p.baseRev + 1)); return;
+        return settleOwned(key, cloud, token, (b && b.legacy === true) || !(cloud.rev === p.baseRev + 1));
       }
       if (b && cloud.rev < b.rev) { showConflict(key, cloud, true); return; }   // 雲端倒退：不憑內容認領、不重傳（A14）
       if (cloud.rev === 0) {
         if (local !== null) { return startPending(key, local, 0, token); }
         saveBaseline(key, 0, null, null); return;
       }
-      if (!b) {   // 第一次加入、雙邊都有資料：照 A4 不猜，各自保留
-        if (local === null) { replaceLocal(key, cloud, token); }
-        else { showConflict(key, cloud); }
-        return;
+      if (!b) {   // 第一次加入、雙邊都有資料：照律師判準自動留練過題數多的那份（#2164；autoResolve 關掉時照 A4 各自保留）
+        if (local === null) { replaceLocal(key, cloud, token); return; }
+        return settleOwned(key, cloud, token, false);
       }
       // 本機已經和雲端一字不差（例如頁面寫進去了但讀回失敗，#1303 第 6 輪）：只補 baseline
       if (local !== null && local === cloud.data) { saveBaseline(key, cloud.rev, cloud.data, cloud.updated); delete conflicts[key]; delete deferred[key]; return; }
       if (cloud.rev === b.rev && contentHash(cloud.data) !== b.hash) { showConflict(key, cloud, true); return; }
       if (cloud.rev > b.rev) {
-        if (contentHash(local) === b.hash) { replaceLocal(key, cloud, token); }
-        else { showConflict(key, cloud, b.legacy === true); }   // 新版的 baseline 沒有 pending＝確定是另一台；舊版遷移來的＝無法確認
-        return;
+        if (contentHash(local) === b.hash) { replaceLocal(key, cloud, token); return; }
+        return settleOwned(key, cloud, token, b.legacy === true);   // 新版的 baseline 沒有 pending＝確定是另一台；舊版遷移來的＝無法確認（不自動選）
       }
       if (local !== null && contentHash(local) !== b.hash) { return startPending(key, local, b.rev, token); }
+    }
+    // 兩份都在、確定是兩台各自練（第一次加入，或另一台已寫新版而這台也改過）：照律師判準自動留一份。
+    // 一般站：留這台＝把這台那份蓋上雲端目前版本（put 會先 backup 雲端那份）；留雲端＝replaceLocal（先 backup 這台那份）。
+    // 這組自動碼收到別台寫的進度＝家人已連上：拿掉「還沒連起來」的標記與頁首提醒
+    function connected() { try { if (storage && storage.getItem(AUTO) === code) { storage.removeItem(AUTO); } } catch (ignoreAuto) { /* 只影響提醒 */ } }
+    function settle(key, cloud, token) {
+      connected();
+      var local = read(key), choice = autoResolve ? pick(key, local, cloud.data) : null;
+      if (choice === 'same') { saveBaseline(key, cloud.rev, cloud.data, cloud.updated); delete conflicts[key]; return; }
+      if (choice === 'cloud') { replaceLocal(key, cloud, token); return; }
+      if (choice === 'local') { return put(key, local, cloud.rev, token, cloud); }
+      showConflict(key, cloud);
+    }
+    // 有 accept 的頁面（難題站）版本：留雲端＝replaceLocal（canReplace／accept 由頁面把關）；
+    // 留這台＝先備份雲端那份，把雲端目前版本記成 baseline、這台那份記成待確認上傳，再走原本的 sendPending（A15 讀回核對照舊）。
+    function settleOwned(key, cloud, token, unsure) {
+      if (!unsure) { connected(); }
+      var local = read(key), choice = autoResolve && !unsure ? pick(key, local, cloud.data) : null;
+      if (choice === 'same') { saveBaseline(key, cloud.rev, cloud.data, cloud.updated); delete conflicts[key]; delete deferred[key]; return; }
+      if (choice === 'cloud') { replaceLocal(key, cloud, token); return; }
+      if (choice === 'local') {
+        if (local.length > 900000) { return Promise.reject(error('too-big')); }
+        backup(key, cloud.data);
+        assertActive(token);
+        var ck = readCk(key);
+        ck.baseline = {rev: cloud.rev, hash: contentHash(cloud.data), updated: cloud.updated};
+        ck.pending = {baseRev: cloud.rev, data: local, hash: contentHash(local)};
+        writeCk(key, ck); mirrorMeta(key, ck.baseline);
+        delete conflicts[key];
+        return sendPending(key, ck, token);
+      }
+      showConflict(key, cloud, unsure);
     }
     function reconcile(key, cloud, token) {
       if (pageOwned) { return recover(key, cloud, token, false); }
@@ -482,18 +598,16 @@
         if (local !== null) { return put(key, local, 0, token); }
         saveBaseline(key, 0, null, null); return;
       }
-      if (!meta) {
-        if (local === null) { replaceLocal(key, cloud, token); }
-        else { showConflict(key, cloud); }
-        return;
+      if (!meta) {   // 第一次加入、雙邊都有資料：照律師判準自動留一份（#2164）
+        if (local === null) { replaceLocal(key, cloud, token); return; }
+        return settle(key, cloud, token);
       }
       if (cloud.rev < meta.rev || (cloud.rev === meta.rev && contentHash(cloud.data) !== meta.hash)) {
         showConflict(key, cloud); return;
       }
       if (cloud.rev > meta.rev) {
-        if (hash === meta.hash) { replaceLocal(key, cloud, token); }
-        else { showConflict(key, cloud); }
-        return;
+        if (hash === meta.hash) { replaceLocal(key, cloud, token); return; }
+        return settle(key, cloud, token);
       }
       if (hash !== meta.hash && local !== null) { return put(key, local, meta.rev, token); }
     }
@@ -639,9 +753,9 @@
       }
     }
     function join(value) {
-      var normalized = normalizeCode(value);
+      var normalized = codeFromInput(value);
       if (!normalized) { notice = BAD_CODE; render(); return Promise.resolve(false); }
-      try { return activate(normalized); }
+      try { if (storage) { storage.removeItem(AUTO); } return activate(normalized); }
       catch (err) { failure(err); render(); return Promise.resolve(false); }
     }
     function applyDecision(key, token) {
@@ -722,7 +836,14 @@
         if (root.removeEventListener) { root.removeEventListener('online', online); root.removeEventListener('storage', storageEvent); }
       }
     };
-    api.ready = invitation !== null ? join(invitation) : sync();
+    function autoStart() {
+      var started = enable();
+      try { if (code) { write(AUTO, code); render(); } } catch (ignoreAuto) { /* 標記寫不進去只少了提醒，不影響同步 */ }
+      return started;
+    }
+    var savedAtStart = null;
+    try { savedAtStart = read(CODE); } catch (ignoreSaved) { savedAtStart = 'unreadable'; }
+    api.ready = invitation !== null ? join(invitation) : (autoEnable && !code && savedAtStart === null ? autoStart() : sync());
     return api;
   }
   return {init: init, normalizeCode: normalizeCode, contentHash: contentHash};

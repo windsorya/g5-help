@@ -371,14 +371,14 @@ test('S34 metadata write failure after downloading still notifies the host about
 
 test('S35 CommonJS export can initialize directly in Node with injected DOM owner and storage', async () => {
   const doc = new Document(), storage = new Storage();
-  const api = G5Sync.init({container: doc.container, storage, fetch: async () => { throw Error('must not fetch'); }, endpoint: 'unused', keys: [KEY]});
+  const api = G5Sync.init({container: doc.container, storage, fetch: async () => { throw Error('must not fetch'); }, endpoint: 'unused', autoEnable: false, keys: [KEY]});
   try { await api.ready; assert.equal(api.getState().code, null); } finally { api.destroy(); }
 });
 
 test('S41 五上國語、社會站的 key（g5chi.v1、g5soc.v1）可以初始化，不丟 bad-key；不在白名單的 key 仍拒絕', async () => {
   for (const key of ['g5chi.v1', 'g5soc.v1']) {
     const doc = new Document(), storage = new Storage();
-    const api = G5Sync.init({container: doc.container, storage, fetch: async () => { throw Error('must not fetch'); }, endpoint: 'unused', keys: [key]});
+    const api = G5Sync.init({container: doc.container, storage, fetch: async () => { throw Error('must not fetch'); }, endpoint: 'unused', autoEnable: false, keys: [key]});
     try { await api.ready; assert.equal(api.getState().code, null); } finally { api.destroy(); }
   }
   assert.throws(() => G5Sync.init({container: new Document().container, storage: new Storage(), keys: ['g5xyz.v1']}), /bad-key/);
@@ -596,6 +596,6 @@ test('A21 派事件丟錯（dispatchEvent／createEvent 會 throw）：同步碼
 
 test('S42 錯題複習站的 key（g5wrong.v1）可以初始化（2026-10-13 律師交辦錯題複習）', async () => {
   const doc = new Document(), storage = new Storage();
-  const api = G5Sync.init({container: doc.container, storage, fetch: async () => { throw Error('must not fetch'); }, endpoint: 'unused', keys: ['g5wrong.v1']});
+  const api = G5Sync.init({container: doc.container, storage, fetch: async () => { throw Error('must not fetch'); }, endpoint: 'unused', autoEnable: false, keys: ['g5wrong.v1']});
   try { await api.ready; assert.equal(api.getState().code, null); } finally { api.destroy(); }
 });

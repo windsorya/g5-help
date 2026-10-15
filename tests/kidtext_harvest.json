@@ -1,13 +1,13 @@
 {
  "index_sha256": "cafa91243d0d14a5ca5f3b3b7d4ac9cc38fd908e76e19e930bb446ae5cbe03c8",
- "kidgate_sha256": "a04d71ab1e674b838882259504b3f0666b6ebc552e9443a536406664561715c6",
+ "kidgate_sha256": "7e5aa8e25612507c3461dac92fc5bf6ba8150b8d86165b02ba16b0a32f53c5b7",
  "driver_sha256": "6518700e20affa6954bfd3dfb32b24d4a335ebfc1f47efec554a404b00c6cf8d",
  "max": 40,
  "self_max": 40,
  "browsers": {
   "chromium": {
    "index_sha256": "cafa91243d0d14a5ca5f3b3b7d4ac9cc38fd908e76e19e930bb446ae5cbe03c8",
-   "kidgate_sha256": "a04d71ab1e674b838882259504b3f0666b6ebc552e9443a536406664561715c6",
+   "kidgate_sha256": "7e5aa8e25612507c3461dac92fc5bf6ba8150b8d86165b02ba16b0a32f53c5b7",
    "driver_sha256": "6518700e20affa6954bfd3dfb32b24d4a335ebfc1f47efec554a404b00c6cf8d",
    "max": 40,
    "cases": [
@@ -478,7 +478,7 @@
   },
   "webkit": {
    "index_sha256": "cafa91243d0d14a5ca5f3b3b7d4ac9cc38fd908e76e19e930bb446ae5cbe03c8",
-   "kidgate_sha256": "a04d71ab1e674b838882259504b3f0666b6ebc552e9443a536406664561715c6",
+   "kidgate_sha256": "7e5aa8e25612507c3461dac92fc5bf6ba8150b8d86165b02ba16b0a32f53c5b7",
    "driver_sha256": "6518700e20affa6954bfd3dfb32b24d4a335ebfc1f47efec554a404b00c6cf8d",
    "max": 40,
    "cases": [

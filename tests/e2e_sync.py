@@ -42,8 +42,12 @@ def backend(route):
     route.fulfill(status=200, content_type="application/json", headers={"Access-Control-Allow-Origin": "*"}, body=json.dumps(body))
 
 
-def device(browser):
+def device(browser, noauto=True):
     ctx = browser.new_context()
+    if not noauto:   # 模擬真機：自動化瀏覽器 navigator.webdriver＝true 時 sync.js 不自動開（免得別站 e2e 寫進真試算表）
+        ctx.add_init_script("Object.defineProperty(Navigator.prototype,'webdriver',{get:()=>false})")
+    if noauto:   # #2164：舊流程驗手動開啟；noauto=False＝新版預設（一打開就自動開同步）
+        ctx.add_init_script("try{localStorage.setItem('g5sync.noauto','1')}catch(e){}")
     ctx.route(lambda url: url.startswith(EP), backend)   # 攔不到就會打到真的 GAS（還沒授權＝回網頁）
     ctx.route("https://windsorya.github.io/g5-help/sync.js", lambda r: r.fulfill(body=(ROOT / "sync.js").read_text(), content_type="application/javascript"))
     ctx.route("https://windsorya.github.io/g5-help/qrcode.js", lambda r: r.fulfill(body=(ROOT / "qrcode.js").read_text(), content_type="application/javascript"))
@@ -87,10 +91,50 @@ def flow(browser, label, url, key, seed_js, expect):
     a.close(); b.close()
 
 
+def auto_flow(browser, url):
+    """#2164／#2189 律師判準（2026-10-15）：主畫面圖示與 Safari 存檔分開 ⇒ 一打開就自動開同步；
+    兩邊連起來時「以練習題目比較多的那份為準」，不出二選一；輸的那份留 backup。真瀏覽器、假 GAS。"""
+    errors = []
+    def seeded(n, tag):
+        log = [{"t": 1792000000000 + i, "q": 0, "clean": True, "wrongs": 0} for i in range(n)]
+        return json.dumps({"v": 1, "entries": {"p38-6-2": {"lessonDone": True, "idx": 3, "seed": 5, "streak": 0, "clean": 0,
+                           "solved": n, "mastered": False, "log": log, "cur": None, "r": 1, "tag": tag}}})
+    few, many = seeded(3, "home"), seeded(22, "safari")
+    # 主畫面那台（練得少）：一打開就有碼、雲端有一份、頁首有提醒
+    h = device(browser, noauto=False); ph = open_(h, url, errors)
+    ph.evaluate("(d) => localStorage.setItem('g5help.v1', d)", few); ph.reload(); ph.wait_for_load_state("load"); ph.wait_for_timeout(2500)
+    hc = ph.evaluate("localStorage.getItem('g5sync.code')")
+    check("自動開同步：主畫面那台一打開就有 12 字同步碼", bool(hc) and len(hc) == 12, hc)
+    check("自動開同步：這台進度已上雲端", (hc, "g5help.v1") in STORE and json.loads(STORE[(hc, "g5help.v1")][1])["entries"]["p38-6-2"]["solved"] == 3,
+          STORE.get((hc, "g5help.v1"), (None,))[0])
+    check("自動開同步：頁首提醒「還沒跟家裡其他裝置連起來」", ph.locator(".g5s-banner").count() == 1 and "還沒跟家裡其他裝置連起來" in ph.locator(".g5s-banner").inner_text())
+    # Safari 那台（練得多）：也自動開了自己的碼；在頁首提醒貼主畫面那台的整條連結
+    s = device(browser, noauto=False); ps = open_(s, url, errors)
+    ps.evaluate("(d) => localStorage.setItem('g5help.v1', d)", many); ps.reload(); ps.wait_for_load_state("load"); ps.wait_for_timeout(2000)
+    sc = ps.evaluate("localStorage.getItem('g5sync.code')")
+    check("自動開同步：另一台是另一組自動碼", bool(sc) and sc != hc, (sc, hc))
+    ps.locator(".g5s-banner input").fill(url + "#sync=" + hc)
+    ps.locator(".g5s-banner button").click(); ps.wait_for_timeout(6000)
+    check("貼整條連結加入：換成主畫面那台的碼、提醒消失", ps.evaluate("localStorage.getItem('g5sync.code')") == hc and ps.locator(".g5s-banner").count() == 0)
+    cloud = json.loads(STORE[(hc, "g5help.v1")][1])["entries"]["p38-6-2"]
+    check("律師判準：雲端換成練過 22 題那份（不是 3 題那份）", cloud["solved"] == 22 and cloud["tag"] == "safari", (cloud["solved"], cloud.get("tag")))
+    bk = ps.evaluate("Object.keys(localStorage).filter(k => k.indexOf('g5sync.backup.g5help.v1.') === 0).map(k => JSON.parse(localStorage.getItem(k)).entries['p38-6-2'].tag)")
+    check("輸的那份（3 題）留在加入那台的備份", bk == ["home"], bk)
+    check("沒有出現二選一按鈕", ps.get_by_role("button", name="留這台的").count() == 0 and ps.get_by_role("button", name="留雲端的").count() == 0)
+    # 主畫面那台重開：換上 22 題那份；它自己原本的 3 題那份留 backup
+    ph.reload(); ph.wait_for_load_state("load"); ph.wait_for_timeout(3000)
+    local = json.loads(ph.evaluate("localStorage.getItem('g5help.v1')"))["entries"]["p38-6-2"]
+    check("主畫面那台重開：換上 22 題那份", local["solved"] == 22, local["solved"])
+    check("主畫面那台：收到別台寫的進度＝家人已連上，頁首提醒消失", ph.locator(".g5s-banner").count() == 0)
+    check("沒有 JS 錯誤", not errors, errors)
+    h.close(); s.close()
+
+
 def main():
     help_seed = ("localStorage.setItem('g5help.v1',JSON.stringify({v:1,entries:{'p38-6-2':{lessonDone:true,idx:3,seed:5,streak:3,clean:3,solved:3,mastered:true,log:[],cur:null,r:1}}}))")
     with sync_playwright() as p:
         br = p.chromium.launch()
+        auto_flow(br, (ROOT / "index.html").as_uri())
         flow(br, "難題站", (ROOT / "index.html").as_uri(), "g5help.v1", help_seed,
              lambda j: json.loads(j)["entries"]["p38-6-2"]["solved"] == 3)
         def sci_seed(pg):

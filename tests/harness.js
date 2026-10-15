@@ -35,8 +35,9 @@ class Element extends Events {
     this.value = ''; this.hidden = false; this.disabled = false;
   }
   get firstChild() { return this.children[0] || null; }
-  appendChild(node) { this.children.push(node); return node; }
-  removeChild(node) { this.children.splice(this.children.indexOf(node), 1); return node; }
+  appendChild(node) { node.parentNode = this; this.children.push(node); return node; }
+  insertBefore(node, ref) { node.parentNode = this; const i = ref ? this.children.indexOf(ref) : -1; if (i < 0) this.children.push(node); else this.children.splice(i, 0, node); return node; }
+  removeChild(node) { this.children.splice(this.children.indexOf(node), 1); node.parentNode = null; return node; }
   set textContent(text) { this._text = String(text); this.children = []; this._html = ''; }
   get textContent() { return this._text + this.children.map(child => child.textContent).join(''); }
   set innerHTML(html) { this._html = String(html); this.children = []; this._text = ''; }
@@ -48,7 +49,7 @@ class Element extends Events {
   click() { if (!this.disabled) this.dispatch('click', {preventDefault() {}}); }
 }
 class Document extends Events {
-  constructor() { super(); this.visibilityState = 'visible'; this.container = new Element('div', this); }
+  constructor() { super(); this.visibilityState = 'visible'; this.container = new Element('div', this); this.body = new Element('body', this); }
   createElement(tag) { return new Element(tag, this); }
   querySelector(selector) { return selector === '#sync' ? this.container : null; }
 }
@@ -107,7 +108,7 @@ function device(server, options = {}) {
   const history = {state: {keep: 1}, calls: [], replaceState(state, title, url) { this.calls.push({state, url}); href = url; }};
   const d = {clock, doc, storage, history, calls: [], replacements: [], qrLinks: [], active: 0, maxActive: 0, mode: 'ok', held: null};
   const window = Object.assign(events, {
-    document: doc, location, history, navigator: {onLine: true}, localStorage: storage,
+    document: doc, location, history, navigator: options.navigator || {onLine: true}, localStorage: storage,
     setTimeout: clock.setTimeout, clearTimeout: clock.clearTimeout, setInterval: clock.setInterval, clearInterval: clock.clearInterval,
     crypto: {getRandomValues(array) { crypto.randomFillSync(array); return array; }}, AbortController
   });
@@ -146,8 +147,11 @@ function device(server, options = {}) {
     now: clock.now, storage, fetch,
     random: array => { for (let i = 0; i < array.length; i++) array[i] = seed++ % 240; },
     onReplaced: key => { d.replacements.push(key); options.onReplaced?.(key, d); },
-    canReplace: options.canReplace, accept: options.accept
+    canReplace: options.canReplace, accept: options.accept,
+    // #2164：舊測試驗的是「選擇」那套機制（備份、版本號、不覆蓋），預設關掉兩個新功能；新測試明確打開
+    autoResolve: options.autoResolve ?? false, autoEnable: options.autoEnable ?? false
   };
+  if (options.score) init.score = options.score;
   if (options.nativeRandom) delete init.random;
   if (options.random) init.random = options.random;
   if (options.noCrypto) delete window.crypto;
