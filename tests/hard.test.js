@@ -430,3 +430,14 @@ test("S6 notePeek 上界：超過 PEEK_MAX 丟最舊的", () => {
   assert.equal(("k" + "0".repeat(14)) in st.peek, false, "最舊那筆被丟");
   assert.equal(H.practiceId(H.practiceAt(P, 0)) in st.peek, true);
 });
+
+test("S7 題庫每一題都看過答案才算學不會（allSeen，交辦 #2288）", () => {
+  const ks = H.practiceAll(P).map(H.practiceId);
+  const st = DOC.fresh(); st.peek = {};
+  ks.slice(0, -1).forEach((k) => { st.peek[k] = 1; });
+  assert.equal(H.allSeen(P, st), false, "還有一題沒看過答案");
+  st.log = [{ t: 1, q: 17, clean: false, wrongs: 1, k: ks[ks.length - 1] }];
+  assert.equal(H.allSeen(P, st), true, "最後一題只記在 log 的 k 也算");
+  const plainE = H.LIST.find((e) => (e.practice || []).length && !(e.practiceAlt || []).length);
+  assert.equal(H.allSeen(plainE, { peek: {}, log: [] }), false, "沒有換數字題的篇不提示");
+});

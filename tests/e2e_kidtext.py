@@ -235,6 +235,18 @@ def steps_cases(B, eid):
         if "之前看過答案" in r.pg.locator("#pend").inner_text() and st["streak"] == 0 and not st["mastered"]:
             r.mark(f"{eid}:revisit")
         B.absorb(r.close(), [f"{eid}:revisit"])
+        # 題庫每一題都看過答案（#2288）：出現請家長加新題的提示（採字，過小五用詞閘）；只看過一部分時不出現
+        r = Run(B, B.device, f"{eid}:allseen")
+        r.go(f"#h/{eid}")
+        keys = r.pg.evaluate("(qs) => qs.map((q) => G5Hard.practiceId(q))", allp)
+        r.seed(eid, fresh_state(lessonDone=True, idx=again, solved=again, peek={k: 1 for k in keys[:-1]}))
+        tap(r.pg, r.pg.locator("#goPractice"))
+        partial = r.pg.locator("#allSeen").count() == 0
+        r.seed(eid, fresh_state(lessonDone=True, idx=again, solved=again, peek={k: 1 for k in keys}))
+        tap(r.pg, r.pg.locator("#goPractice")); r.snap("每一題都看過答案")
+        if partial and r.pg.locator("#allSeen").is_visible():
+            r.mark(f"{eid}:allseen")
+        B.absorb(r.close(), [f"{eid}:allseen"])
     # 學會了（連續 need 題）：答對最後一題出現「這種題你會了」；重開後上方顯示已學會
     if n:
         r = Run(B, B.device, f"{eid}:mastery")

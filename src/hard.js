@@ -251,6 +251,16 @@
     if (ks.length > PEEK_MAX) ks.sort(function (a, b) { return p[a] - p[b]; }).slice(0, ks.length - PEEK_MAX).forEach(function (x) { delete p[x]; });
     return true;
   }
+  // 題庫每一題都看過答案：之後怎麼做都不會算進連續答對＝學不會（交辦 #2288）。頁面據此提示請家長加新題，不自動放寬
+  function allSeen(e, st) {
+    if (!tracksPeek(e)) return false;
+    var all = practiceAll(e);
+    for (var i = 0; i < all.length; i++) {
+      var k = practiceId(all[i]);
+      if (k && !ownKey(st.peek, k) && !(st.log || []).some(function (l) { return l && l.clean === false && l.k === k; })) return false;
+    }
+    return all.length > 0;
+  }
   // 選擇題答對後計分（頁面 choicePractice 與 node 測試共用同一份）：一次就對、而且以前沒看過答案，才算進連續答對
   function scoreChoice(e, st, wrongs, need, now) {
     var idx = st.idx, clean = wrongs === 0, seen = shownBefore(e, st, idx), counts = clean && !seen;
@@ -264,6 +274,6 @@
     st.log.push(l); st.log = st.log.slice(-100);
     return { clean: clean, seen: seen, counts: counts };
   }
-  var api = { LIST: LIST, get: get, SUBJECTS: SUBJECTS, KINDS: ["frac-compare", "steps"], gradeAt: gradeAt, readingAt: readingAt, READING: READING, HARD_WORDS: HARD_WORDS, practiceAt: practiceAt, practiceAll: practiceAll, practiceId: practiceId, PEEK_MAX: PEEK_MAX, shownBefore: shownBefore, notePeek: notePeek, scoreChoice: scoreChoice };
+  var api = { LIST: LIST, get: get, SUBJECTS: SUBJECTS, KINDS: ["frac-compare", "steps"], gradeAt: gradeAt, readingAt: readingAt, READING: READING, HARD_WORDS: HARD_WORDS, practiceAt: practiceAt, practiceAll: practiceAll, practiceId: practiceId, PEEK_MAX: PEEK_MAX, shownBefore: shownBefore, notePeek: notePeek, scoreChoice: scoreChoice, allSeen: allSeen };
   if (typeof module !== "undefined" && module.exports) module.exports = api; else root.G5Hard = api;
 })(typeof window !== "undefined" ? window : this);

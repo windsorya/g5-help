@@ -694,7 +694,9 @@ function choicePractice(){
   if (!st.cur || st.cur.idx !== st.idx) { st.cur = {idx:st.idx, hints:0, wrongs:0}; save(); }
   var cur = st.cur;
   P.innerHTML = '<div class="row" style="justify-content:space-between"><h2 style="font-size:24px">練習第 ' + (st.idx + 1) + ' 題</h2><span class="small muted">連續自己做對' + dots() + '</span></div>' +
-    '<div class="small muted">連續 ' + need() + ' 題第一次就選對，就算學會。</div><div class="qtext">' + q.q + '</div><div class="chips">' +
+    '<div class="small muted">連續 ' + need() + ' 題第一次就選對，就算學會。</div>' +
+    (!st.mastered && H.allSeen(E, st) ? '<div class="note" id="allSeen">這篇的每一題你都看過答案了，再做也不會算進連續答對。請爸爸媽媽幫你加新的題目。</div>' : '') +
+    '<div class="qtext">' + q.q + '</div><div class="chips">' +
     q.opts.map(function(o, k){ return '<button type="button" class="chip" data-k="' + k + '">' + esc(o) + '</button>'; }).join("") + '</div><div class="fb" hidden></div><div id="pend" style="display:grid;gap:12px" hidden></div>';
   var out = $(".fb", P), bs = P.querySelectorAll(".chip");
   var g1 = GEN;

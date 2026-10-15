@@ -1,14 +1,14 @@
 {
- "index_sha256": "54cd0ef50cf988370ce4e8b8e967d3a3e5571f08abca456cb0d1efb01a0e8680",
+ "index_sha256": "515bcc2e7771d263e93761ff766edc15849f49014403631aa390731c0d6c5276",
  "kidgate_sha256": "7e5aa8e25612507c3461dac92fc5bf6ba8150b8d86165b02ba16b0a32f53c5b7",
- "driver_sha256": "540a8f5acc82977f2bcacdafdd754e13e7ff59f7f9a7215d42d92812d0dff3e6",
+ "driver_sha256": "81323607038692450ff067547017344153a7c7ba05cf52c6dbe547d8a5ae00e6",
  "max": 40,
  "self_max": 40,
  "browsers": {
   "webkit": {
-   "index_sha256": "54cd0ef50cf988370ce4e8b8e967d3a3e5571f08abca456cb0d1efb01a0e8680",
+   "index_sha256": "515bcc2e7771d263e93761ff766edc15849f49014403631aa390731c0d6c5276",
    "kidgate_sha256": "7e5aa8e25612507c3461dac92fc5bf6ba8150b8d86165b02ba16b0a32f53c5b7",
-   "driver_sha256": "540a8f5acc82977f2bcacdafdd754e13e7ff59f7f9a7215d42d92812d0dff3e6",
+   "driver_sha256": "81323607038692450ff067547017344153a7c7ba05cf52c6dbe547d8a5ae00e6",
    "max": 40,
    "cases": [
     "home",
@@ -21,6 +21,7 @@
     "p38-6-2:practice",
     "p38-6-2:resume",
     "p38-6-2:video",
+    "p40-2-5:allseen",
     "p40-2-5:direct",
     "p40-2-5:lesson",
     "p40-2-5:mastery",
@@ -109,6 +110,7 @@
     "checkSign:wrong-eq",
     "checkSign:wrong-neq",
     "p38-6-2:direct",
+    "p40-2-5:allseen",
     "p40-2-5:check1:0",
     "p40-2-5:check1:1",
     "p40-2-5:check2:0",
@@ -544,12 +546,12 @@
     }
    },
    "errors": [],
-   "snapshots": 214
+   "snapshots": 215
   },
   "chromium": {
-   "index_sha256": "54cd0ef50cf988370ce4e8b8e967d3a3e5571f08abca456cb0d1efb01a0e8680",
+   "index_sha256": "515bcc2e7771d263e93761ff766edc15849f49014403631aa390731c0d6c5276",
    "kidgate_sha256": "7e5aa8e25612507c3461dac92fc5bf6ba8150b8d86165b02ba16b0a32f53c5b7",
-   "driver_sha256": "540a8f5acc82977f2bcacdafdd754e13e7ff59f7f9a7215d42d92812d0dff3e6",
+   "driver_sha256": "81323607038692450ff067547017344153a7c7ba05cf52c6dbe547d8a5ae00e6",
    "max": 40,
    "cases": [
     "home",
@@ -562,6 +564,7 @@
     "p38-6-2:practice",
     "p38-6-2:resume",
     "p38-6-2:video",
+    "p40-2-5:allseen",
     "p40-2-5:direct",
     "p40-2-5:lesson",
     "p40-2-5:mastery",
@@ -650,6 +653,7 @@
     "checkSign:wrong-eq",
     "checkSign:wrong-neq",
     "p38-6-2:direct",
+    "p40-2-5:allseen",
     "p40-2-5:check1:0",
     "p40-2-5:check1:1",
     "p40-2-5:check2:0",
@@ -1085,7 +1089,7 @@
     }
    },
    "errors": [],
-   "snapshots": 214
+   "snapshots": 215
   }
  }
 }
