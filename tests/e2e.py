@@ -356,8 +356,10 @@ def flow_home(browser):
     subj = page.locator("#subjects .subj")
     check("切換列六項（自然、數學、國語、社會、錯題複習、難題解說）、目前站是「難題解說」", page.locator("#siteNav a, #siteNav [aria-current]").count() == 6 and page.locator('#siteNav [aria-current="page"]').inner_text() == "難題解說")
     check("首頁列出國語、數學、自然、社會、英文、其他六科", [subj.nth(i).get_attribute("data-subj") for i in range(subj.count())] == ["國語", "數學", "自然", "社會", "英文", "其他"])
-    math = page.locator('.subj[data-subj="數學"] .hcard')
-    check("數學有第 1 篇（28/42），狀態還沒看", math.count() == 1 and "28/42 和 27/45 比大小" in math.inner_text() and "還沒看" in math.inner_text(), math.inner_text())
+    # 數學科從 2026-10-15 起有第 2 篇（p40-2-5），這裡固定看第 1 篇；另驗第 2 篇也列在數學科
+    math = page.locator('.subj[data-subj="數學"] .hcard[href="#h/p38-6-2"]')
+    check("數學也列出第 2 篇（26/25 和 31/30）", page.locator('.subj[data-subj="數學"] .hcard[href="#h/p40-2-5"]').count() == 1)
+    check("數學有第 1 篇（28/42），狀態還沒看（數學已不只一篇，指定那一篇）", math.count() == 1 and "28/42 和 27/45 比大小" in math.inner_text() and "還沒看" in math.inner_text(), math.inner_text())
     check("國語目前寫「還沒有題目」", "還沒有題目" in page.locator('.subj[data-subj="國語"]').inner_text())
     math.click()
     page.wait_for_selector("#entry:not([hidden])")
@@ -366,7 +368,7 @@ def flow_home(browser):
     solve_practice(page, *FIXED[0])
     page.locator("#backHome").click()
     page.wait_for_selector("#home:not([hidden])")
-    check("回列表後狀態變成「練習中」", "練習中" in page.locator('.subj[data-subj="數學"] .hcard').inner_text())
+    check("回列表後狀態變成「練習中」", "練習中" in page.locator('.subj[data-subj="數學"] .hcard[href="#h/p38-6-2"]').inner_text())
     check("首頁沒有 JS 錯誤", not errors, errors)
     ctx.close()
 
@@ -871,7 +873,7 @@ def flow_delete(browser, label="Chromium"):
     pg.locator("#setBox summary").click(); pg.locator("#unhideAll").click()
     d = db_of(pg)
     check(f"{label} 刪除D8 「恢復全部隱藏的篇」只帶回數學那篇，刪掉的不回來",
-          card_count(pg, '.subj[data-subj="數學"]') == 1 and card_count(pg, G) == 0 and pg.locator("#hidBox").count() == 0 and sorted(d["hidden"].keys()) == ["_del_t-guoyu", "t-guoyu"], d)
+          pg.locator('.subj[data-subj="數學"] .hcard[href="#h/p38-6-2"]').count() == 1 and card_count(pg, G) == 0 and pg.locator("#hidBox").count() == 0 and sorted(d["hidden"].keys()) == ["_del_t-guoyu", "t-guoyu"], d)
     txt = pg.locator("#home").inner_text()
     check(f"{label} 刪除D9 新字每句不超過 40 字", not sentences_over(txt), sentences_over(txt))
     check(f"{label} 刪除 沒有 JS 錯誤", not errors, errors)
@@ -899,7 +901,7 @@ def flow_clear(browser, label="Chromium"):
     clr.click(); clr.click()
     d = db_of(pg)
     check(f"{label} 清除C5 再按「確定清除？」：每一篇回到「還沒看」、存檔 entries 是空的", d.get("entries") == {} and "還沒看" in pg.locator(G).inner_text(), d)
-    check(f"{label} 清除C6 隱藏清單不清：數學那篇仍隱藏、仍有「顯示已隱藏的 1 篇」", d.get("hidden") == {"p38-6-2": 5} and pg.locator('.subj[data-subj="數學"] .hcard').count() == 0 and pg.locator("#hidBox summary").inner_text() == "顯示已隱藏的 1 篇", d)
+    check(f"{label} 清除C6 隱藏清單不清：數學那篇仍隱藏、仍有「顯示已隱藏的 1 篇」", d.get("hidden") == {"p38-6-2": 5} and pg.locator('.subj[data-subj="數學"] .hcard[href="#h/p38-6-2"]').count() == 0 and pg.locator("#hidBox summary").inner_text() == "顯示已隱藏的 1 篇", d)
     check(f"{label} 清除C7 告訴家長清好了", "清好了" in pg.locator("#clearMsg").inner_text(), pg.locator("#clearMsg").inner_text())
     pg.reload(); pg.wait_for_function("window.G5HelpWriter && G5HelpWriter()")
     check(f"{label} 清除C8 重新整理後仍是空白；舊 g5math.v1 沒有被搬回第 1 篇（原文也沒動）",
@@ -908,7 +910,7 @@ def flow_clear(browser, label="Chromium"):
     allb = pg.locator("#unhideAll")
     check(f"{label} 清除C9 設定裡有「恢復全部隱藏的篇（1 篇）」", allb.is_visible() and allb.inner_text() == "恢復全部隱藏的篇（1 篇）", allb.count() and allb.inner_text())
     allb.click()
-    check(f"{label} 清除C10 按了之後數學那篇回到清單、hidden 清空", pg.locator('.subj[data-subj="數學"] .hcard').count() == 1 and db_of(pg).get("hidden") == {} and pg.locator("#unhideAll").count() == 0)
+    check(f"{label} 清除C10 按了之後數學那篇回到清單、hidden 清空", pg.locator('.subj[data-subj="數學"] .hcard[href="#h/p38-6-2"]').count() == 1 and db_of(pg).get("hidden") == {} and pg.locator("#unhideAll").count() == 0)
     # 存不進去時清除：記憶體先清、標成未存；之後存成功也不能把磁碟上的舊紀錄併回來
     pg.goto(HOME + "#h/t-guoyu"); pg.wait_for_selector("#entry:not([hidden])")
     pg.get_by_role("button", name="開始學").click()
