@@ -144,8 +144,16 @@ def last_ask(pg):
     return pg.locator("#lesson .ask").last
 
 
+def tap(pg, loc):
+    """點了要等畫面真的變了再採字。2026-10-15（#2259）兩個瀏覽器同時跑時，WebKit（iPad 觸控模擬）的點擊事件比 click() 回傳晚到，
+    自檢 B09 在回饋出現前就採字、拍到空畫面——正式內容的採字也可能因此漏看違規。等不到變化就報錯，不默默採空畫面。"""
+    before = pg.evaluate("document.body.innerHTML")
+    loc.click()
+    pg.wait_for_function("(b) => document.body.innerHTML !== b", arg=before, timeout=10000)
+
+
 def lchip(pg, text):
-    last_ask(pg).get_by_role("button", name=text, exact=True).click()
+    tap(pg, last_ask(pg).get_by_role("button", name=text, exact=True))
 
 
 def lnums(pg, values):
@@ -176,17 +184,17 @@ def steps_cases(B, eid):
     r = Run(B, B.device, f"{eid}:lesson")
     r.go(f"#h/{eid}"); r.snap("開篇")
     e = entry(r.pg, eid)
-    r.pg.get_by_role("button", name="開始學").click(); r.snap("開始學")
+    tap(r.pg, r.pg.get_by_role("button", name="開始學")); r.snap("開始學")
     for i, s in enumerate(e["steps"]):
         if s.get("check"):
             c = s["check"]
             for k in range(len(c["opts"])):
                 if k == c["a"]:
                     continue
-                last_ask(r.pg).locator(f'.chip[data-i="{k}"]').click(); r.snap(f"第{i + 1}步選錯 {k}"); r.mark(f"{eid}:check{i + 1}:{k}")
-            last_ask(r.pg).locator(f'.chip[data-i="{c["a"]}"]').click(); r.snap(f"第{i + 1}步選對"); r.mark(f"{eid}:check{i + 1}:{c['a']}")
+                tap(r.pg, last_ask(r.pg).locator(f'.chip[data-i="{k}"]')); r.snap(f"第{i + 1}步選錯 {k}"); r.mark(f"{eid}:check{i + 1}:{k}")
+            tap(r.pg, last_ask(r.pg).locator(f'.chip[data-i="{c["a"]}"]')); r.snap(f"第{i + 1}步選對"); r.mark(f"{eid}:check{i + 1}:{c['a']}")
         else:
-            r.pg.locator("#lesson button[data-next]:not([disabled])").last.click(); r.snap(f"第{i + 1}步我懂了")
+            tap(r.pg, r.pg.locator("#lesson button[data-next]:not([disabled])").last); r.snap(f"第{i + 1}步我懂了")
     r.snap("答案")
     B.absorb(r.close(), [f"{eid}:lesson"])
     n = len(e.get("practice") or [])
@@ -194,25 +202,25 @@ def steps_cases(B, eid):
     # 直接練習（全新紀錄、沒看教學）
     r = Run(B, B.device, f"{eid}:direct")
     r.go(f"#h/{eid}")
-    r.pg.get_by_role("button", name="我已經會了，直接練習").click(); r.snap("直接練習第 1 題")
+    tap(r.pg, r.pg.get_by_role("button", name="我已經會了，直接練習")); r.snap("直接練習第 1 題")
     B.absorb(r.close(), [f"{eid}:direct"])
     # 每一題：重開續練（第 k 題）、每個錯選項、答對
     for q in range(n):
         r = Run(B, B.device, f"{eid}:resume{q}")
         r.go(f"#h/{eid}"); r.seed(eid, fresh_state(lessonDone=True, idx=q, solved=q))
-        r.pg.locator("#goPractice").click(); r.snap(f"續練第 {q + 1} 題")
+        tap(r.pg, r.pg.locator("#goPractice")); r.snap(f"續練第 {q + 1} 題")
         pq = e["practice"][q]
         for k in range(len(pq["opts"])):
             if k != pq["a"]:
-                r.pg.locator(f'#practice .chip[data-k="{k}"]').click(); r.snap(f"第 {q + 1} 題選錯 {k}"); r.mark(f"{eid}:prac{q + 1}:{k}")
-        r.pg.locator(f'#practice .chip[data-k="{pq["a"]}"]').click(); r.snap(f"第 {q + 1} 題選對"); r.mark(f"{eid}:prac{q + 1}:{pq['a']}")
+                tap(r.pg, r.pg.locator(f'#practice .chip[data-k="{k}"]')); r.snap(f"第 {q + 1} 題選錯 {k}"); r.mark(f"{eid}:prac{q + 1}:{k}")
+        tap(r.pg, r.pg.locator(f'#practice .chip[data-k="{pq["a"]}"]')); r.snap(f"第 {q + 1} 題選對"); r.mark(f"{eid}:prac{q + 1}:{pq['a']}")
         B.absorb(r.close(), [f"{eid}:resume{q}"])
     # 學會了（連續 need 題）：答對最後一題出現「這種題你會了」；重開後上方顯示已學會
     if n:
         r = Run(B, B.device, f"{eid}:mastery")
         r.go(f"#h/{eid}"); r.seed(eid, fresh_state(lessonDone=True, idx=0, solved=need - 1, streak=need - 1, clean=need - 1))
-        r.pg.locator("#goPractice").click()
-        r.pg.locator(f'#practice .chip[data-k="{e["practice"][0]["a"]}"]').click(); r.snap("學會了")
+        tap(r.pg, r.pg.locator("#goPractice"))
+        tap(r.pg, r.pg.locator(f'#practice .chip[data-k="{e["practice"][0]["a"]}"]')); r.snap("學會了")
         ok = r.pg.locator("#pend .win").count() == 1
         r.pg.reload(); r.pg.wait_for_function("window.KidGate && G5HelpWriter()"); r.snap("重開：已學會")
         if ok:

@@ -44,13 +44,20 @@ ship)
 ${dirty}"
   git push -q origin HEAD:main || { st "推不上去（先 git fetch、rebase 到 origin/main）"; exit 1 }
   st "已推上 main（$(git rev-parse --short HEAD)）"
-  live=0
+  # 判準＝正式網址的 index.html 和這次 commit 的一模一樣（只找篇 id 的話，改寫舊篇時舊版就已經有這個 id）。
+  # 先存檔再算雜湊：不能 curl | grep -q——grep 找到就先結束，curl 寫不進去回 23，pipefail 會把整條判成失敗（2026-10-15 實跑空轉 5 分鐘）
+  want=$(git show HEAD:index.html | shasum -a 256 | cut -c1-64)
+  live=0; fails=0
   for i in {1..60}; do
-    curl -s "https://windsorya.github.io/g5-help/?nc=${RANDOM}${i}" | grep -q "\"${id}\"" && { live=1; break }
+    if curl -sS --max-time 20 -o "${LOG}/live.html" "https://windsorya.github.io/g5-help/?nc=${RANDOM}${i}" 2>> "${LOG}/curl.err"; then
+      [[ $(shasum -a 256 < "${LOG}/live.html" | cut -c1-64) == "${want}" ]] && { live=1; break }
+    else
+      (( fails++ ))
+    fi
     sleep 5
   done
-  (( live )) || { st "5 分鐘內正式網址還沒有 ${id}（GitHub Pages 卡住？）"; exit 1 }
-  st "正式網址已有這一篇：https://windsorya.github.io/g5-help/#h/${id}"
+  (( live )) || { st "5 分鐘內正式網址還不是這一版（連線失敗 ${fails} 次，見 ${LOG}/curl.err）"; exit 1 }
+  st "正式網址已是這一版（index.html 雜湊與 commit 相同）：https://windsorya.github.io/g5-help/#h/${id}"
   if [[ -n ${inbox} ]]; then
     python3 ~/scripts/g5_help_inbox.py --done "${inbox}" "${id}" || { st "回寫網頁進度清單失敗"; exit 1 }
     st "已回寫網頁進度清單（家長看得到連結）"

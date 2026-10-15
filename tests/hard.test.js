@@ -195,39 +195,61 @@ test("快篩：數學題的答案與每一題比大小，用 frac.js 再算一�
   assert.throws(() => judge(bad.practice[1], "自檢 哪一個比較大"));
 });
 
-// Opus 審 p40-2-5（2026-10-15）抓到：10 組比較全部是「數字大的反而小」，只學會「選數字小的」也能 6/6 全對；4 題確認題的正解又全是第一個選項
-// （前端不打亂選項）。這種事 Sonnet 與 Codex 都沒抓到，所以改成機器檢查，不靠審稿模型夠不夠強。
-test("快篩：作答不能用同一個表面捷徑全部答對（一律選第一個；比大小一律選數字小的或數字大的）", () => {
+// Opus 審 p40-2-5（2026-10-15）兩輪抓到：①10 組比較全是「數字大的反而小」，只學會「選數字小的」就全對；②我補的對照題又讓
+// 「都多 1 就選小的、其他選大的」「多出來的分子大的比較大」全對；確認題正解又全是第一個（前端不打亂選項）。Sonnet、Codex 都沒抓到。
+// 判準照「學會」的定義：練習照順序輪流出（app.html list[st.idx % n]）、連續 min(3,n) 題第一次就對＝學會，
+// 所以任何一段連續 min(3,n) 題（含繞回開頭）都不能被同一個錯規則全部答對——錯規則學會了也拿得到「學會」，這篇就沒教到。
+const SHORTCUTS = (() => {
   const two = (s) => { const m = String(s).match(/(\d+)\/(\d+)\D+?(\d+)\/(\d+)/); return m ? [{ n: +m[1], d: +m[2] }, { n: +m[3], d: +m[4] }] : null; };
-  const shortcutProblems = (list) => {
-    const problems = [];
-    list.filter((e) => e.kind === "steps").forEach((e) => {
-      const checks = e.steps.filter((s) => s.check).map((s) => s.check), items = checks.concat(e.practice || []);
-      [["確認題", checks], ["練習題", e.practice || []]].forEach(([name, g]) => {
-        if (g.length >= 3 && g.every((q) => q.a === 0)) problems.push(e.id + "：" + name + "的正解全是第一個選項（前端不打亂選項）");
-      });
-      if (e.subject !== "數學") return;
-      // 比大小題：數字比較小的那一個（分子分母都不比較大、至少一個比較小）是不是比較大；分子分母一大一小的題，兩種捷徑都不適用
-      const le = (x, y) => x.n <= y.n && x.d <= y.d && (x.n < y.n || x.d < y.d);
-      const sides = items.map((q) => {
-        const f = two(q.q); if (!f) return null;
-        const small = le(f[0], f[1]) ? 0 : le(f[1], f[0]) ? 1 : null;
-        const sign = F.cmp(f[0], f[1]); if (sign === "=") return null;
-        return { small: small, larger: sign === ">" ? 0 : 1 };
-      }).filter(Boolean);
-      if (sides.length >= 3 && sides.every((x) => x.small !== null && x.larger === x.small)) problems.push(e.id + "：每一題比大小都是「數字小的比較大」，只學會「選數字小的」也能全對——加一題數字大的比較大");
-      if (sides.length >= 3 && sides.every((x) => x.small !== null && x.larger !== x.small)) problems.push(e.id + "：每一題比大小都是「數字大的比較大」，只學會「選數字大的」也能全對");
-    });
-    return problems;
+  const le = (x, y) => x.n <= y.n && x.d <= y.d && (x.n < y.n || x.d < y.d);   // 分子分母都不比較大、至少一個比較小
+  const smaller = (f) => le(f[0], f[1]) ? 0 : le(f[1], f[0]) ? 1 : null;
+  const plusOne = (x) => x.n - x.d === 1;
+  const extra = (x) => [Math.floor(x.n / x.d), x.n % x.d];                       // 帶分數的整數與多出來的分子
+  // 每條錯規則：給兩個分數，回它會選哪一個（0／1）；不適用回 null（＝這題用它答不出來）
+  const rules = {
+    "選數字大的": (f) => { const s = smaller(f); return s === null ? null : 1 - s; },
+    "選數字小的": (f) => smaller(f),
+    "都只多 1 就選數字小的、其他選數字大的": (f) => { const s = smaller(f); return s === null ? null : (plusOne(f[0]) && plusOne(f[1]) ? s : 1 - s); },
+    "多出來的分子大的比較大": (f) => { const a = extra(f[0]), b = extra(f[1]); return a[0] !== b[0] ? (a[0] > b[0] ? 0 : 1) : a[1] !== b[1] ? (a[1] > b[1] ? 0 : 1) : smaller(f); }
   };
-  assert.deepEqual(shortcutProblems(H.LIST), []);
-  // 判準自檢：上線版（b3daf54）的 p40-2-5 兩種毛病都要抓到
-  const old = JSON.parse(JSON.stringify(H.get("p40-2-5")));
-  old.steps.forEach((s) => { if (s.check) { s.check.opts = [s.check.opts[s.check.a]].concat(s.check.opts.filter((_, i) => i !== s.check.a)); s.check.a = 0; } });
-  old.practice = old.practice.filter((q) => !/53\/50|13\/10/.test(q.q));
-  const got = shortcutProblems([old]);
-  assert.ok(got.some((p) => /確認題的正解全是第一個選項/.test(p)) && got.some((p) => /數字小的比較大/.test(p)), "上線版的兩種毛病都要抓到：" + got.join("；"));
-  assert.ok(!got.some((p) => /練習題的正解全是第一個/.test(p)), "練習題正解位置有錯開，不該誤報");
+  // 這一題用某條規則答，會不會答對（題目不是兩個分數比大小 ⇒ 數學規則不適用＝答不對）
+  const rightBy = (q, pick) => {
+    const f = two(q.q); if (!f || F.cmp(f[0], f[1]) === "=") return false;
+    const k = pick(f); if (k === null) return false;
+    const ans = q.opts.every((o) => [">", "<", "="].includes(o)) ? (k === 0 ? ">" : "<") : F.txt(f[k]);
+    return q.opts[q.a] === ans;
+  };
+  return function problems(list) {
+    const out = [];
+    list.filter((e) => e.kind === "steps").forEach((e) => {
+      const checks = e.steps.filter((s) => s.check).map((s) => s.check), prac = e.practice || [];
+      if (checks.length >= 3 && checks.every((q) => q.a === 0)) out.push(e.id + "：確認題的正解全是第一個選項（前端不打亂選項）");
+      const n = prac.length, w = Math.min(3, n);
+      if (!n) return;
+      const all = { "一律選第一個": (q) => q.a === 0, "一律選第二個": (q) => q.a === 1 };
+      if (e.subject === "數學") Object.keys(rules).forEach((name) => { all[name] = (q) => rightBy(q, rules[name]); });
+      Object.keys(all).forEach((name) => {
+        for (let s = 0; s < n; s++) {
+          const win = Array.from({ length: w }, (_, i) => (s + i) % n);
+          if (win.every((i) => all[name](prac[i]))) { out.push(e.id + "：練習第 " + win.map((i) => i + 1).join("、") + " 題連續答對只靠「" + name + "」就做得到"); break; }
+        }
+      });
+    });
+    return out;
+  };
+})();
+
+test("快篩：作答不能用同一個表面捷徑拿到「學會」（一律選第一或第二個；比大小的四種錯規則）", () => {
+  assert.deepEqual(SHORTCUTS(H.LIST), []);
+  // 判準自檢：上過線的兩版 p40-2-5 練習題（b3daf54、0bea6d9），都要被抓到
+  const v = (practice, checksA) => { const e = JSON.parse(JSON.stringify(H.get("p40-2-5"))); e.practice = practice; if (checksA) e.steps.forEach((s) => { if (s.check) { s.check.opts = [s.check.opts[s.check.a]].concat(s.check.opts.filter((_, i) => i !== s.check.a)); s.check.a = 0; } }); return e; };
+  const q = (t, opts, a) => ({ q: t, opts: opts, a: a, why: opts.map(() => "") });
+  const b3 = [q("11/10 和 13/12，哪一個比較大？", ["11/10", "13/12"], 0), q("8/7 和 6/5，哪一個比較大？", ["8/7", "6/5"], 1), q("21/20 □ 16/15，□ 要填什麼？", [">", "<"], 1), q("4/3 和 9/8，哪一個比較大？", ["4/3", "9/8"], 0)];
+  const got1 = SHORTCUTS([v(b3, true)]);
+  assert.ok(got1.some((p) => /確認題的正解全是第一個/.test(p)) && got1.some((p) => /「選數字小的」/.test(p)), "b3daf54 版要抓到：" + got1.join("；"));
+  const bea = [b3[0], q("26/25 和 53/50，哪一個比較大？", ["26/25", "53/50"], 1), b3[1], b3[2], q("6/5 和 13/10，哪一個比較大？", ["6/5", "13/10"], 1), b3[3]];
+  const got2 = SHORTCUTS([v(bea, false)]);
+  assert.ok(got2.some((p) => /都只多 1 就選數字小的/.test(p)) && got2.some((p) => /多出來的分子大的比較大/.test(p)) && !got2.some((p) => /「選數字小的」/.test(p)), "0bea6d9 版要抓到 Opus 第 2 輪那兩條、且不再是「選數字小的」：" + got2.join("；"));
 });
 
 test("審稿模型不得比原設計弱：2026-10-15 起 readReview.by 只能是 codex 或 claude-opus", () => {
