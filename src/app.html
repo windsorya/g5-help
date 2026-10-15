@@ -945,8 +945,8 @@ window.G5HelpPage = {state:function(id){ return JSON.parse(JSON.stringify(DB.ent
       if (stale()) return;
       MINE_APPLIED = mySeq;
       if (!r || !r.ok) { $("#upHealth").textContent = "進度暫時讀不到，稍後再看。"; return; }
-      var ago = r.lastFetch ? Math.round((Date.now() - r.lastFetch) / 60000) : null;
-      $("#upHealth").innerHTML = ago === null ? "電腦還沒取過題目。" : ago <= 10 ? "電腦運作正常（上次取題 " + hhmm(r.lastFetch) + "，每分鐘取一次）。"
+      var hl = window.G5UpProgress.health(r.lastFetch, Date.now()), ago = hl.ago;
+      $("#upHealth").innerHTML = hl.state === "never" ? "電腦還沒取過題目。" : hl.state === "ok" ? "電腦運作正常（上次取題 " + hhmm(r.lastFetch) + "，每分鐘取一次）。"
         : '<span style="color:var(--bad)">電腦已經 ' + ago + ' 分鐘沒取題（上次 ' + hhmm(r.lastFetch) + '）：可能關機、睡眠或故障，題目會等電腦開機後再處理。</span>';
       LAST = r; render(r);
     }).catch(function(){ fin(); if (!stale()) $("#upHealth").textContent = "進度暫時讀不到（可能沒有網路），稍後再看。"; });

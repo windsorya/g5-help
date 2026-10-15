@@ -20,13 +20,20 @@
       // 電腦從沒取過題目＝不知道它在不在跑，不承諾時間（舊版用「現在＋10 分」會每次打開都往後順延）
       if (!num(lastFetch)) return { pct: 33, text: "已送出，等電腦取回" };
       var due = lastFetch + FETCH_EVERY;
-      return { pct: 33, text: due >= now ? "已送出，最晚 " + hhmm(due) + " 前電腦會取回" : "已送出，等電腦取回" };
+      // 顯示要無條件進位到下一分鐘：截秒會把 14:01:30 寫成「14:01 前」＝已經過去的時間（Codex 審 27b7d84）
+      return { pct: 33, text: due >= now ? "已送出，最晚 " + hhmm(Math.ceil(due / MIN) * MIN) + " 前電腦會取回" : "已送出，等電腦取回" };
     }
     var start = num(it.time) ? it.time : now, total = estimate(items), eta = start + total;
     if (now > eta) return { pct: 95, text: "製作中，比預期久（可能在等電腦上的 Claude 視窗開著）" };
     var pct = 66 + Math.floor(29 * Math.max(0, now - start) / total);
     return { pct: Math.min(95, pct), text: "製作中，預計 " + hhmm(eta) + " 前做好" };
   }
-  var api = { view: view, estimate: estimate, hhmm: hhmm };
+  // 電腦健康：每分鐘取一次，超過 HEALTH_LATE 沒取＝至少漏了兩輪，就要警告（Codex 審 27b7d84：沿用 10 分容忍窗＝停了 10 分鐘還說正常）
+  var HEALTH_LATE = 3 * MIN;   // cap-why: 取題 StartInterval 60 秒＋一輪網路失敗重試的餘裕
+  function health(lastFetch, now) {
+    if (!num(lastFetch)) return { state: "never" };
+    return { state: now - lastFetch <= HEALTH_LATE ? "ok" : "late", ago: Math.round((now - lastFetch) / MIN) };
+  }
+  var api = { view: view, estimate: estimate, hhmm: hhmm, health: health };
   if (typeof module !== "undefined" && module.exports) module.exports = api; else root.G5UpProgress = api;
 })(typeof window !== "undefined" ? window : this);

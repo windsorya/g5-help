@@ -15,7 +15,20 @@ test('時間一律用台北時間顯示', () => {
 test('已送出：33%，顯示最晚幾點前電腦會取回（上次取題＋1 分）', () => {
   const v = P.view({ status: 'new', time: T0 }, [], T0 + 30000, T0 + MIN);
   assert.equal(v.pct, 33);
-  assert.match(v.text, /最晚 14:01 前/);
+  assert.match(v.text, /最晚 14:02 前/);   // 14:01:30 到期 ⇒ 進位顯示 14:02，不能顯示已過去的 14:01（Codex 審 27b7d84）
+});
+
+test('最晚取回時間剛好整分不進位；有秒數一律進位到下一分', () => {
+  assert.match(P.view({ status: 'new', time: T0 }, [], T0, T0 + 10000).text, /最晚 14:01 前/);
+  assert.match(P.view({ status: 'new', time: T0 }, [], T0 + 1000, T0 + 10000).text, /最晚 14:02 前/);
+});
+
+test('電腦健康：3 分鐘內取過＝正常；超過＝警告；從沒取過另說（Codex 審 27b7d84：停 10 分鐘還說正常）', () => {
+  assert.equal(P.health(T0, T0 + 3 * MIN).state, 'ok');
+  assert.equal(P.health(T0, T0 + 3 * MIN + 1000).state, 'late');
+  assert.equal(P.health(T0, T0 + 10 * MIN + 29000).state, 'late');
+  assert.equal(P.health(T0, T0 + 10 * MIN + 29000).ago, 10);
+  for (const x of [0, null, undefined, NaN]) assert.equal(P.health(x, T0).state, 'never');
 });
 
 // Codex 審 5367999：電腦從沒取過題目（lastFetch=0）時舊版用「現在＋10 分」，每次打開都往後順延、永遠不會過期。
