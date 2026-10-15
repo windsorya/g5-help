@@ -232,7 +232,7 @@ def steps_cases(B, eid):
         assert r.pg.locator("#practice .qtext").inner_text().strip() == pq["q"].strip(), f"{eid} 第 {again + 1} 題應該是題庫第 {n + 1} 題再出現"
         tap(r.pg, r.pg.locator(f'#practice .chip[data-k="{pq["a"]}"]')); r.snap("以前答錯過、這次答對")
         st = r.pg.evaluate("(id) => G5HelpPage.state(id)", eid)
-        if "之前看過答案" in r.pg.locator("#pend").inner_text() and st["streak"] == 0 and not st["mastered"]:
+        if "之前看過答案" in r.pg.locator("#pend").inner_text() and st["streak"] == 2 and not st["mastered"]:   # 中性：不加不歸零
             r.mark(f"{eid}:revisit")
         B.absorb(r.close(), [f"{eid}:revisit"])
         # 題庫每一題都看過答案（#2288）：出現請家長加新題的提示（採字，過小五用詞閘）；只看過一部分時不出現

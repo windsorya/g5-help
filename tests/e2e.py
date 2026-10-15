@@ -1003,6 +1003,13 @@ def flow_peek_sync(browser):
     ok = pa.evaluate("(raw) => G5HelpApplyRemote('g5help.v1', raw)", cleared); pa.wait_for_timeout(500)
     sc = pa.evaluate("G5HelpPage.state('p40-2-5')")
     check("看過P6 換上已清除的那份：不把 K1、K2 帶回來", ok and "peek" not in (sc or {}) and "peek" not in json.loads(pa.evaluate("localStorage.getItem('g5help.v1')"))["entries"]["p40-2-5"], sc)
+    # Opus 審 e84b623 B1 的反例：別台清除後又練了 1 題（solved=1、新世代 g）⇒ 不把 K1、K2 帶回來
+    pa.evaluate("(raw) => G5HelpApplyRemote('g5help.v1', raw)", json.dumps({"v": 1, "entries": {"p40-2-5": dict(ent(9, {K1: 100, K2: 200}), g=1000)}, "hidden": {}}))
+    pa.wait_for_timeout(500)
+    again = json.dumps({"v": 1, "entries": {"p40-2-5": dict(ent(1, {}), g=2000, peek=None)}, "hidden": {}})
+    ok = pa.evaluate("(raw) => G5HelpApplyRemote('g5help.v1', raw)", again); pa.wait_for_timeout(500)
+    sr = pa.evaluate("G5HelpPage.state('p40-2-5')")
+    check("看過P7 別台清除後又練 1 題（新世代）：不把 K1、K2 帶回來", ok and (sr or {}).get("solved") == 1 and "peek" not in (sr or {}), sr)
     check("看過 沒有 JS 錯誤", not errors, errors)
     a.close(); b.close()
 
@@ -1131,6 +1138,7 @@ def main():
         flow_hide(wk, "WebKit")
         flow_delete(wk, "WebKit")
         flow_clear(wk, "WebKit")
+        flow_peek_sync(wk)   # Opus 審 e84b623：commit 寫兩個瀏覽器，原本只在 Chromium 跑
         if BASE.startswith("https:"):
             flow_video_live(wk, "線上iPad", ipad)
         wk.close()

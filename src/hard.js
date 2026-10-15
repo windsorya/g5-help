@@ -212,7 +212,8 @@
   function norm(s) {
     s = String(s == null ? "" : s);
     if (s.normalize) s = s.normalize("NFKC");
-    return s.replace(/<[^>]*>/g, "").replace(/[\s，。、？！：；,.?!:;「」『』“”"']/g, "");
+    // 數字之間的空白、小數點有意義（帶分數 1 1/2 ≠ 11/2、1.5 ≠ 15，Opus 審 e84b623 B10）：先把數字間空白收成一個「_」再刪其他空白
+    return s.replace(/<[^>]*>/g, "").replace(/(\d)\s+(?=\d)/g, "$1_").replace(/[\s，。、？！：；,?!:;「」『』“”"']/g, "");
   }
   function cyrb53(str) {   // 53 位元字串雜湊（公開演算法，bryc/code cyrb53）；不需加密強度，只要穩定、碰撞機率低
     var h1 = 0xdeadbeef, h2 = 0x41c6ce57;
@@ -261,12 +262,14 @@
     }
     return all.length > 0;
   }
-  // 選擇題答對後計分（頁面 choicePractice 與 node 測試共用同一份）：一次就對、而且以前沒看過答案，才算進連續答對
+  // 選擇題答對後計分（頁面 choicePractice 與 node 測試共用同一份）：一次就對、而且以前沒看過答案，才算進連續答對；看過答案的題不加不減
   function scoreChoice(e, st, wrongs, need, now) {
     var idx = st.idx, clean = wrongs === 0, seen = shownBefore(e, st, idx), counts = clean && !seen;
     if (!clean) notePeek(e, st, idx, now);
     st.solved++;
-    if (counts) { st.clean++; st.streak++; } else st.streak = 0;
+    // 看過答案的題答對＝中性：不加、也不歸零（Opus 審 e84b623 B2：歸零的話只要 6/18 題看過答案，兩套換數字題輪流出、
+    // 每連續 3 題必碰到一題看過的，就永遠學不會）。學會＝連續 3 題沒看過答案的題都一次選對；答錯照樣歸零。
+    if (counts) { st.clean++; st.streak++; } else if (!clean) st.streak = 0;
     st.idx++; st.cur = null;
     if (st.streak >= need) st.mastered = true;
     var l = { t: now, q: idx, clean: clean, wrongs: wrongs }, k = tracksPeek(e) ? practiceId(practiceAt(e, idx)) : null;

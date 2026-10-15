@@ -252,7 +252,8 @@ function readDisk(){
 }
 function loadDB(){ var d = readDisk(); return {v:1, entries:d.ok ? d.entries : Object.create(null), hidden:d.ok ? d.hidden : noHidden(), deleted:d.ok ? d.deleted : noHidden(), readOk:d.ok}; }
 var DB = loadDB(), st = null, NOTICE = "", GEN = 0;
-function stateOf(id){ if (!own(DB.entries, id)) DB.entries[id] = fresh(); return DB.entries[id]; }
+function newEntry(){ var f = fresh(); f.g = Date.now(); return f; }   // g＝這篇紀錄的世代（src/helpdoc.js clean1）
+function stateOf(id){ if (!own(DB.entries, id)) DB.entries[id] = newEntry(); return DB.entries[id]; }
 function dirtyCount(){ return Object.keys(DIRTY).length; }
 // 舊畫面守門（Codex 第 6 輪：重播舊 handler 會改到別篇或把記憶體換回磁碟）：綁定時記下畫面世代 GEN（和這一題的 cur），
 // 執行時世代變了、或這一題已計分換題、或還沒讀成功，就什麼都不做。所有會改進度或切畫面的按鈕都走這裡。
@@ -305,8 +306,8 @@ function applyRemote(key, raw){
   GEN++; ARM = null; DB = {v:1, entries:doc.entries, hidden:doc.hidden, deleted:doc.deleted, readOk:true}; drawHome();   // 寫進去了就一定採用：記憶體與磁碟一致（Codex 第 6 輪必修 1）；隱藏清單跟著換
   var back; try { back = localStorage.getItem(KEY); } catch (e) { back = null; }
   // 換上雲端那份之後，把這台原本記得的看過答案併回去（取聯集，交辦 #2282）：sync 要求讀回與雲端原文一字不差，所以先照原文寫、
-  // 下一個事件迴圈才併、存；sync 下一輪看到本機與基準版本不同就把聯集版傳上去。只併進對方有作答的篇——
-  // 家長在別台清除或刪除過的篇（solved＝0）不把看過紀錄帶回來。
+  // 下一個事件迴圈才併、存；sync 下一輪看到本機與基準版本不同就把聯集版傳上去。只併同一世代（g）、對方有作答的篇——
+  // 家長在別台清除或刪除過、之後又練了幾題的篇，g 不同，不把看過紀錄帶回來。
   setTimeout(function(){ mergePeek(prev); }, 0);
   return back === raw;   // 讀回失敗只告訴 sync「下次再確認」，sync 下一輪看到本機＝雲端會只補 baseline
 }
@@ -314,7 +315,7 @@ function mergePeek(prev){
   var added = false;
   Object.keys(prev || {}).forEach(function(id){
     var cur = own(DB.entries, id) ? DB.entries[id] : null, old = prev[id];
-    if (!cur || !old || !old.peek || !(cur.solved > 0)) return;
+    if (!cur || !old || !old.peek || !(cur.solved > 0) || (cur.g || 0) !== (old.g || 0)) return;   // 不同世代＝其中一台清除或刪除過，不併
     if (DOC.unionPeek(cur, old.peek)) { DIRTY[id] = true; added = true; }
   });
   if (added) save();
@@ -747,7 +748,7 @@ function setHidden(h){ DB.hidden = h; arm(null); homeSave("#hidden"); }
 function deleteEntry(id){
   var r = DOC.remove(hidOf(), delOf(), id, Date.now());
   DB.hidden = r.hidden; DB.deleted = r.deleted;
-  if (own(DB.entries, id)) DB.entries[id] = fresh();
+  if (own(DB.entries, id)) DB.entries[id] = newEntry();
   arm(null); homeSave("#deleted");
 }
 function clearAllRecords(){

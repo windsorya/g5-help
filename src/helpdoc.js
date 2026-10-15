@@ -31,6 +31,9 @@
     // 正在做的那一題：看過提示、答錯過幾次（Codex 2026-10-12 第 1 輪必修 1、2：重開練習不能洗掉、不能重複計分）
     if (s.cur && nat(s.cur.idx) && nat(s.cur.hints) && nat(s.cur.wrongs)) d.cur = {idx: s.cur.idx, hints: s.cur.hints, wrongs: s.cur.wrongs};
     // peek：看過答案的題（src/hard.js notePeek，交辦 #2282）。只有至少一筆合法時才寫出——沒有這欄的舊存檔讀進來再寫出去一字不差
+    // g：這篇紀錄是哪一次建立的（建立時間 ms；家長清除、刪除後重建會換新值）。兩台同步併 peek 只併同一個 g 的——
+    // 清除過的篇不會被另一台的舊紀錄復活（Opus 審 e84b623 B1）。舊存檔沒有 g＝0，同樣只寫出有的
+    if (stamp(s.g) && s.g > 0) d.g = s.g;
     var pk = cleanPeek(s.peek);
     if (Object.keys(pk).length) d.peek = pk;
     return d;

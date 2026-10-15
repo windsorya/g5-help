@@ -365,6 +365,9 @@ details p{margin:0 0 10px}
     // 正在做的那一題：看過提示、答錯過幾次（Codex 2026-10-12 第 1 輪必修 1、2：重開練習不能洗掉、不能重複計分）
     if (s.cur && nat(s.cur.idx) && nat(s.cur.hints) && nat(s.cur.wrongs)) d.cur = {idx: s.cur.idx, hints: s.cur.hints, wrongs: s.cur.wrongs};
     // peek：看過答案的題（src/hard.js notePeek，交辦 #2282）。只有至少一筆合法時才寫出——沒有這欄的舊存檔讀進來再寫出去一字不差
+    // g：這篇紀錄是哪一次建立的（建立時間 ms；家長清除、刪除後重建會換新值）。兩台同步併 peek 只併同一個 g 的——
+    // 清除過的篇不會被另一台的舊紀錄復活（Opus 審 e84b623 B1）。舊存檔沒有 g＝0，同樣只寫出有的
+    if (stamp(s.g) && s.g > 0) d.g = s.g;
     var pk = cleanPeek(s.peek);
     if (Object.keys(pk).length) d.peek = pk;
     return d;
@@ -665,7 +668,8 @@ details p{margin:0 0 10px}
   function norm(s) {
     s = String(s == null ? "" : s);
     if (s.normalize) s = s.normalize("NFKC");
-    return s.replace(/<[^>]*>/g, "").replace(/[\s，。、？！：；,.?!:;「」『』“”"']/g, "");
+    // 數字之間的空白、小數點有意義（帶分數 1 1/2 ≠ 11/2、1.5 ≠ 15，Opus 審 e84b623 B10）：先把數字間空白收成一個「_」再刪其他空白
+    return s.replace(/<[^>]*>/g, "").replace(/(\d)\s+(?=\d)/g, "$1_").replace(/[\s，。、？！：；,?!:;「」『』“”"']/g, "");
   }
   function cyrb53(str) {   // 53 位元字串雜湊（公開演算法，bryc/code cyrb53）；不需加密強度，只要穩定、碰撞機率低
     var h1 = 0xdeadbeef, h2 = 0x41c6ce57;
@@ -714,12 +718,14 @@ details p{margin:0 0 10px}
     }
     return all.length > 0;
   }
-  // 選擇題答對後計分（頁面 choicePractice 與 node 測試共用同一份）：一次就對、而且以前沒看過答案，才算進連續答對
+  // 選擇題答對後計分（頁面 choicePractice 與 node 測試共用同一份）：一次就對、而且以前沒看過答案，才算進連續答對；看過答案的題不加不減
   function scoreChoice(e, st, wrongs, need, now) {
     var idx = st.idx, clean = wrongs === 0, seen = shownBefore(e, st, idx), counts = clean && !seen;
     if (!clean) notePeek(e, st, idx, now);
     st.solved++;
-    if (counts) { st.clean++; st.streak++; } else st.streak = 0;
+    // 看過答案的題答對＝中性：不加、也不歸零（Opus 審 e84b623 B2：歸零的話只要 6/18 題看過答案，兩套換數字題輪流出、
+    // 每連續 3 題必碰到一題看過的，就永遠學不會）。學會＝連續 3 題沒看過答案的題都一次選對；答錯照樣歸零。
+    if (counts) { st.clean++; st.streak++; } else if (!clean) st.streak = 0;
     st.idx++; st.cur = null;
     if (st.streak >= need) st.mastered = true;
     var l = { t: now, q: idx, clean: clean, wrongs: wrongs }, k = tracksPeek(e) ? practiceId(practiceAt(e, idx)) : null;
@@ -834,7 +840,8 @@ function readDisk(){
 }
 function loadDB(){ var d = readDisk(); return {v:1, entries:d.ok ? d.entries : Object.create(null), hidden:d.ok ? d.hidden : noHidden(), deleted:d.ok ? d.deleted : noHidden(), readOk:d.ok}; }
 var DB = loadDB(), st = null, NOTICE = "", GEN = 0;
-function stateOf(id){ if (!own(DB.entries, id)) DB.entries[id] = fresh(); return DB.entries[id]; }
+function newEntry(){ var f = fresh(); f.g = Date.now(); return f; }   // g＝這篇紀錄的世代（src/helpdoc.js clean1）
+function stateOf(id){ if (!own(DB.entries, id)) DB.entries[id] = newEntry(); return DB.entries[id]; }
 function dirtyCount(){ return Object.keys(DIRTY).length; }
 // 舊畫面守門（Codex 第 6 輪：重播舊 handler 會改到別篇或把記憶體換回磁碟）：綁定時記下畫面世代 GEN（和這一題的 cur），
 // 執行時世代變了、或這一題已計分換題、或還沒讀成功，就什麼都不做。所有會改進度或切畫面的按鈕都走這裡。
@@ -887,8 +894,8 @@ function applyRemote(key, raw){
   GEN++; ARM = null; DB = {v:1, entries:doc.entries, hidden:doc.hidden, deleted:doc.deleted, readOk:true}; drawHome();   // 寫進去了就一定採用：記憶體與磁碟一致（Codex 第 6 輪必修 1）；隱藏清單跟著換
   var back; try { back = localStorage.getItem(KEY); } catch (e) { back = null; }
   // 換上雲端那份之後，把這台原本記得的看過答案併回去（取聯集，交辦 #2282）：sync 要求讀回與雲端原文一字不差，所以先照原文寫、
-  // 下一個事件迴圈才併、存；sync 下一輪看到本機與基準版本不同就把聯集版傳上去。只併進對方有作答的篇——
-  // 家長在別台清除或刪除過的篇（solved＝0）不把看過紀錄帶回來。
+  // 下一個事件迴圈才併、存；sync 下一輪看到本機與基準版本不同就把聯集版傳上去。只併同一世代（g）、對方有作答的篇——
+  // 家長在別台清除或刪除過、之後又練了幾題的篇，g 不同，不把看過紀錄帶回來。
   setTimeout(function(){ mergePeek(prev); }, 0);
   return back === raw;   // 讀回失敗只告訴 sync「下次再確認」，sync 下一輪看到本機＝雲端會只補 baseline
 }
@@ -896,7 +903,7 @@ function mergePeek(prev){
   var added = false;
   Object.keys(prev || {}).forEach(function(id){
     var cur = own(DB.entries, id) ? DB.entries[id] : null, old = prev[id];
-    if (!cur || !old || !old.peek || !(cur.solved > 0)) return;
+    if (!cur || !old || !old.peek || !(cur.solved > 0) || (cur.g || 0) !== (old.g || 0)) return;   // 不同世代＝其中一台清除或刪除過，不併
     if (DOC.unionPeek(cur, old.peek)) { DIRTY[id] = true; added = true; }
   });
   if (added) save();
@@ -1329,7 +1336,7 @@ function setHidden(h){ DB.hidden = h; arm(null); homeSave("#hidden"); }
 function deleteEntry(id){
   var r = DOC.remove(hidOf(), delOf(), id, Date.now());
   DB.hidden = r.hidden; DB.deleted = r.deleted;
-  if (own(DB.entries, id)) DB.entries[id] = fresh();
+  if (own(DB.entries, id)) DB.entries[id] = newEntry();
   arm(null); homeSave("#deleted");
 }
 function clearAllRecords(){

@@ -441,3 +441,40 @@ test("S7 題庫每一題都看過答案才算學不會（allSeen，交辦 #2288�
   const plainE = H.LIST.find((e) => (e.practice || []).length && !(e.practiceAlt || []).length);
   assert.equal(H.allSeen(plainE, { peek: {}, log: [] }), false, "沒有換數字題的篇不提示");
 });
+
+test("S8 只看過一部分題目的答案不會永遠學不會：看過答案的題答對不加不減（Opus 審 e84b623 B2）", () => {
+  // 反例：第 3、6、9、12、15、18 題各答錯一次，其餘一次就對；之後全部一次就選對
+  const st = DOC.fresh();
+  let t = 1, at = -1;
+  for (let i = 0; i < 400 && !st.mastered; i++) {
+    const w = i < 18 && i % 3 === 2 ? 1 : 0;
+    if (w) H.notePeek(P, st, st.idx, t);
+    H.scoreChoice(P, st, w, need3, t++);
+    if (st.mastered) at = i + 1;
+  }
+  assert.equal(Object.keys(st.peek).length, 6);
+  assert.ok(st.mastered && at > 18 && at <= 30, "看過 6 題答案後，連續 3 題新題一次選對就學會（實際第 " + at + " 題）");
+  // 中性：看過答案的題答對，streak 不變；答錯照樣歸零
+  const s2 = DOC.fresh(); s2.peek = { [H.practiceId(H.practiceAt(P, 0))]: 1 }; s2.streak = 2;
+  const r = H.scoreChoice(P, s2, 0, need3, 9);
+  assert.equal(r.counts, false); assert.equal(s2.streak, 2, "看過答案的題答對：不加也不歸零"); assert.equal(s2.mastered, false);
+  const s3 = DOC.fresh(); s3.streak = 2; H.scoreChoice(P, s3, 1, need3, 9);
+  assert.equal(s3.streak, 0, "答錯照樣歸零");
+});
+
+test("S9 log 兜底路徑：scoreChoice 寫的 log 帶 k；只有 clean:false 的 k 算看過（Opus 審 e84b623 C 兩個漏網突變）", () => {
+  const st = DOC.fresh();
+  H.scoreChoice(P, st, 0, need3, 1); H.scoreChoice(P, st, 1, need3, 2);
+  assert.equal(st.log[0].k, H.practiceId(H.practiceAt(P, 0)), "一次就對的那筆也帶 k");
+  assert.equal(st.log[1].k, H.practiceId(H.practiceAt(P, 1)));
+  delete st.peek;   // 舊版頁面存檔丟掉 peek 的情境：只剩 log
+  assert.equal(H.shownBefore(P, st, 0), false, "一次就對、帶 k 的 log 不能被當成看過答案");
+  assert.equal(H.shownBefore(P, st, 1), true, "答錯過、帶 k 的 log 要擋");
+});
+
+test("S10 題目鍵：帶分數、小數點不會和別的數字撞鍵（Opus 審 e84b623 B10）", () => {
+  const q = (t) => ({ q: t, opts: ["a", "b"], a: 0 });
+  assert.notEqual(H.practiceId(q("1 1/2 和 2/3 哪個大？")), H.practiceId(q("11/2 和 2/3 哪個大？")));
+  assert.notEqual(H.practiceId(q("1.5 和 2 哪個大？")), H.practiceId(q("15 和 2 哪個大？")));
+  assert.equal(H.practiceId(q("1  1/2 和 2/3 哪個大？")), H.practiceId(q("1 1/2和 2/3哪個大？")), "數字間空白幾格、文字旁空白都不影響");
+});

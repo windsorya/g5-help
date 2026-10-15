@@ -210,3 +210,9 @@ test("H20 兩台同步合併：unionPeek 取聯集、同題留較早時間、沒
   const full = {peek: {}}; for (let i = 0; i < 256; i++) full.peek[KK(i + 10)] = 1000 + i;
   assert.equal(D.unionPeek(full, {[KK(1)]: 1}), false);
 });
+
+test("H21 紀錄世代 g：clean1 保留合法的 g、壞的丟掉；沒有 g 的舊存檔不多寫（Opus 審 e84b623 B1）", () => {
+  assert.equal(D.clean1({solved: 1, g: 1760000000000}).g, 1760000000000);
+  [0, -1, 1.5, "x", null].forEach((bad) => assert.equal(D.clean1({solved: 1, g: bad}).g, undefined));
+  assert.equal("g" in D.clean1({solved: 1}), false);
+});
