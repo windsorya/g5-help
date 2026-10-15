@@ -49,7 +49,7 @@ ship)
   [[ -z ${dirty} ]] || { print -r -- "下列改動還沒 commit（commit 要含 src、重建後的 index.html、tests/kidtext_harvest.json）：
 ${dirty}"; st "沒推"; exit 1 }
   ${PY} build.py > "${LOG}/build.log" 2>&1 || { cat "${LOG}/build.log"; exit 1 }
-  rebuilt=$(git status --porcelain -- index.html sync.js qrcode.js upload.js)
+  rebuilt=$(git status --porcelain --untracked-files=no -- index.html sync.js qrcode.js upload.js)
   [[ -z ${rebuilt} ]] || { print -r -- "commit 裡的 index.html 不是用現在的 src 建出來的（重建後有差異：${rebuilt}）——重跑 verify、把重建後的檔一起 commit"; st "沒推"; exit 1 }
   node --test tests/*.test.js > "${LOG}/node_ship.log" 2>&1 || { grep -E '^✖' "${LOG}/node_ship.log" | head -5; st "node 測試沒過（含採字結果是不是這一版 index.html 的）：沒推"; exit 1 }
   st "推前檢查通過：沒有未 commit 的改動、index.html 與 src 一致、node 全過"
