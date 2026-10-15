@@ -964,6 +964,49 @@ def flow_hide_sync(browser):
     a.close(); b.close()
 
 
+def flow_peek_sync(browser):
+    """看過答案 peek 跨裝置取聯集（交辦 #2282）：A 記得 K1、B 記得 K2 且練得較多；B 加入時留 B 那份（雲端少了 K1），
+    A 重開換上雲端那份後把 K1 併回去並上傳 ⇒ 雲端與兩台最後都有 K1、K2，之後不再來回上傳。另驗家長清除過的篇不把看過紀錄帶回來。"""
+    from e2e_sync import backend, STORE, EP as SEP
+    def dev(doc):
+        seed = ("if(!sessionStorage.getItem('pk')){sessionStorage.setItem('pk','1');localStorage.setItem('g5help.v1'," + json.dumps(json.dumps(doc)) + ");}")
+        c = browser.new_context(); c.add_init_script(FIXTURE + seed); c.route(lambda u: u.startswith(SEP), backend); return c
+    def ent(n, peek):
+        return {"lessonDone": True, "idx": n, "seed": 3, "streak": 0, "clean": 0, "solved": n, "mastered": False,
+                "log": [{"t": 10 + i, "q": i, "clean": True, "wrongs": 0} for i in range(n)], "cur": None, "r": 1, "peek": peek}
+    K1, K2 = "k" + "1" * 14, "k" + "2" * 14
+    errors = []
+    a = dev({"v": 1, "entries": {"p40-2-5": ent(4, {K1: 100})}}); pa = a.new_page(); pa.on("pageerror", lambda e: errors.append(str(e)))
+    pa.goto(HOME); pa.wait_for_function("window.G5HelpWriter && G5HelpWriter()")
+    pa.locator("#syncBox summary").click()
+    pa.get_by_role("button", name="開啟跨裝置同步", exact=False).click(); pa.wait_for_timeout(1500)
+    code = pa.evaluate("localStorage.getItem('g5sync.code')")
+    pa.wait_for_timeout(4500)
+    b = dev({"v": 1, "entries": {"p40-2-5": ent(9, {K2: 200})}}); pb = b.new_page(); pb.on("pageerror", lambda e: errors.append(str(e)))
+    pb.goto(HOME + "#sync=" + code); pb.wait_for_timeout(6000)
+    cloud = lambda: json.loads((STORE.get((code, "g5help.v1")) or (0, "{}"))[1] or "{}")
+    mid = cloud().get("entries", {}).get("p40-2-5", {})
+    check("看過P1 B 加入：練得多的 B 那份勝出（雲端 solved=9、只有 K2）", mid.get("solved") == 9 and mid.get("peek") == {K2: 200}, mid)
+    pa.reload(); pa.wait_for_timeout(9000)
+    c = cloud().get("entries", {}).get("p40-2-5", {})
+    check("看過P2 A 換上雲端那份後把 K1 併回去並上傳：雲端 peek＝K1＋K2、solved 仍是 9", c.get("peek") == {K1: 100, K2: 200} and c.get("solved") == 9, c)
+    sa = pa.evaluate("G5HelpPage.state('p40-2-5')")
+    check("看過P3 A 本機也是聯集", (sa or {}).get("peek") == {K1: 100, K2: 200}, sa)
+    pb.reload(); pb.wait_for_timeout(4000)
+    sb = pb.evaluate("G5HelpPage.state('p40-2-5')")
+    check("看過P4 B 重開也拿到聯集", (sb or {}).get("peek") == {K1: 100, K2: 200}, sb)
+    rev = (STORE.get((code, "g5help.v1")) or (0, ""))[0]
+    pa.wait_for_timeout(9000)
+    check("看過P5 收斂後不再來回上傳（9 秒內雲端版本號沒變）", (STORE.get((code, "g5help.v1")) or (0, ""))[0] == rev, (rev, STORE.get((code, "g5help.v1"))[0]))
+    # 家長在別台清除過（solved=0、沒有 peek）的篇：換上後不把這台記得的看過紀錄帶回來
+    cleared = json.dumps({"v": 1, "entries": {"p40-2-5": {"lessonDone": False, "idx": 0, "seed": 1, "streak": 0, "clean": 0, "solved": 0, "mastered": False, "log": [], "cur": None, "r": 9}}, "hidden": {}})
+    ok = pa.evaluate("(raw) => G5HelpApplyRemote('g5help.v1', raw)", cleared); pa.wait_for_timeout(500)
+    sc = pa.evaluate("G5HelpPage.state('p40-2-5')")
+    check("看過P6 換上已清除的那份：不把 K1、K2 帶回來", ok and "peek" not in (sc or {}) and "peek" not in json.loads(pa.evaluate("localStorage.getItem('g5help.v1')"))["entries"]["p40-2-5"], sc)
+    check("看過 沒有 JS 錯誤", not errors, errors)
+    a.close(); b.close()
+
+
 def flow_withdraw(browser):
     """「你傳的題目」每筆還沒做好的都能撤回（兩段式確認）；送 op=withdraw（code＋傳題 id），成功後清單不再列。後端以記憶體模擬。"""
     items = [{"id": "u1-1", "time": 1791868600000, "subject": "自然", "note": "【測試】銀葉樹的板根是什麼？", "status": "new", "url": "", "doneAt": 0},
@@ -1075,6 +1118,7 @@ def main():
         flow_delete(cr)
         flow_clear(cr)
         flow_hide_sync(cr)
+        flow_peek_sync(cr)
         flow_withdraw(cr)
         cr.close()
         wk = p.webkit.launch()

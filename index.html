@@ -364,7 +364,29 @@ details p{margin:0 0 10px}
     if (Array.isArray(s.log)) d.log = s.log.slice(-100);
     // 正在做的那一題：看過提示、答錯過幾次（Codex 2026-10-12 第 1 輪必修 1、2：重開練習不能洗掉、不能重複計分）
     if (s.cur && nat(s.cur.idx) && nat(s.cur.hints) && nat(s.cur.wrongs)) d.cur = {idx: s.cur.idx, hints: s.cur.hints, wrongs: s.cur.wrongs};
+    // peek：看過答案的題（src/hard.js notePeek，交辦 #2282）。只有至少一筆合法時才寫出——沒有這欄的舊存檔讀進來再寫出去一字不差
+    var pk = cleanPeek(s.peek);
+    if (Object.keys(pk).length) d.peek = pk;
     return d;
+  }
+  var PEEK_KEY = /^k[0-9a-f]{14}$/, PEEK_MAX = 256;   // 與 src/hard.js practiceId、PEEK_MAX 同規則
+  // 讀不懂的 peek（陣列、字串、壞鍵、壞時間）只丟那一部分；超過上限留時間最新的
+  function cleanPeek(p) {
+    var out = {};
+    if (!p || typeof p !== "object" || Array.isArray(p)) return out;
+    var ks = Object.keys(p).filter(function (k) { return PEEK_KEY.test(k) && stamp(p[k]); });
+    if (ks.length > PEEK_MAX) ks = ks.sort(function (a, b) { return p[b] - p[a]; }).slice(0, PEEK_MAX);
+    ks.sort().forEach(function (k) { out[k] = p[k]; });
+    return out;
+  }
+  // 兩台同步：把另一份記得的看過答案併進 st（取聯集、同一題留較早的時間）；有多出來的才回 true（呼叫端才需要再存）
+  function unionPeek(st, other) {
+    var add = cleanPeek(other), before = cleanPeek(st.peek), cur = cleanPeek(st.peek);
+    Object.keys(add).forEach(function (k) { if (!own(cur, k) || add[k] < cur[k]) cur[k] = add[k]; });
+    cur = cleanPeek(cur);   // 超過上限會丟最舊的：比的是丟完之後有沒有變，不然併進來又被丟的題會讓兩台一直互傳
+    if (JSON.stringify(cur) === JSON.stringify(before)) return false;
+    st.peek = cur;
+    return true;
   }
   function own(o, k) { return Object.prototype.hasOwnProperty.call(o, k); }
   function cleanHidden(h) {
@@ -423,7 +445,7 @@ details p{margin:0 0 10px}
   }
   // 清除全部作答紀錄：每一篇回到空白（之後打開時才用 fresh() 建）；隱藏與刪除清單照留（另有「恢復全部隱藏的篇」）
   function cleared(hidden, deleted) { return {entries: Object.create(null), hidden: cleanHidden(plain(hidden)), deleted: cleanHidden(plain(deleted))}; }
-  var api = {fresh: fresh, clean1: clean1, parse: parse, serialize: serialize, cleanHidden: cleanHidden, hide: hide, unhide: unhide, isHidden: isHidden, hiddenIn: hiddenIn, remove: remove, unhideAll: unhideAll, cleared: cleared, own: own, postIdOk: postIdOk};
+  var api = {fresh: fresh, clean1: clean1, parse: parse, serialize: serialize, cleanHidden: cleanHidden, hide: hide, unhide: unhide, isHidden: isHidden, hiddenIn: hiddenIn, remove: remove, unhideAll: unhideAll, cleared: cleared, own: own, postIdOk: postIdOk, cleanPeek: cleanPeek, unionPeek: unionPeek, PEEK_MAX: PEEK_MAX};
   if (typeof module !== "undefined" && module.exports) module.exports = api; else root.G5HelpDoc = api;
 })(typeof window !== "undefined" ? window : this);
 
@@ -635,14 +657,67 @@ details p{margin:0 0 10px}
   }
   // 依出題順序列出全部練習題（第 1 輪＋每一套換數字的題）：採字工具逐題走過、測試逐題驗算
   function practiceAll(e) { var out = (e.practice || []).slice(); (e.practiceAlt || []).forEach(function (s) { out = out.concat(s); }); return out; }
-  // 第 idx 題是題庫裡的哪一題（practiceAll 的位置）：同一題再出現時編號相同。前端用它認「這題以前答錯過、看過答案」（Codex 審 41b02fe，交辦 #2274）
-  function practiceKey(e, idx) {
-    var n = (e.practice || []).length, alt = e.practiceAlt || [];
-    if (!n) return -1;
-    var r = Math.floor(idx / n);
-    return r === 0 || !alt.length ? idx % n : n + ((r - 1) % alt.length) * n + idx % n;
+  // 「看過答案」改成直接存下來（Codex 審 556db59 FAIL 兩項，交辦 #2282；設計見 commit 說明）：
+  //   ①題目身分用內容，不用位置——改版換掉的題不會套到舊題的錯答（舊：practiceKey 依位置，換題後 5/4 和 17/14 被當成看過答案）；
+  //   ②存在每篇的 peek {題目鍵: 第一次看到答案的時間}，不靠 log 推——log 只留 100 筆，做到第 117 題舊錯答就被擠掉。
+  // 題目鍵只取「題幹＋正解文字」：改解說（why／ok）、調換選項順序、換錯誤選項都還是同一題；改數字或正解＝新題。
+  // 只改題幹措辭也會變新題（偏寬鬆）；tests/hard.test.js 的鍵快照讓這種改動現形，合理換題時照提示更新快照。
+  function norm(s) {
+    s = String(s == null ? "" : s);
+    if (s.normalize) s = s.normalize("NFKC");
+    return s.replace(/<[^>]*>/g, "").replace(/[\s，。、？！：；,.?!:;「」『』“”"']/g, "");
   }
-  var api = { LIST: LIST, get: get, SUBJECTS: SUBJECTS, KINDS: ["frac-compare", "steps"], gradeAt: gradeAt, readingAt: readingAt, READING: READING, HARD_WORDS: HARD_WORDS, practiceAt: practiceAt, practiceAll: practiceAll, practiceKey: practiceKey };
+  function cyrb53(str) {   // 53 位元字串雜湊（公開演算法，bryc/code cyrb53）；不需加密強度，只要穩定、碰撞機率低
+    var h1 = 0xdeadbeef, h2 = 0x41c6ce57;
+    for (var i = 0; i < str.length; i++) { var ch = str.charCodeAt(i); h1 = Math.imul(h1 ^ ch, 2654435761); h2 = Math.imul(h2 ^ ch, 1597334677); }
+    h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507); h1 ^= Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+    h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507); h2 ^= Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+    return 4294967296 * (2097151 & h2) + (h1 >>> 0);
+  }
+  function practiceId(q) {
+    if (!q || !q.opts) return null;
+    var h = cyrb53(norm(q.q) + "\u0001" + norm(q.opts[q.a])).toString(16);
+    while (h.length < 14) h = "0" + h;
+    return "k" + h;
+  }
+  var PEEK_MAX = 256;   // 每篇最多記幾題看過答案（超過丟最舊的）；與 src/helpdoc.js cleanPeek 同一個數
+  // 只有附換數字題（practiceAlt）的篇記看過答案：沒有新題可換的篇，算了會永遠學不會
+  function tracksPeek(e) { return !!(e && (e.practiceAlt || []).length); }
+  function ownKey(o, k) { return !!o && Object.prototype.hasOwnProperty.call(o, k); }
+  function shownBefore(e, st, idx) {
+    if (!tracksPeek(e)) return false;
+    var k = practiceId(practiceAt(e, idx));
+    if (!k) return false;
+    if (ownKey(st.peek, k)) return true;
+    // 舊分頁存檔時會丟掉 peek（舊版不認得），但 log 每筆照留：用 log 裡的 k 兜底
+    return (st.log || []).some(function (l) { return l && l.clean === false && l.k === k; });
+  }
+  // 答錯當下就記：看了解說再選對、或中途離開回來，這題都已看過答案
+  function notePeek(e, st, idx, now) {
+    if (!tracksPeek(e)) return false;
+    var k = practiceId(practiceAt(e, idx));
+    if (!k) return false;
+    var p = st.peek && typeof st.peek === "object" ? st.peek : (st.peek = {});
+    if (ownKey(p, k)) return false;
+    p[k] = now;
+    var ks = Object.keys(p);
+    if (ks.length > PEEK_MAX) ks.sort(function (a, b) { return p[a] - p[b]; }).slice(0, ks.length - PEEK_MAX).forEach(function (x) { delete p[x]; });
+    return true;
+  }
+  // 選擇題答對後計分（頁面 choicePractice 與 node 測試共用同一份）：一次就對、而且以前沒看過答案，才算進連續答對
+  function scoreChoice(e, st, wrongs, need, now) {
+    var idx = st.idx, clean = wrongs === 0, seen = shownBefore(e, st, idx), counts = clean && !seen;
+    if (!clean) notePeek(e, st, idx, now);
+    st.solved++;
+    if (counts) { st.clean++; st.streak++; } else st.streak = 0;
+    st.idx++; st.cur = null;
+    if (st.streak >= need) st.mastered = true;
+    var l = { t: now, q: idx, clean: clean, wrongs: wrongs }, k = tracksPeek(e) ? practiceId(practiceAt(e, idx)) : null;
+    if (k) l.k = k;
+    st.log.push(l); st.log = st.log.slice(-100);
+    return { clean: clean, seen: seen, counts: counts };
+  }
+  var api = { LIST: LIST, get: get, SUBJECTS: SUBJECTS, KINDS: ["frac-compare", "steps"], gradeAt: gradeAt, readingAt: readingAt, READING: READING, HARD_WORDS: HARD_WORDS, practiceAt: practiceAt, practiceAll: practiceAll, practiceId: practiceId, PEEK_MAX: PEEK_MAX, shownBefore: shownBefore, notePeek: notePeek, scoreChoice: scoreChoice };
   if (typeof module !== "undefined" && module.exports) module.exports = api; else root.G5Hard = api;
 })(typeof window !== "undefined" ? window : this);
 
@@ -798,9 +873,23 @@ function applyRemote(key, raw){
   if (!canReplace(key)) return false;
   var doc = DOC.parse(raw); if (!doc) return false;
   try { localStorage.setItem(KEY, raw); } catch (e) { return false; }   // 沒寫進去＝磁碟沒變，記憶體也不換
+  var prev = DB.entries;
   GEN++; ARM = null; DB = {v:1, entries:doc.entries, hidden:doc.hidden, deleted:doc.deleted, readOk:true}; drawHome();   // 寫進去了就一定採用：記憶體與磁碟一致（Codex 第 6 輪必修 1）；隱藏清單跟著換
   var back; try { back = localStorage.getItem(KEY); } catch (e) { back = null; }
+  // 換上雲端那份之後，把這台原本記得的看過答案併回去（取聯集，交辦 #2282）：sync 要求讀回與雲端原文一字不差，所以先照原文寫、
+  // 下一個事件迴圈才併、存；sync 下一輪看到本機與基準版本不同就把聯集版傳上去。只併進對方有作答的篇——
+  // 家長在別台清除或刪除過的篇（solved＝0）不把看過紀錄帶回來。
+  setTimeout(function(){ mergePeek(prev); }, 0);
   return back === raw;   // 讀回失敗只告訴 sync「下次再確認」，sync 下一輪看到本機＝雲端會只補 baseline
+}
+function mergePeek(prev){
+  var added = false;
+  Object.keys(prev || {}).forEach(function(id){
+    var cur = own(DB.entries, id) ? DB.entries[id] : null, old = prev[id];
+    if (!cur || !old || !old.peek || !(cur.solved > 0)) return;
+    if (DOC.unionPeek(cur, old.peek)) { DIRTY[id] = true; added = true; }
+  });
+  if (added) save();
 }
 
 // ---------- 互動元件 ----------
@@ -1184,17 +1273,12 @@ function choicePractice(){
   each(bs, function(bt){ bt.onclick = function(){
     if (g1 !== GEN || st.cur !== cur) return;   // 這題已計分或已切走：舊 handler 失效，不重複計分
     var k = +bt.dataset.k;
-    if (k !== q.a) { cur.wrongs++; save(); bt.classList.remove("shake"); void bt.offsetWidth; bt.classList.add("shake", "tried"); fb(out, false, (q.why && q.why[k]) || "再想想看。"); return; }
+    if (k !== q.a) { cur.wrongs++; H.notePeek(E, st, st.idx, Date.now()); save(); bt.classList.remove("shake"); void bt.offsetWidth; bt.classList.add("shake", "tried"); fb(out, false, (q.why && q.why[k]) || "再想想看。"); return; }
     each(bs, function(x){ x.disabled = true; }); bt.classList.add("picked"); fb(out, true, q.ok || "對了！");
-    var clean = cur.wrongs === 0, was = st.mastered;
-    // 有換數字題（practiceAlt）的篇：這題以前答錯過＝看過答案，這次答對不算進連續答對（Codex 審 41b02fe：題目重播時背答案就能拿到學會，交辦 #2274）。
-    // 從作答紀錄推（log 記第幾題、有沒有一次就對），不另加存檔欄位。沒有換數字題的篇照舊——沒有新題可換，算了會永遠學不會。
-    var key = H.practiceKey(E, st.idx), seenBefore = !!(E.practiceAlt || []).length && st.log.some(function(l){ return l && l.clean === false && H.practiceKey(E, l.q) === key; });
-    var counts = clean && !seenBefore;
-    st.solved++; if (counts) { st.clean++; st.streak++; } else st.streak = 0;
-    st.idx++; st.cur = null;
-    if (st.streak >= need()) st.mastered = true;
-    st.log.push({t:Date.now(), q:st.idx - 1, clean:clean, wrongs:cur.wrongs}); st.log = st.log.slice(-100);
+    var was = st.mastered;
+    // 有換數字題（practiceAlt）的篇：這題以前答錯過＝看過答案，這次答對不算進連續答對（交辦 #2274）。
+    // 「看過答案」直接存在 st.peek、題目身分用內容（src/hard.js scoreChoice／shownBefore；Codex 審 556db59：從只留 100 筆的 log 依位置推會失效，交辦 #2282）。
+    var r = H.scoreChoice(E, st, cur.wrongs, need(), Date.now()), clean = r.clean, counts = r.counts;
     var saved = save(), PE = $("#pend", P); PE.hidden = false;
     PE.innerHTML = (st.mastered && !was ? '<div class="win"><b class="t">這種題你會了！</b><span>連續 ' + need() + ' 題自己做對。回到' + esc(E.source) + '，把它寫完吧。</span></div>' :
       '<div class="fb ok">' + (counts ? "第一次就選對！連續 " + st.streak + " 題。" : clean ? "答對了！這題之前看過答案，這次不算進連續答對。" : "做完了！這題有改過答案，下一題試試一次選對。") + '</div>') +

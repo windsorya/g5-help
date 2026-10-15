@@ -222,9 +222,13 @@ def steps_cases(B, eid):
     if alts and n:
         again = n * (1 + len(alts))   # 第一套換數字題再出現的第一題（題庫編號＝n）
         r = Run(B, B.device, f"{eid}:revisit")
-        r.go(f"#h/{eid}"); r.seed(eid, fresh_state(lessonDone=True, idx=again, solved=again, streak=2, log=[{"t": 0, "q": n, "clean": False, "wrongs": 1}]))
-        tap(r.pg, r.pg.locator("#goPractice"))
+        r.go(f"#h/{eid}")
         pq = allp[n]
+        # 看過答案存在 peek、題目身分用內容（#2282）：鍵用頁面自己的 G5Hard.practiceId 算；另塞 100 筆一次就對的 log，證明擋法不靠 log
+        k = r.pg.evaluate("(q) => G5Hard.practiceId(q)", pq)
+        filler = [{"t": 10 + i, "q": n + 1, "clean": True, "wrongs": 0} for i in range(100)]
+        r.seed(eid, fresh_state(lessonDone=True, idx=again, solved=again, streak=2, log=filler, peek={k: 1}))
+        tap(r.pg, r.pg.locator("#goPractice"))
         assert r.pg.locator("#practice .qtext").inner_text().strip() == pq["q"].strip(), f"{eid} 第 {again + 1} 題應該是題庫第 {n + 1} 題再出現"
         tap(r.pg, r.pg.locator(f'#practice .chip[data-k="{pq["a"]}"]')); r.snap("以前答錯過、這次答對")
         st = r.pg.evaluate("(id) => G5HelpPage.state(id)", eid)

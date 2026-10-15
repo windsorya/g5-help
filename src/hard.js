@@ -204,13 +204,66 @@
   }
   // 依出題順序列出全部練習題（第 1 輪＋每一套換數字的題）：採字工具逐題走過、測試逐題驗算
   function practiceAll(e) { var out = (e.practice || []).slice(); (e.practiceAlt || []).forEach(function (s) { out = out.concat(s); }); return out; }
-  // 第 idx 題是題庫裡的哪一題（practiceAll 的位置）：同一題再出現時編號相同。前端用它認「這題以前答錯過、看過答案」（Codex 審 41b02fe，交辦 #2274）
-  function practiceKey(e, idx) {
-    var n = (e.practice || []).length, alt = e.practiceAlt || [];
-    if (!n) return -1;
-    var r = Math.floor(idx / n);
-    return r === 0 || !alt.length ? idx % n : n + ((r - 1) % alt.length) * n + idx % n;
+  // 「看過答案」改成直接存下來（Codex 審 556db59 FAIL 兩項，交辦 #2282；設計見 commit 說明）：
+  //   ①題目身分用內容，不用位置——改版換掉的題不會套到舊題的錯答（舊：practiceKey 依位置，換題後 5/4 和 17/14 被當成看過答案）；
+  //   ②存在每篇的 peek {題目鍵: 第一次看到答案的時間}，不靠 log 推——log 只留 100 筆，做到第 117 題舊錯答就被擠掉。
+  // 題目鍵只取「題幹＋正解文字」：改解說（why／ok）、調換選項順序、換錯誤選項都還是同一題；改數字或正解＝新題。
+  // 只改題幹措辭也會變新題（偏寬鬆）；tests/hard.test.js 的鍵快照讓這種改動現形，合理換題時照提示更新快照。
+  function norm(s) {
+    s = String(s == null ? "" : s);
+    if (s.normalize) s = s.normalize("NFKC");
+    return s.replace(/<[^>]*>/g, "").replace(/[\s，。、？！：；,.?!:;「」『』“”"']/g, "");
   }
-  var api = { LIST: LIST, get: get, SUBJECTS: SUBJECTS, KINDS: ["frac-compare", "steps"], gradeAt: gradeAt, readingAt: readingAt, READING: READING, HARD_WORDS: HARD_WORDS, practiceAt: practiceAt, practiceAll: practiceAll, practiceKey: practiceKey };
+  function cyrb53(str) {   // 53 位元字串雜湊（公開演算法，bryc/code cyrb53）；不需加密強度，只要穩定、碰撞機率低
+    var h1 = 0xdeadbeef, h2 = 0x41c6ce57;
+    for (var i = 0; i < str.length; i++) { var ch = str.charCodeAt(i); h1 = Math.imul(h1 ^ ch, 2654435761); h2 = Math.imul(h2 ^ ch, 1597334677); }
+    h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507); h1 ^= Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+    h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507); h2 ^= Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+    return 4294967296 * (2097151 & h2) + (h1 >>> 0);
+  }
+  function practiceId(q) {
+    if (!q || !q.opts) return null;
+    var h = cyrb53(norm(q.q) + "\u0001" + norm(q.opts[q.a])).toString(16);
+    while (h.length < 14) h = "0" + h;
+    return "k" + h;
+  }
+  var PEEK_MAX = 256;   // 每篇最多記幾題看過答案（超過丟最舊的）；與 src/helpdoc.js cleanPeek 同一個數
+  // 只有附換數字題（practiceAlt）的篇記看過答案：沒有新題可換的篇，算了會永遠學不會
+  function tracksPeek(e) { return !!(e && (e.practiceAlt || []).length); }
+  function ownKey(o, k) { return !!o && Object.prototype.hasOwnProperty.call(o, k); }
+  function shownBefore(e, st, idx) {
+    if (!tracksPeek(e)) return false;
+    var k = practiceId(practiceAt(e, idx));
+    if (!k) return false;
+    if (ownKey(st.peek, k)) return true;
+    // 舊分頁存檔時會丟掉 peek（舊版不認得），但 log 每筆照留：用 log 裡的 k 兜底
+    return (st.log || []).some(function (l) { return l && l.clean === false && l.k === k; });
+  }
+  // 答錯當下就記：看了解說再選對、或中途離開回來，這題都已看過答案
+  function notePeek(e, st, idx, now) {
+    if (!tracksPeek(e)) return false;
+    var k = practiceId(practiceAt(e, idx));
+    if (!k) return false;
+    var p = st.peek && typeof st.peek === "object" ? st.peek : (st.peek = {});
+    if (ownKey(p, k)) return false;
+    p[k] = now;
+    var ks = Object.keys(p);
+    if (ks.length > PEEK_MAX) ks.sort(function (a, b) { return p[a] - p[b]; }).slice(0, ks.length - PEEK_MAX).forEach(function (x) { delete p[x]; });
+    return true;
+  }
+  // 選擇題答對後計分（頁面 choicePractice 與 node 測試共用同一份）：一次就對、而且以前沒看過答案，才算進連續答對
+  function scoreChoice(e, st, wrongs, need, now) {
+    var idx = st.idx, clean = wrongs === 0, seen = shownBefore(e, st, idx), counts = clean && !seen;
+    if (!clean) notePeek(e, st, idx, now);
+    st.solved++;
+    if (counts) { st.clean++; st.streak++; } else st.streak = 0;
+    st.idx++; st.cur = null;
+    if (st.streak >= need) st.mastered = true;
+    var l = { t: now, q: idx, clean: clean, wrongs: wrongs }, k = tracksPeek(e) ? practiceId(practiceAt(e, idx)) : null;
+    if (k) l.k = k;
+    st.log.push(l); st.log = st.log.slice(-100);
+    return { clean: clean, seen: seen, counts: counts };
+  }
+  var api = { LIST: LIST, get: get, SUBJECTS: SUBJECTS, KINDS: ["frac-compare", "steps"], gradeAt: gradeAt, readingAt: readingAt, READING: READING, HARD_WORDS: HARD_WORDS, practiceAt: practiceAt, practiceAll: practiceAll, practiceId: practiceId, PEEK_MAX: PEEK_MAX, shownBefore: shownBefore, notePeek: notePeek, scoreChoice: scoreChoice };
   if (typeof module !== "undefined" && module.exports) module.exports = api; else root.G5Hard = api;
 })(typeof window !== "undefined" ? window : this);

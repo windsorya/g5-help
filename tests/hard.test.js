@@ -319,3 +319,114 @@ test("審稿模型不得比原設計弱：2026-10-15 起 readReview.by 只能是
   const STRONG = ["codex", "claude-opus"];
   H.LIST.filter((e) => e.date >= "2026-10-15").forEach((e) => assert.ok(e.readReview && STRONG.includes(e.readReview.by), e.id + " 的 readReview.by 是 " + (e.readReview && e.readReview.by) + "，要用 " + STRONG.join(" 或 ")));
 });
+
+// ---------- 看過答案（交辦 #2282；Codex 審 556db59 FAIL 兩項）：驗收矩陣 S1–S5 ----------
+const LEG_EFA = require("./fixtures/hard.legacy-efa05fe.js");   // git show efa05fe:src/hard.js（題目身分依位置的那一版）
+const LEG_556 = require("./fixtures/hard.legacy-556db59.js");   // git show 669fd69:src/hard.js（＝556db59 的題目內容）
+const P = H.get("p40-2-5");
+const need3 = 3;
+// efa05fe 的計分（從 app.html 原樣搬來，只用來證明測試真的會抓到 Codex 的反例）
+function oldScore(e, st, wrongs, Hx) {
+  const clean = wrongs === 0, key = Hx.practiceKey(e, st.idx);
+  const seen = !!(e.practiceAlt || []).length && st.log.some((l) => l && l.clean === false && Hx.practiceKey(e, l.q) === key);
+  const counts = clean && !seen;
+  st.solved++; if (counts) { st.clean++; st.streak++; } else st.streak = 0;
+  st.idx++; st.cur = null;
+  if (st.streak >= need3) st.mastered = true;
+  st.log.push({ t: 1, q: st.idx - 1, clean, wrongs }); st.log = st.log.slice(-100);
+}
+function drill(score) {   // Codex 的反例：前 18 題各錯一次再改對，之後全部照記住的答案一次選對，做到第 117 題
+  const st = DOC.fresh();
+  let t = 1000;
+  for (let i = 0; i < 117; i++) {
+    const w = i < H.practiceAll(P).length ? 1 : 0;
+    if (w) H.notePeek(P, st, st.idx, t);
+    score(st, w, t++);
+  }
+  return st;
+}
+
+test("S1 117 題記憶：log 被截到 100 筆後，看過答案的題仍不算進連續答對", () => {
+  const n = H.practiceAll(P).length;
+  assert.equal(n, 18, "p40-2-5 題庫應是 18 題（practice＋兩套換數字題）");
+  const st = drill((s, w, t) => H.scoreChoice(P, s, w, need3, t));
+  assert.equal(st.log.length, 100);
+  assert.equal(Object.keys(st.peek).length, 18, "18 題都記成看過答案");
+  assert.equal(st.streak, 0);
+  assert.equal(st.mastered, false, "照記憶作答不能拿到學會");
+  // 自我檢查：同一段操作用 efa05fe 的推法，要重現 Codex 的反例（第 117 題 mastered=true、streak=3）
+  const old = DOC.fresh();
+  for (let i = 0; i < 117; i++) oldScore(P, old, i < n ? 1 : 0, LEG_EFA);
+  assert.equal(old.mastered, true, "efa05fe 的推法應重現反例，否則本測試沒有鑑別力");
+  assert.equal(old.streak, 3);
+});
+
+test("S2 改版換題不誤判：efa05fe 舊題的錯答不套到內容不同的新題", () => {
+  const oldE = LEG_EFA.get("p40-2-5"), oldQ = LEG_EFA.practiceAt(oldE, 14), newQ = H.practiceAt(P, 14);
+  assert.match(newQ.q, /5\/4.*17\/14|17\/14.*5\/4/, "第 15 題現在是 5/4 和 17/14");
+  assert.notEqual(H.practiceId(oldQ), H.practiceId(newQ), "內容不同的題鍵要不同");
+  const st = DOC.fresh(); st.peek = { [H.practiceId(oldQ)]: 1 };
+  assert.equal(H.shownBefore(P, st, 14), false, "peek 裡舊題的鍵不套到新題");
+  const st2 = DOC.fresh(); st2.log = [{ t: 0, q: 14, clean: false, wrongs: 1 }];
+  assert.equal(H.shownBefore(P, st2, 14), false, "沒有 k 的舊 log（依位置記的）不拿來判斷");
+  // 對照：efa05fe 的位置推法會把它誤判成看過答案（Codex 的反例）
+  assert.equal(LEG_EFA.practiceKey(P, 14), LEG_EFA.practiceKey(oldE, 14));
+});
+
+test("S2a 題目鍵規則：同篇不重複；改解說、調換選項、換錯誤選項鍵不變；改數字或正解鍵改變", () => {
+  H.LIST.forEach((e) => {
+    const ks = H.practiceAll(e).filter((q) => q && q.opts).map(H.practiceId);
+    assert.equal(new Set(ks).size, ks.length, e.id + " 同一篇裡兩題的鍵相同（內容重複的題？）");
+    ks.forEach((k) => assert.match(k, /^k[0-9a-f]{14}$/));
+  });
+  const q = H.practiceAt(P, 0), k = H.practiceId(q);
+  const sw = { ...q, opts: q.opts.slice().reverse(), a: q.opts.length - 1 - q.a };
+  assert.equal(H.practiceId(sw), k, "調換選項順序");
+  assert.equal(H.practiceId({ ...q, why: ["x", "y", "z"], ok: "改過的解說" }), k, "改解說");
+  const other = q.opts.map((o, i) => (i === q.a ? o : o + "（換）"));
+  assert.equal(H.practiceId({ ...q, opts: other }), k, "換錯誤選項");
+  assert.equal(H.practiceId({ ...q, q: "<b>" + q.q + "</b> " }), k, "HTML 標籤、空白不影響");
+  assert.notEqual(H.practiceId({ ...q, q: q.q.replace(/\d/, (d) => String((+d + 1) % 10)) }), k, "改數字＝新題");
+  const opts2 = q.opts.slice(); opts2[q.a] = opts2[q.a] + "!x";
+  assert.notEqual(H.practiceId({ ...q, opts: opts2 }), k, "改正解文字＝新題");
+});
+
+test("S2a' 題目鍵快照：鍵變了要人工確認是合理換題（tests/fixtures/practice_keys.json）", () => {
+  const snapPath = path.join(__dirname, "fixtures", "practice_keys.json");
+  const now = {};
+  H.LIST.forEach((e) => { if ((e.practiceAlt || []).length) now[e.id] = H.practiceAll(e).map(H.practiceId); });
+  const snap = JSON.parse(fs.readFileSync(snapPath, "utf8"));
+  assert.deepEqual(now, snap, "題目鍵和快照不同：若是刻意換題，舊題的看過紀錄不再套用是預期的，跑 node tools/practice_keys.js 更新快照");
+});
+
+test("S2b 改版但內容沒變的題，看過紀錄照樣保留", () => {
+  const oldE = LEG_EFA.get("p40-2-5"), newE = LEG_556.get("p40-2-5");
+  const same = [];
+  for (let i = 0; i < 18; i++) if (H.practiceId(LEG_EFA.practiceAt(oldE, i)) === H.practiceId(H.practiceAt(newE, i))) same.push(i);
+  assert.ok(same.length >= 3, "efa05fe→556db59 應至少有 3 題沒變（實際 " + same.length + "）");
+  const st = DOC.fresh(); st.peek = {};
+  same.forEach((i) => { st.peek[H.practiceId(LEG_EFA.practiceAt(oldE, i))] = 1; });
+  same.forEach((i) => assert.equal(H.shownBefore(P, st, i), true, "第 " + (i + 1) + " 題內容沒變，看過紀錄要保留"));
+});
+
+test("S5 沒有換數字題的篇不受影響：不記 peek、log 不帶 k、重來的題照算", () => {
+  const plainE = H.LIST.find((e) => (e.practice || []).length && !(e.practiceAlt || []).length);
+  assert.ok(plainE, "清單裡至少要有一篇沒有 practiceAlt 的篇");
+  const st = DOC.fresh();
+  assert.equal(H.notePeek(plainE, st, 0, 5), false);
+  H.scoreChoice(plainE, st, 1, need3, 5);
+  assert.equal(st.peek, undefined);
+  assert.equal("k" in st.log[0], false);
+  st.idx = (plainE.practice || []).length;   // 第 2 輪第 1 題（同一題再出現）
+  const r = H.scoreChoice(plainE, st, 0, need3, 6);
+  assert.equal(r.counts, true, "沒有新題可換的篇，重來的題答對照算");
+});
+
+test("S6 notePeek 上界：超過 PEEK_MAX 丟最舊的", () => {
+  const st = DOC.fresh(); st.peek = {};
+  for (let i = 0; i < H.PEEK_MAX; i++) st.peek["k" + i.toString(16).padStart(14, "0")] = 10 + i;
+  assert.equal(H.notePeek(P, st, 0, 99999), true);
+  assert.equal(Object.keys(st.peek).length, H.PEEK_MAX);
+  assert.equal(("k" + "0".repeat(14)) in st.peek, false, "最舊那筆被丟");
+  assert.equal(H.practiceId(H.practiceAt(P, 0)) in st.peek, true);
+});

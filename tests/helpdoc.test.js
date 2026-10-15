@@ -164,3 +164,49 @@ test("H15 6495640 寫過的 deleted 欄位照樣讀得懂，下次存檔改成 _
   assert.equal(d.deleted.x, 2);
   assert.deepEqual(JSON.parse(D.serialize(d.entries, d.hidden, d.deleted)).hidden, {x: 1, _del_x: 2});
 });
+
+// ---------- 看過答案 peek（交辦 #2282）----------
+const PRE = require("./fixtures/helpdoc.legacy-669fd69.js");   // 改之前的 helpdoc.js（＝線上舊版頁面）
+const H = require("../src/hard.js");
+const KK = (i) => "k" + i.toString(16).padStart(14, "0");
+
+test("H17 舊版頁面讀寫：peek 會被丟（已知降級），log 每筆的 k 照留、新版用它兜底", () => {
+  const P = H.get("p40-2-5");
+  const ks = H.practiceAll(P).map(H.practiceId);
+  const st = D.fresh(); st.solved = 30; st.peek = {}; ks.forEach((k, i) => { st.peek[k] = 100 + i; });
+  st.log = ks.slice(0, 5).map((k, i) => ({t: 200 + i, q: i, clean: false, wrongs: 1, k}));
+  const raw = D.serialize({"p40-2-5": st}, {}, {});
+  const old = PRE.parse(raw);
+  assert.ok(old, "舊版讀得懂新格式");
+  const back = D.parse(PRE.serialize(old.entries, old.hidden, old.deleted));
+  const e = back.entries["p40-2-5"];
+  assert.equal(e.peek, undefined, "舊版寫回後 peek 不見（記錄降級事實）");
+  assert.deepEqual(e.log.map((l) => l.k), ks.slice(0, 5), "log 的 k 全部保留");
+  for (let i = 0; i < 18; i++) assert.equal(H.shownBefore(P, e, i), i < 5, "第 " + (i + 1) + " 題：log 有 k 的照擋，只在 peek 裡的已降級");
+});
+
+test("H19 peek 上界與遷移：只留最新 256 筆、壞的只丟那部分、沒有 peek 的舊存檔寫出一字不差", () => {
+  const big = {}; for (let i = 0; i < 300; i++) big[KK(i)] = 1000 + i;
+  const a = D.clean1({solved: 1, peek: big}).peek;
+  assert.equal(Object.keys(a).length, 256);
+  assert.equal(KK(0) in a, false); assert.equal(KK(299) in a, true);
+  const mixed = D.clean1({solved: 2, peek: {[KK(1)]: 5, bad: 1, ["k" + "Z".repeat(14)]: 1, [KK(2)]: -1, [KK(3)]: 1.5}});
+  assert.deepEqual(plain(mixed.peek), {[KK(1)]: 5}); assert.equal(mixed.solved, 2);
+  ["str", [KK(1)], 5, null].forEach((bad) => { const d = D.clean1({solved: 3, peek: bad}); assert.equal(d.peek, undefined); assert.equal(d.solved, 3); });
+  // 沒有 peek 的舊存檔：新版讀進來再寫出去，跟舊版寫出去一字不差（升級不會讓同步多傳一版）
+  const raw = JSON.stringify({v: 1, entries: {"p40-2-5": {lessonDone: true, idx: 7, seed: 9, streak: 1, clean: 3, solved: 7, mastered: false, log: [{t: 1, q: 0, clean: false, wrongs: 1}], cur: null, r: 4}}, hidden: {}});
+  const n = D.parse(raw), o = PRE.parse(raw);
+  assert.equal(D.serialize(n.entries, n.hidden, n.deleted), PRE.serialize(o.entries, o.hidden, o.deleted));
+});
+
+test("H20 兩台同步合併：unionPeek 取聯集、同題留較早時間、沒變回 false", () => {
+  const st = {peek: {[KK(1)]: 50, [KK(2)]: 60}};
+  assert.equal(D.unionPeek(st, {[KK(2)]: 40, [KK(3)]: 70}), true);
+  assert.deepEqual(plain(st.peek), {[KK(1)]: 50, [KK(2)]: 40, [KK(3)]: 70});
+  assert.equal(D.unionPeek(st, {[KK(1)]: 99}), false, "對方沒有多出來的、時間也不更早：不必再存");
+  const none = {}; assert.equal(D.unionPeek(none, {[KK(5)]: 1}), true); assert.deepEqual(plain(none.peek), {[KK(5)]: 1});
+  assert.equal(D.unionPeek({}, "壞資料"), false);
+  // 上界：已滿 256 筆時，併進來又會被丟的舊題不算變動（否則兩台一直互傳）
+  const full = {peek: {}}; for (let i = 0; i < 256; i++) full.peek[KK(i + 10)] = 1000 + i;
+  assert.equal(D.unionPeek(full, {[KK(1)]: 1}), false);
+});
