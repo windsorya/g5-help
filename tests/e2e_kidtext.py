@@ -673,6 +673,9 @@ def parallel():
 
 
 def main():
+    if "--help" in sys.argv or "-h" in sys.argv:   # #2260 實測：舊版不認 --help，下了直接跑整套
+        print(__doc__)
+        return
     if "--parallel" in sys.argv:
         return parallel()
     only = sys.argv[sys.argv.index("--only") + 1] if "--only" in sys.argv else None
