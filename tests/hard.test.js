@@ -54,6 +54,11 @@ test("每一篇：id 唯一、科目與格式合法、日期與出處齊全、�
         if (s.check) checkChoice(s.check, e.id + " 第 " + (i + 1) + " 步");
       });
       (e.practice || []).forEach((q, i) => { assert.ok(q.q); checkChoice(q, e.id + " 練習 " + (i + 1)); });
+      // practiceAlt（第 2 輪起換數字的同型題，#2270）：每一套題數要和 practice 一樣，前端才能一題換一題
+      (e.practiceAlt || []).forEach((set, j) => {
+        assert.ok(Array.isArray(set) && set.length === (e.practice || []).length, e.id + " practiceAlt 第 " + (j + 1) + " 套要和 practice 一樣是 " + (e.practice || []).length + " 題");
+        set.forEach((q, i) => { assert.ok(q.q); checkChoice(q, e.id + " 換數字第 " + (j + 1) + " 套第 " + (i + 1) + " 題"); });
+      });
     }
   });
 });
@@ -186,7 +191,7 @@ test("快篩：數學題的答案與每一題比大小，用 frac.js 再算一�
     const f = two(e.question);
     if (f && /□/.test(e.question)) assert.ok(String(e.answer).includes(F.cmp(f[0], f[1])), e.id + " 答案和 frac.js 算的不一樣");
     e.steps.forEach((s, i) => s.check && judge(s.check, e.id + " 第 " + (i + 1) + " 步"));
-    (e.practice || []).forEach((q, i) => judge(q, e.id + " 練習 " + (i + 1)));
+    H.practiceAll(e).forEach((q, i) => judge(q, e.id + " 練習（出題順序）第 " + (i + 1) + " 題"));   // 含 practiceAlt
   });
   // 判準自檢：答案故意弄反要抓得到（兩種題型各一）
   const bad = JSON.parse(JSON.stringify(H.get("p40-2-5")));
@@ -224,14 +229,16 @@ const SHORTCUTS = (() => {
     list.filter((e) => e.kind === "steps").forEach((e) => {
       const checks = e.steps.filter((s) => s.check).map((s) => s.check), prac = e.practice || [];
       if (checks.length >= 3 && checks.every((q) => q.a === 0)) out.push(e.id + "：確認題的正解全是第一個選項（前端不打亂選項）");
-      const n = prac.length, w = Math.min(3, n);
+      const n = prac.length, w = Math.min(3, n), alts = e.practiceAlt || [];
       if (!n) return;
+      // 照前端實際出題順序（H.practiceAt）：第 1 輪 practice，第 2 輪起輪流出 practiceAlt（沒有就重複 practice）。
+      // 一路排到「最後一套接回第一套換數字題」，所有連續 w 題的段落都檢查到（含第 1 輪接第 2 輪的交界）
+      const seq = Array.from({ length: n * (alts.length + 2) }, (_, i) => H.practiceAt(e, i));
       const all = { "一律選第一個": (q) => q.a === 0, "一律選第二個": (q) => q.a === 1 };
       if (e.subject === "數學") Object.keys(rules).forEach((name) => { all[name] = (q) => rightBy(q, rules[name]); });
       Object.keys(all).forEach((name) => {
-        for (let s = 0; s < n; s++) {
-          const win = Array.from({ length: w }, (_, i) => (s + i) % n);
-          if (win.every((i) => all[name](prac[i]))) { out.push(e.id + "：練習第 " + win.map((i) => i + 1).join("、") + " 題連續答對只靠「" + name + "」就做得到"); break; }
+        for (let s = 0; s + w <= seq.length; s++) {
+          if (seq.slice(s, s + w).every((q) => all[name](q))) { out.push(e.id + "：出題順序第 " + (s + 1) + "–" + (s + w) + " 題連續答對只靠「" + name + "」就做得到"); break; }
         }
       });
     });
@@ -242,7 +249,7 @@ const SHORTCUTS = (() => {
 test("快篩：作答不能用同一個表面捷徑拿到「學會」（一律選第一或第二個；比大小的四種錯規則）", () => {
   assert.deepEqual(SHORTCUTS(H.LIST), []);
   // 判準自檢：上過線的兩版 p40-2-5 練習題（b3daf54、0bea6d9），都要被抓到
-  const v = (practice, checksA) => { const e = JSON.parse(JSON.stringify(H.get("p40-2-5"))); e.practice = practice; if (checksA) e.steps.forEach((s) => { if (s.check) { s.check.opts = [s.check.opts[s.check.a]].concat(s.check.opts.filter((_, i) => i !== s.check.a)); s.check.a = 0; } }); return e; };
+  const v = (practice, checksA) => { const e = JSON.parse(JSON.stringify(H.get("p40-2-5"))); e.practice = practice; e.practiceAlt = []; if (checksA) e.steps.forEach((s) => { if (s.check) { s.check.opts = [s.check.opts[s.check.a]].concat(s.check.opts.filter((_, i) => i !== s.check.a)); s.check.a = 0; } }); return e; };
   const q = (t, opts, a) => ({ q: t, opts: opts, a: a, why: opts.map(() => "") });
   const b3 = [q("11/10 和 13/12，哪一個比較大？", ["11/10", "13/12"], 0), q("8/7 和 6/5，哪一個比較大？", ["8/7", "6/5"], 1), q("21/20 □ 16/15，□ 要填什麼？", [">", "<"], 1), q("4/3 和 9/8，哪一個比較大？", ["4/3", "9/8"], 0)];
   const got1 = SHORTCUTS([v(b3, true)]);
@@ -250,6 +257,11 @@ test("快篩：作答不能用同一個表面捷徑拿到「學會」（一律�
   const bea = [b3[0], q("26/25 和 53/50，哪一個比較大？", ["26/25", "53/50"], 1), b3[1], b3[2], q("6/5 和 13/10，哪一個比較大？", ["6/5", "13/10"], 1), b3[3]];
   const got2 = SHORTCUTS([v(bea, false)]);
   assert.ok(got2.some((p) => /都只多 1 就選數字小的/.test(p)) && got2.some((p) => /多出來的分子大的比較大/.test(p)) && !got2.some((p) => /「選數字小的」/.test(p)), "0bea6d9 版要抓到 Opus 第 2 輪那兩條、且不再是「選數字小的」：" + got2.join("；"));
+  // 第 2 輪（practiceAlt）也要檢查到：換數字那套若全是「數字小的比較大」，第 1 輪再好也要紅，而且紅在第 7 題之後
+  const bad = JSON.parse(JSON.stringify(H.get("p40-2-5"))); bad.practiceAlt = [b3.concat(b3.slice(0, 2))];
+  const got3 = SHORTCUTS([bad]);
+  assert.ok(got3.some((p) => /出題順序第 (\d+)–\d+ 題.*「選數字小的」/.test(p) && +p.match(/出題順序第 (\d+)/)[1] >= 5), "換數字那套壞掉要在第 2 輪抓到：" + got3.join("；"));
+  assert.deepEqual(SHORTCUTS([H.get("p40-2-5")]), [], "現行 p40-2-5（含換數字那套）不該被抓");
 });
 
 test("審稿模型不得比原設計弱：2026-10-15 起 readReview.by 只能是 codex 或 claude-opus", () => {

@@ -204,12 +204,14 @@ def steps_cases(B, eid):
     r.go(f"#h/{eid}")
     tap(r.pg, r.pg.get_by_role("button", name="我已經會了，直接練習")); r.snap("直接練習第 1 題")
     B.absorb(r.close(), [f"{eid}:direct"])
-    # 每一題：重開續練（第 k 題）、每個錯選項、答對
-    for q in range(n):
+    # 每一題：重開續練（第 k 題）、每個錯選項、答對。含 practiceAlt（第 2 輪起換數字的題，#2270）：idx＝q 時前端出的就是 allp[q]
+    allp = (e.get("practice") or []) + [q for s in (e.get("practiceAlt") or []) for q in s]
+    for q in range(len(allp)):
         r = Run(B, B.device, f"{eid}:resume{q}")
         r.go(f"#h/{eid}"); r.seed(eid, fresh_state(lessonDone=True, idx=q, solved=q))
         tap(r.pg, r.pg.locator("#goPractice")); r.snap(f"續練第 {q + 1} 題")
-        pq = e["practice"][q]
+        pq = allp[q]
+        assert r.pg.locator("#practice .qtext").inner_text().strip() == pq["q"].strip(), f"{eid} 第 {q + 1} 題畫面上的題目不是 {pq['q']}"
         for k in range(len(pq["opts"])):
             if k != pq["a"]:
                 tap(r.pg, r.pg.locator(f'#practice .chip[data-k="{k}"]')); r.snap(f"第 {q + 1} 題選錯 {k}"); r.mark(f"{eid}:prac{q + 1}:{k}")

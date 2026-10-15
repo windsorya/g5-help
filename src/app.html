@@ -676,7 +676,7 @@ function stepsEnd(){
   if ((E.practice || []).length) { var go = add(b, '<div class="row"><button class="btn" type="button" id="toPractice">換你自己做</button></div>'); $("#toPractice", go).onclick = guard(openPractice); }
 }
 function choicePractice(){
-  var P = $("#practice"), list = E.practice, q = list[st.idx % list.length];
+  var P = $("#practice"), q = H.practiceAt(E, st.idx);   // 第 2 輪起出 practiceAlt（換數字的同型題），不再重複上一輪背得到答案的題（交辦 #2270）
   if (!st.cur || st.cur.idx !== st.idx) { st.cur = {idx:st.idx, hints:0, wrongs:0}; save(); }
   var cur = st.cur;
   P.innerHTML = '<div class="row" style="justify-content:space-between"><h2 style="font-size:24px">練習第 ' + (st.idx + 1) + ' 題</h2><span class="small muted">連續自己做對' + dots() + '</span></div>' +

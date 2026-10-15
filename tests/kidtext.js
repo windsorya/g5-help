@@ -119,7 +119,7 @@ function requiredCases(list = H.LIST) {
   list.forEach((e) => {
     if (e.kind === "steps") {
       out.push(e.id + ":lesson", e.id + ":direct");
-      (e.practice || []).forEach((_, q) => out.push(e.id + ":resume" + q));
+      H.practiceAll(e).forEach((_, q) => out.push(e.id + ":resume" + q));   // 含 practiceAlt（第 2 輪起換數字的題，#2270）：每一題都要實際走到
       if ((e.practice || []).length) out.push(e.id + ":mastery");
     } else {
       out.push(e.id + ":lesson", e.id + ":alt", e.id + ":direct", e.id + ":practice", e.id + ":resume");
@@ -133,7 +133,7 @@ function requiredBranches(list = H.LIST) {
   list.forEach((e) => {
     if (e.kind === "steps") {
       (e.steps || []).forEach((s, i) => { if (s.check) s.check.opts.forEach((_, k) => out.push(e.id + ":check" + (i + 1) + ":" + k)); });
-      (e.practice || []).forEach((q, n) => q.opts.forEach((_, k) => out.push(e.id + ":prac" + (n + 1) + ":" + k)));
+      H.practiceAll(e).forEach((q, n) => q.opts.forEach((_, k) => out.push(e.id + ":prac" + (n + 1) + ":" + k)));
       if ((e.practice || []).length) out.push(e.id + ":mastery");
     } else {
       out.push(e.id + ":direct");
