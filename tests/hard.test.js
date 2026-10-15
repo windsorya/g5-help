@@ -210,12 +210,20 @@ const SHORTCUTS = (() => {
   const smaller = (f) => le(f[0], f[1]) ? 0 : le(f[1], f[0]) ? 1 : null;
   const plusOne = (x) => x.n - x.d === 1;
   const extra = (x) => [Math.floor(x.n / x.d), x.n % x.d];                       // 帶分數的整數與多出來的分子
-  // 每條錯規則：給兩個分數，回它會選哪一個（0／1）；不適用回 null（＝這題用它答不出來）
+  const mult = (f) => f[0].d % f[1].d === 0 || f[1].d % f[0].d === 0;               // 分母成倍數＝只要擴一邊就能通分
+  const correct = (f) => { const c = F.cmp(f[0], f[1]); return c === ">" ? 0 : c === "<" ? 1 : null; };
+  // 每條錯規則：pick 給兩個分數、回它會選哪一個（0／1），不適用回 null（＝這題用它答不出來）；
+  // valid（選填）＝這一題它用的其實是正確算法——全段都是正確算法答對的，不算錯規則拿到「學會」（Opus 審 41b02fe 的判準）
   const rules = {
-    "選數字大的": (f) => { const s = smaller(f); return s === null ? null : 1 - s; },
-    "選數字小的": (f) => smaller(f),
-    "都只多 1 就選數字小的、其他選數字大的": (f) => { const s = smaller(f); return s === null ? null : (plusOne(f[0]) && plusOne(f[1]) ? s : 1 - s); },
-    "多出來的分子大的比較大": (f) => { const a = extra(f[0]), b = extra(f[1]); return a[0] !== b[0] ? (a[0] > b[0] ? 0 : 1) : a[1] !== b[1] ? (a[1] > b[1] ? 0 : 1) : smaller(f); }
+    "選數字大的": { pick: (f) => { const s = smaller(f); return s === null ? null : 1 - s; } },
+    "選數字小的": { pick: (f) => smaller(f) },
+    "都只多 1 就選數字小的、其他選數字大的": { pick: (f) => { const s = smaller(f); return s === null ? null : (plusOne(f[0]) && plusOne(f[1]) ? s : 1 - s); } },
+    "多出來的分子大的比較大": { pick: (f) => { const a = extra(f[0]), b = extra(f[1]); return a[0] !== b[0] ? (a[0] > b[0] ? 0 : 1) : a[1] !== b[1] ? (a[1] > b[1] ? 0 : 1) : smaller(f); } },
+    // 以下兩條是 Opus 審 41b02fe 第 2 輪抓到的（第 2 輪只有 B 型的分母成倍數）
+    "分母成倍數就選數字大的、不成倍數就選數字小的": { pick: (f) => { const s = smaller(f); return s === null ? null : (mult(f) ? 1 - s : s); } },
+    "兩邊分母都要換時只比多出來那塊的分母（分母小的比較大）": {
+      pick: (f) => { if (mult(f)) return correct(f); const a = extra(f[0]), b = extra(f[1]); if (a[0] !== b[0] || a[1] === b[1]) return correct(f); return f[0].d < f[1].d ? 0 : f[1].d < f[0].d ? 1 : null; },
+      valid: (f) => { if (mult(f)) return true; const a = extra(f[0]), b = extra(f[1]); return a[0] !== b[0] || a[1] === b[1]; } }
   };
   // 這一題用某條規則答，會不會答對（題目不是兩個分數比大小 ⇒ 數學規則不適用＝答不對）
   const rightBy = (q, pick) => {
@@ -234,11 +242,16 @@ const SHORTCUTS = (() => {
       // 照前端實際出題順序（H.practiceAt）：第 1 輪 practice，第 2 輪起輪流出 practiceAlt（沒有就重複 practice）。
       // 一路排到「最後一套接回第一套換數字題」，所有連續 w 題的段落都檢查到（含第 1 輪接第 2 輪的交界）
       const seq = Array.from({ length: n * (alts.length + 2) }, (_, i) => H.practiceAt(e, i));
-      const all = { "一律選第一個": (q) => q.a === 0, "一律選第二個": (q) => q.a === 1 };
-      if (e.subject === "數學") Object.keys(rules).forEach((name) => { all[name] = (q) => rightBy(q, rules[name]); });
+      // ok＝這題用它答會對；bogus＝這題靠的是錯的推理（全段都對、而且至少一題是靠錯推理碰對的，才算錯規則拿到學會）
+      const all = { "一律選第一個": { ok: (q) => q.a === 0, bogus: () => true }, "一律選第二個": { ok: (q) => q.a === 1, bogus: () => true } };
+      if (e.subject === "數學") Object.keys(rules).forEach((name) => {
+        const r = rules[name];
+        all[name] = { ok: (q) => rightBy(q, r.pick), bogus: (q) => { const f = two(q.q); return !r.valid || !f || !r.valid(f); } };
+      });
       Object.keys(all).forEach((name) => {
         for (let s = 0; s + w <= seq.length; s++) {
-          if (seq.slice(s, s + w).every((q) => all[name](q))) { out.push(e.id + "：出題順序第 " + (s + 1) + "–" + (s + w) + " 題連續答對只靠「" + name + "」就做得到"); break; }
+          const win = seq.slice(s, s + w);
+          if (win.every((q) => all[name].ok(q)) && win.some((q) => all[name].bogus(q))) { out.push(e.id + "：出題順序第 " + (s + 1) + "–" + (s + w) + " 題連續答對只靠「" + name + "」就做得到"); break; }
         }
       });
     });
@@ -262,6 +275,12 @@ test("快篩：作答不能用同一個表面捷徑拿到「學會」（一律�
   const got3 = SHORTCUTS([bad]);
   assert.ok(got3.some((p) => /出題順序第 (\d+)–\d+ 題.*「選數字小的」/.test(p) && +p.match(/出題順序第 (\d+)/)[1] >= 5), "換數字那套壞掉要在第 2 輪抓到：" + got3.join("；"));
   assert.deepEqual(SHORTCUTS([H.get("p40-2-5")]), [], "現行 p40-2-5（含換數字那套）不該被抓");
+  // 41b02fe 上線版的換數字那套（B 型分母成倍數）：Opus 抓到的兩條錯規則都要在第 2 輪抓到
+  const v41 = JSON.parse(JSON.stringify(H.get("p40-2-5")));
+  v41.practiceAlt[0][1] = q("12/11 和 25/22，哪一個比較大？", ["12/11", "25/22"], 1);
+  v41.practiceAlt[0][4] = q("3/2 和 17/10，哪一個比較大？", ["17/10", "3/2"], 0);
+  const got4 = SHORTCUTS([v41]);
+  assert.ok(got4.some((p) => /分母成倍數就選數字大的/.test(p)) && got4.some((p) => /只比多出來那塊的分母/.test(p)), "41b02fe 版要抓到 Opus 那兩條：" + got4.join("；"));
 });
 
 test("審稿模型不得比原設計弱：2026-10-15 起 readReview.by 只能是 codex 或 claude-opus", () => {
