@@ -559,10 +559,10 @@
     }
     // 兩份都在、確定是兩台各自練（第一次加入，或另一台已寫新版而這台也改過）：照律師判準自動留一份。
     // 一般站：留這台＝把這台那份蓋上雲端目前版本（put 會先 backup 雲端那份）；留雲端＝replaceLocal（先 backup 這台那份）。
-    // 這組自動碼收到別台寫的進度＝家人已連上：拿掉「還沒連起來」的標記與頁首提醒
+    // 這組自動碼換上了別台寫的進度（replaceLocal）＝家人已連上：拿掉「還沒連起來」的標記與頁首提醒。
+    // 只在真的換上別的內容時拿掉——雲端版本比這台記得的新、但其實是這台自己上一頁送出、回應沒收到（關頁太快）時，這台那份會勝出，不算家人連上（2026-10-15 正式網址實測抓到）
     function connected() { try { if (storage && storage.getItem(AUTO) === code) { storage.removeItem(AUTO); } } catch (ignoreAuto) { /* 只影響提醒 */ } }
     function settle(key, cloud, token) {
-      connected();
       var local = read(key), choice = autoResolve ? pick(key, local, cloud.data) : null;
       if (choice === 'same') { saveBaseline(key, cloud.rev, cloud.data, cloud.updated); delete conflicts[key]; return; }
       if (choice === 'cloud') { replaceLocal(key, cloud, token); return; }
@@ -572,7 +572,6 @@
     // 有 accept 的頁面（難題站）版本：留雲端＝replaceLocal（canReplace／accept 由頁面把關）；
     // 留這台＝先備份雲端那份，把雲端目前版本記成 baseline、這台那份記成待確認上傳，再走原本的 sendPending（A15 讀回核對照舊）。
     function settleOwned(key, cloud, token, unsure) {
-      if (!unsure) { connected(); }
       var local = read(key), choice = autoResolve && !unsure ? pick(key, local, cloud.data) : null;
       if (choice === 'same') { saveBaseline(key, cloud.rev, cloud.data, cloud.updated); delete conflicts[key]; delete deferred[key]; return; }
       if (choice === 'cloud') { replaceLocal(key, cloud, token); return; }

@@ -171,3 +171,19 @@ test('R14 自動化測試瀏覽器（navigator.webdriver＝true）不自動開�
   t.after(() => real.api.destroy()); await real.api.ready; await flush();
   assert.match(real.api.getState().code || '', /^[A-Z2-9]{12}$/, '真機照樣自動開');
 });
+
+test('R15 自動碼的這台：上一頁送出後回應沒收到就關頁（雲端版本比這台記得的新、其實是自己寫的），重開後提醒仍在、進度留這台較多那份', async t => {
+  const clock = new Clock(), backend = server(clock);
+  const d = device(backend, {initial: {[KEY]: v3(1, 'x')}, autoEnable: true, autoResolve: true});
+  await d.api.ready; await flush();
+  const code = d.api.getState().code; assert.equal(d.storage.getItem('g5sync.auto'), code);
+  d.api.destroy();
+  // 這台送出的 5 題那份伺服器收下了（rev 2），但頁面已關、回應沒收到 ⇒ 這台的 baseline 還停在 rev 1
+  assert.equal(backend.handle({op: 'put', code, key: KEY, rev: 1, data: v3(5, 'y')}).ok, true);
+  assert.equal(backend.store.record(code).rev, 2);
+  d.storage.setItem(KEY, v3(8, 'z'));
+  const again = device(backend, {storage: d.storage, autoEnable: true, autoResolve: true}); t.after(() => again.api.destroy());
+  await again.api.ready; await flush(); await clock.advance(10);
+  assert.equal(again.storage.getItem('g5sync.auto'), code, '不是家人連上，提醒要留著');
+  assert.equal(backend.store.record(code).data, v3(8, 'z'), '這台 8 題那份留在雲端');
+});
