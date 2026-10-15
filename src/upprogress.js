@@ -1,10 +1,10 @@
 // 家長傳題目的進度條（交辦 #1320，律師 2026-10-13：「完成進度條，會隨時間變化嗎？會告知還要等多久嗎」）。
-// 已送出 33%＋「最晚 HH:MM 前電腦會取回」（上次取題＋10 分；電腦已逾時就不承諾時間）；
-// 製作中 66→95% 依送出後經過時間增加＋「預計 HH:MM 前做好」（已做好題目「送出→做好」耗時的中位數，沒有資料先用 40 分＝取題 10＋製作 30）；
+// 已送出 33%＋「最晚 HH:MM 前電腦會取回」（上次取題＋1 分；電腦已逾時就不承諾時間）；
+// 製作中 66→95% 依送出後經過時間增加＋「預計 HH:MM 前做好」（已做好題目「送出→做好」耗時的中位數，沒有資料先用 40 分（取題原為 10 分；製作耗時尚無實測，暫不調））；
 // 超過預估 95% 封頂、改說比預期久；做好了 100%。時間一律台北時間。tests/upprogress.test.js
 (function (root) {
   "use strict";
-  var MIN = 60000, FETCH_EVERY = 10 * MIN, DEFAULT_TOTAL = 40 * MIN;   // cap-why: launchd 每 10 分鐘取題一次（com.lawyer.g5-help-inbox）
+  var MIN = 60000, FETCH_EVERY = 1 * MIN, DEFAULT_TOTAL = 40 * MIN;   // cap-why: launchd 每 1 分鐘取題一次（律師 2026-10-15：孩子嫌等太久，600→60 秒）（com.lawyer.g5-help-inbox）
   function hhmm(t) { var d = new Date(t + 8 * 3600000); return ("0" + d.getUTCHours()).slice(-2) + ":" + ("0" + d.getUTCMinutes()).slice(-2); }
   function num(x) { return typeof x === "number" && isFinite(x) && x > 0; }
   function estimate(items) {

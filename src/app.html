@@ -889,7 +889,7 @@ window.G5HelpPage = {state:function(id){ return JSON.parse(JSON.stringify(DB.ent
       img.onerror = function(){ no(new Error("img")); }; img.src = url;
     });
   }
-  // 進度：已送出（等電腦取回，最多 10 分鐘）→ 已收到、解說製作中 → 做好了（連結）；電腦上次取題時間＝有無故障
+  // 進度：已送出（等電腦取回，最多 1 分鐘）→ 已收到、解說製作中 → 做好了（連結）；電腦上次取題時間＝有無故障
   function hhmm(t){ var d = new Date(t + 8 * 3600000); return (d.getUTCMonth() + 1) + "/" + d.getUTCDate() + " " + ("0" + d.getUTCHours()).slice(-2) + ":" + ("0" + d.getUTCMinutes()).slice(-2); }
   // 撤回自己傳的題目（2026-10-13 律師：「為何我測試用的題目，我沒法清除？」）：還沒做好的每筆有「撤回」，兩段式確認（不用 confirm()），
   // 第一次按變「確定撤回？」＋「取消」，5 秒沒再按自動取消；送 op=withdraw（同步碼＋傳題 id），GAS 只准撤回同一個家庭碼、還沒做好的。
@@ -946,7 +946,7 @@ window.G5HelpPage = {state:function(id){ return JSON.parse(JSON.stringify(DB.ent
       MINE_APPLIED = mySeq;
       if (!r || !r.ok) { $("#upHealth").textContent = "進度暫時讀不到，稍後再看。"; return; }
       var ago = r.lastFetch ? Math.round((Date.now() - r.lastFetch) / 60000) : null;
-      $("#upHealth").innerHTML = ago === null ? "電腦還沒取過題目。" : ago <= 20 ? "電腦運作正常（上次取題 " + hhmm(r.lastFetch) + "，每 10 分鐘取一次）。"
+      $("#upHealth").innerHTML = ago === null ? "電腦還沒取過題目。" : ago <= 10 ? "電腦運作正常（上次取題 " + hhmm(r.lastFetch) + "，每分鐘取一次）。"
         : '<span style="color:var(--bad)">電腦已經 ' + ago + ' 分鐘沒取題（上次 ' + hhmm(r.lastFetch) + '）：可能關機、睡眠或故障，題目會等電腦開機後再處理。</span>';
       LAST = r; render(r);
     }).catch(function(){ fin(); if (!stale()) $("#upHealth").textContent = "進度暫時讀不到（可能沒有網路），稍後再看。"; });
