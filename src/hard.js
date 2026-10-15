@@ -252,10 +252,13 @@
     if (ks.length > PEEK_MAX) ks.sort(function (a, b) { return p[a] - p[b]; }).slice(0, ks.length - PEEK_MAX).forEach(function (x) { delete p[x]; });
     return true;
   }
-  // 題庫每一題都看過答案：之後怎麼做都不會算進連續答對＝學不會（交辦 #2288）。頁面據此提示請家長加新題，不自動放寬
+  // 之後還會再出的題都看過答案：怎麼做都不會算進連續答對＝學不會（交辦 #2288）。頁面據此提示請家長加新題，不自動放寬。
+  // 第 1 輪（practice）只出一次，第 2 輪起輪流出換數字題——只看換數字題（Opus 第 2 輪審 4fc56af：看全部 18 題的話，
+  // 第 1 輪有沒看過的題時，孩子已經學不會了提示也不出現）
   function allSeen(e, st) {
     if (!tracksPeek(e)) return false;
-    var all = practiceAll(e);
+    var all = [];
+    (e.practiceAlt || []).forEach(function (set) { all = all.concat(set); });
     for (var i = 0; i < all.length; i++) {
       var k = practiceId(all[i]);
       if (k && !ownKey(st.peek, k) && !(st.log || []).some(function (l) { return l && l.clean === false && l.k === k; })) return false;

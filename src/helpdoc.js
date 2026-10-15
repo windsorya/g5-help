@@ -31,9 +31,6 @@
     // 正在做的那一題：看過提示、答錯過幾次（Codex 2026-10-12 第 1 輪必修 1、2：重開練習不能洗掉、不能重複計分）
     if (s.cur && nat(s.cur.idx) && nat(s.cur.hints) && nat(s.cur.wrongs)) d.cur = {idx: s.cur.idx, hints: s.cur.hints, wrongs: s.cur.wrongs};
     // peek：看過答案的題（src/hard.js notePeek，交辦 #2282）。只有至少一筆合法時才寫出——沒有這欄的舊存檔讀進來再寫出去一字不差
-    // g：這篇紀錄是哪一次建立的（建立時間 ms；家長清除、刪除後重建會換新值）。兩台同步併 peek 只併同一個 g 的——
-    // 清除過的篇不會被另一台的舊紀錄復活（Opus 審 e84b623 B1）。舊存檔沒有 g＝0，同樣只寫出有的
-    if (stamp(s.g) && s.g > 0) d.g = s.g;
     var pk = cleanPeek(s.peek);
     if (Object.keys(pk).length) d.peek = pk;
     return d;
@@ -47,15 +44,6 @@
     if (ks.length > PEEK_MAX) ks = ks.sort(function (a, b) { return p[b] - p[a]; }).slice(0, PEEK_MAX);
     ks.sort().forEach(function (k) { out[k] = p[k]; });
     return out;
-  }
-  // 兩台同步：把另一份記得的看過答案併進 st（取聯集、同一題留較早的時間）；有多出來的才回 true（呼叫端才需要再存）
-  function unionPeek(st, other) {
-    var add = cleanPeek(other), before = cleanPeek(st.peek), cur = cleanPeek(st.peek);
-    Object.keys(add).forEach(function (k) { if (!own(cur, k) || add[k] < cur[k]) cur[k] = add[k]; });
-    cur = cleanPeek(cur);   // 超過上限會丟最舊的：比的是丟完之後有沒有變，不然併進來又被丟的題會讓兩台一直互傳
-    if (JSON.stringify(cur) === JSON.stringify(before)) return false;
-    st.peek = cur;
-    return true;
   }
   function own(o, k) { return Object.prototype.hasOwnProperty.call(o, k); }
   function cleanHidden(h) {
@@ -114,6 +102,6 @@
   }
   // 清除全部作答紀錄：每一篇回到空白（之後打開時才用 fresh() 建）；隱藏與刪除清單照留（另有「恢復全部隱藏的篇」）
   function cleared(hidden, deleted) { return {entries: Object.create(null), hidden: cleanHidden(plain(hidden)), deleted: cleanHidden(plain(deleted))}; }
-  var api = {fresh: fresh, clean1: clean1, parse: parse, serialize: serialize, cleanHidden: cleanHidden, hide: hide, unhide: unhide, isHidden: isHidden, hiddenIn: hiddenIn, remove: remove, unhideAll: unhideAll, cleared: cleared, own: own, postIdOk: postIdOk, cleanPeek: cleanPeek, unionPeek: unionPeek, PEEK_MAX: PEEK_MAX};
+  var api = {fresh: fresh, clean1: clean1, parse: parse, serialize: serialize, cleanHidden: cleanHidden, hide: hide, unhide: unhide, isHidden: isHidden, hiddenIn: hiddenIn, remove: remove, unhideAll: unhideAll, cleared: cleared, own: own, postIdOk: postIdOk, cleanPeek: cleanPeek, PEEK_MAX: PEEK_MAX};
   if (typeof module !== "undefined" && module.exports) module.exports = api; else root.G5HelpDoc = api;
 })(typeof window !== "undefined" ? window : this);

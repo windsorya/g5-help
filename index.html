@@ -365,9 +365,6 @@ details p{margin:0 0 10px}
     // 正在做的那一題：看過提示、答錯過幾次（Codex 2026-10-12 第 1 輪必修 1、2：重開練習不能洗掉、不能重複計分）
     if (s.cur && nat(s.cur.idx) && nat(s.cur.hints) && nat(s.cur.wrongs)) d.cur = {idx: s.cur.idx, hints: s.cur.hints, wrongs: s.cur.wrongs};
     // peek：看過答案的題（src/hard.js notePeek，交辦 #2282）。只有至少一筆合法時才寫出——沒有這欄的舊存檔讀進來再寫出去一字不差
-    // g：這篇紀錄是哪一次建立的（建立時間 ms；家長清除、刪除後重建會換新值）。兩台同步併 peek 只併同一個 g 的——
-    // 清除過的篇不會被另一台的舊紀錄復活（Opus 審 e84b623 B1）。舊存檔沒有 g＝0，同樣只寫出有的
-    if (stamp(s.g) && s.g > 0) d.g = s.g;
     var pk = cleanPeek(s.peek);
     if (Object.keys(pk).length) d.peek = pk;
     return d;
@@ -381,15 +378,6 @@ details p{margin:0 0 10px}
     if (ks.length > PEEK_MAX) ks = ks.sort(function (a, b) { return p[b] - p[a]; }).slice(0, PEEK_MAX);
     ks.sort().forEach(function (k) { out[k] = p[k]; });
     return out;
-  }
-  // 兩台同步：把另一份記得的看過答案併進 st（取聯集、同一題留較早的時間）；有多出來的才回 true（呼叫端才需要再存）
-  function unionPeek(st, other) {
-    var add = cleanPeek(other), before = cleanPeek(st.peek), cur = cleanPeek(st.peek);
-    Object.keys(add).forEach(function (k) { if (!own(cur, k) || add[k] < cur[k]) cur[k] = add[k]; });
-    cur = cleanPeek(cur);   // 超過上限會丟最舊的：比的是丟完之後有沒有變，不然併進來又被丟的題會讓兩台一直互傳
-    if (JSON.stringify(cur) === JSON.stringify(before)) return false;
-    st.peek = cur;
-    return true;
   }
   function own(o, k) { return Object.prototype.hasOwnProperty.call(o, k); }
   function cleanHidden(h) {
@@ -448,7 +436,7 @@ details p{margin:0 0 10px}
   }
   // 清除全部作答紀錄：每一篇回到空白（之後打開時才用 fresh() 建）；隱藏與刪除清單照留（另有「恢復全部隱藏的篇」）
   function cleared(hidden, deleted) { return {entries: Object.create(null), hidden: cleanHidden(plain(hidden)), deleted: cleanHidden(plain(deleted))}; }
-  var api = {fresh: fresh, clean1: clean1, parse: parse, serialize: serialize, cleanHidden: cleanHidden, hide: hide, unhide: unhide, isHidden: isHidden, hiddenIn: hiddenIn, remove: remove, unhideAll: unhideAll, cleared: cleared, own: own, postIdOk: postIdOk, cleanPeek: cleanPeek, unionPeek: unionPeek, PEEK_MAX: PEEK_MAX};
+  var api = {fresh: fresh, clean1: clean1, parse: parse, serialize: serialize, cleanHidden: cleanHidden, hide: hide, unhide: unhide, isHidden: isHidden, hiddenIn: hiddenIn, remove: remove, unhideAll: unhideAll, cleared: cleared, own: own, postIdOk: postIdOk, cleanPeek: cleanPeek, PEEK_MAX: PEEK_MAX};
   if (typeof module !== "undefined" && module.exports) module.exports = api; else root.G5HelpDoc = api;
 })(typeof window !== "undefined" ? window : this);
 
@@ -708,10 +696,13 @@ details p{margin:0 0 10px}
     if (ks.length > PEEK_MAX) ks.sort(function (a, b) { return p[a] - p[b]; }).slice(0, ks.length - PEEK_MAX).forEach(function (x) { delete p[x]; });
     return true;
   }
-  // 題庫每一題都看過答案：之後怎麼做都不會算進連續答對＝學不會（交辦 #2288）。頁面據此提示請家長加新題，不自動放寬
+  // 之後還會再出的題都看過答案：怎麼做都不會算進連續答對＝學不會（交辦 #2288）。頁面據此提示請家長加新題，不自動放寬。
+  // 第 1 輪（practice）只出一次，第 2 輪起輪流出換數字題——只看換數字題（Opus 第 2 輪審 4fc56af：看全部 18 題的話，
+  // 第 1 輪有沒看過的題時，孩子已經學不會了提示也不出現）
   function allSeen(e, st) {
     if (!tracksPeek(e)) return false;
-    var all = practiceAll(e);
+    var all = [];
+    (e.practiceAlt || []).forEach(function (set) { all = all.concat(set); });
     for (var i = 0; i < all.length; i++) {
       var k = practiceId(all[i]);
       if (k && !ownKey(st.peek, k) && !(st.log || []).some(function (l) { return l && l.clean === false && l.k === k; })) return false;
@@ -840,8 +831,7 @@ function readDisk(){
 }
 function loadDB(){ var d = readDisk(); return {v:1, entries:d.ok ? d.entries : Object.create(null), hidden:d.ok ? d.hidden : noHidden(), deleted:d.ok ? d.deleted : noHidden(), readOk:d.ok}; }
 var DB = loadDB(), st = null, NOTICE = "", GEN = 0;
-function newEntry(){ var f = fresh(); f.g = Date.now(); return f; }   // g＝這篇紀錄的世代（src/helpdoc.js clean1）
-function stateOf(id){ if (!own(DB.entries, id)) DB.entries[id] = newEntry(); return DB.entries[id]; }
+function stateOf(id){ if (!own(DB.entries, id)) DB.entries[id] = fresh(); return DB.entries[id]; }
 function dirtyCount(){ return Object.keys(DIRTY).length; }
 // 舊畫面守門（Codex 第 6 輪：重播舊 handler 會改到別篇或把記憶體換回磁碟）：綁定時記下畫面世代 GEN（和這一題的 cur），
 // 執行時世代變了、或這一題已計分換題、或還沒讀成功，就什麼都不做。所有會改進度或切畫面的按鈕都走這裡。
@@ -890,23 +880,11 @@ function applyRemote(key, raw){
   if (!canReplace(key)) return false;
   var doc = DOC.parse(raw); if (!doc) return false;
   try { localStorage.setItem(KEY, raw); } catch (e) { return false; }   // 沒寫進去＝磁碟沒變，記憶體也不換
-  var prev = DB.entries;
   GEN++; ARM = null; DB = {v:1, entries:doc.entries, hidden:doc.hidden, deleted:doc.deleted, readOk:true}; drawHome();   // 寫進去了就一定採用：記憶體與磁碟一致（Codex 第 6 輪必修 1）；隱藏清單跟著換
   var back; try { back = localStorage.getItem(KEY); } catch (e) { back = null; }
-  // 換上雲端那份之後，把這台原本記得的看過答案併回去（取聯集，交辦 #2282）：sync 要求讀回與雲端原文一字不差，所以先照原文寫、
-  // 下一個事件迴圈才併、存；sync 下一輪看到本機與基準版本不同就把聯集版傳上去。只併同一世代（g）、對方有作答的篇——
-  // 家長在別台清除或刪除過、之後又練了幾題的篇，g 不同，不把看過紀錄帶回來。
-  setTimeout(function(){ mergePeek(prev); }, 0);
+  // 看過答案（peek）跟著整份存檔走、不跨裝置合併（交辦 #2282 縮小範圍，升級階梯末級）：兩次合併設計都被審出退步
+  // （清除後被另一台復活、首次加入同步丟紀錄）。後果：兩台都在同步前練過同一篇時，輸的那台的看過紀錄與作答紀錄一起不留。
   return back === raw;   // 讀回失敗只告訴 sync「下次再確認」，sync 下一輪看到本機＝雲端會只補 baseline
-}
-function mergePeek(prev){
-  var added = false;
-  Object.keys(prev || {}).forEach(function(id){
-    var cur = own(DB.entries, id) ? DB.entries[id] : null, old = prev[id];
-    if (!cur || !old || !old.peek || !(cur.solved > 0) || (cur.g || 0) !== (old.g || 0)) return;   // 不同世代＝其中一台清除或刪除過，不併
-    if (DOC.unionPeek(cur, old.peek)) { DIRTY[id] = true; added = true; }
-  });
-  if (added) save();
 }
 
 // ---------- 互動元件 ----------
@@ -1336,7 +1314,7 @@ function setHidden(h){ DB.hidden = h; arm(null); homeSave("#hidden"); }
 function deleteEntry(id){
   var r = DOC.remove(hidOf(), delOf(), id, Date.now());
   DB.hidden = r.hidden; DB.deleted = r.deleted;
-  if (own(DB.entries, id)) DB.entries[id] = newEntry();
+  if (own(DB.entries, id)) DB.entries[id] = fresh();
   arm(null); homeSave("#deleted");
 }
 function clearAllRecords(){

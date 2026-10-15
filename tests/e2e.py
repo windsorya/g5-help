@@ -965,8 +965,8 @@ def flow_hide_sync(browser):
 
 
 def flow_peek_sync(browser):
-    """看過答案 peek 跨裝置取聯集（交辦 #2282）：A 記得 K1、B 記得 K2 且練得較多；B 加入時留 B 那份（雲端少了 K1），
-    A 重開換上雲端那份後把 K1 併回去並上傳 ⇒ 雲端與兩台最後都有 K1、K2，之後不再來回上傳。另驗家長清除過的篇不把看過紀錄帶回來。"""
+    """看過答案 peek 跟著整份存檔走、不跨裝置合併（交辦 #2282 縮小範圍）：A 記得 K1、B 記得 K2 且練得較多；B 加入時留 B 那份，
+    A 重開換上雲端那份 ⇒ A 本機＝雲端＝B 那份（只有 K2），不再上傳、不來回；別台清除後的紀錄也不會被這台記得的復活。"""
     from e2e_sync import backend, STORE, EP as SEP
     def dev(doc):
         seed = ("if(!sessionStorage.getItem('pk')){sessionStorage.setItem('pk','1');localStorage.setItem('g5help.v1'," + json.dumps(json.dumps(doc)) + ");}")
@@ -987,29 +987,18 @@ def flow_peek_sync(browser):
     cloud = lambda: json.loads((STORE.get((code, "g5help.v1")) or (0, "{}"))[1] or "{}")
     mid = cloud().get("entries", {}).get("p40-2-5", {})
     check("看過P1 B 加入：練得多的 B 那份勝出（雲端 solved=9、只有 K2）", mid.get("solved") == 9 and mid.get("peek") == {K2: 200}, mid)
-    pa.reload(); pa.wait_for_timeout(9000)
-    c = cloud().get("entries", {}).get("p40-2-5", {})
-    check("看過P2 A 換上雲端那份後把 K1 併回去並上傳：雲端 peek＝K1＋K2、solved 仍是 9", c.get("peek") == {K1: 100, K2: 200} and c.get("solved") == 9, c)
-    sa = pa.evaluate("G5HelpPage.state('p40-2-5')")
-    check("看過P3 A 本機也是聯集", (sa or {}).get("peek") == {K1: 100, K2: 200}, sa)
-    pb.reload(); pb.wait_for_timeout(4000)
-    sb = pb.evaluate("G5HelpPage.state('p40-2-5')")
-    check("看過P4 B 重開也拿到聯集", (sb or {}).get("peek") == {K1: 100, K2: 200}, sb)
     rev = (STORE.get((code, "g5help.v1")) or (0, ""))[0]
-    pa.wait_for_timeout(9000)
-    check("看過P5 收斂後不再來回上傳（9 秒內雲端版本號沒變）", (STORE.get((code, "g5help.v1")) or (0, ""))[0] == rev, (rev, STORE.get((code, "g5help.v1"))[0]))
-    # 家長在別台清除過（solved=0、沒有 peek）的篇：換上後不把這台記得的看過紀錄帶回來
-    cleared = json.dumps({"v": 1, "entries": {"p40-2-5": {"lessonDone": False, "idx": 0, "seed": 1, "streak": 0, "clean": 0, "solved": 0, "mastered": False, "log": [], "cur": None, "r": 9}}, "hidden": {}})
-    ok = pa.evaluate("(raw) => G5HelpApplyRemote('g5help.v1', raw)", cleared); pa.wait_for_timeout(500)
-    sc = pa.evaluate("G5HelpPage.state('p40-2-5')")
-    check("看過P6 換上已清除的那份：不把 K1、K2 帶回來", ok and "peek" not in (sc or {}) and "peek" not in json.loads(pa.evaluate("localStorage.getItem('g5help.v1')"))["entries"]["p40-2-5"], sc)
-    # Opus 審 e84b623 B1 的反例：別台清除後又練了 1 題（solved=1、新世代 g）⇒ 不把 K1、K2 帶回來
-    pa.evaluate("(raw) => G5HelpApplyRemote('g5help.v1', raw)", json.dumps({"v": 1, "entries": {"p40-2-5": dict(ent(9, {K1: 100, K2: 200}), g=1000)}, "hidden": {}}))
-    pa.wait_for_timeout(500)
-    again = json.dumps({"v": 1, "entries": {"p40-2-5": dict(ent(1, {}), g=2000, peek=None)}, "hidden": {}})
-    ok = pa.evaluate("(raw) => G5HelpApplyRemote('g5help.v1', raw)", again); pa.wait_for_timeout(500)
+    pa.reload(); pa.wait_for_timeout(9000)
+    sa = pa.evaluate("G5HelpPage.state('p40-2-5')")
+    check("看過P2 A 重開換上雲端那份：整份照收（solved=9、peek 只有 K2；K1 隨 A 那份一起不留，縮小範圍的已知後果）", (sa or {}).get("solved") == 9 and (sa or {}).get("peek") == {K2: 200}, sa)
+    check("看過P3 A 換上後沒有再上傳、不來回（雲端版本號沒變）", (STORE.get((code, "g5help.v1")) or (0, ""))[0] == rev, (rev, (STORE.get((code, "g5help.v1")) or (0,))[0]))
+    # 別台清除後又練了 1 題（Opus 審 e84b623 B1、第 2 輪的反例）：換上後不把這台記得的看過紀錄帶回來
+    cleared = ent(1, {}); del cleared["peek"]   # 別台清除後重建的紀錄：沒有 peek 欄位
+    again = json.dumps({"v": 1, "entries": {"p40-2-5": cleared}, "hidden": {}})
+    ok = pa.evaluate("(raw) => G5HelpApplyRemote('g5help.v1', raw)", again); pa.wait_for_timeout(800)
     sr = pa.evaluate("G5HelpPage.state('p40-2-5')")
-    check("看過P7 別台清除後又練 1 題（新世代）：不把 K1、K2 帶回來", ok and (sr or {}).get("solved") == 1 and "peek" not in (sr or {}), sr)
+    disk = json.loads(pa.evaluate("localStorage.getItem('g5help.v1')"))["entries"]["p40-2-5"]
+    check("看過P4 別台清除後又練 1 題：換上後不把 K2 帶回來（記憶體與磁碟都沒有 peek）", ok and (sr or {}).get("solved") == 1 and "peek" not in (sr or {}) and "peek" not in disk, sr)
     check("看過 沒有 JS 錯誤", not errors, errors)
     a.close(); b.close()
 

@@ -431,15 +431,25 @@ test("S6 notePeek 上界：超過 PEEK_MAX 丟最舊的", () => {
   assert.equal(H.practiceId(H.practiceAt(P, 0)) in st.peek, true);
 });
 
-test("S7 題庫每一題都看過答案才算學不會（allSeen，交辦 #2288）", () => {
-  const ks = H.practiceAll(P).map(H.practiceId);
+test("S7 之後還會再出的換數字題都看過答案＝學不會，才提示（allSeen，交辦 #2288；Opus 第 2 輪審 4fc56af）", () => {
+  const altKeys = [].concat(...P.practiceAlt).map(H.practiceId), firstKeys = P.practice.map(H.practiceId);
   const st = DOC.fresh(); st.peek = {};
-  ks.slice(0, -1).forEach((k) => { st.peek[k] = 1; });
-  assert.equal(H.allSeen(P, st), false, "還有一題沒看過答案");
-  st.log = [{ t: 1, q: 17, clean: false, wrongs: 1, k: ks[ks.length - 1] }];
-  assert.equal(H.allSeen(P, st), true, "最後一題只記在 log 的 k 也算");
+  altKeys.slice(0, -1).forEach((k) => { st.peek[k] = 1; });
+  assert.equal(H.allSeen(P, st), false, "還有一題換數字題沒看過答案");
+  st.log = [{ t: 1, q: 17, clean: false, wrongs: 1, k: altKeys[altKeys.length - 1] }];
+  assert.equal(H.allSeen(P, st), true, "最後一題只記在 log 的 k 也算；第 1 輪那 6 題不看（之後不會再出）");
+  assert.equal(firstKeys.some((k) => k in st.peek), false, "前提：第 1 輪的題一題都沒看過答案");
   const plainE = H.LIST.find((e) => (e.practice || []).length && !(e.practiceAlt || []).length);
   assert.equal(H.allSeen(plainE, { peek: {}, log: [] }), false, "沒有換數字題的篇不提示");
+  // Opus 的反例：第 1 輪 6 題錯第 3、6 題（不可能連對 3 題）、12 題換數字題各錯一次、之後全部一次就對 ⇒ 永遠學不會，提示要出現
+  const s2 = DOC.fresh(); let t = 1;
+  for (let i = 0; i < 60; i++) {
+    const w = i === 2 || i === 5 || (i >= 6 && i < 18) ? 1 : 0;
+    if (w) H.notePeek(P, s2, s2.idx, t);
+    H.scoreChoice(P, s2, w, need3, t++);
+  }
+  assert.equal(s2.mastered, false);
+  assert.equal(H.allSeen(P, s2), true, "已經學不會時提示要出現");
 });
 
 test("S8 只看過一部分題目的答案不會永遠學不會：看過答案的題答對不加不減（Opus 審 e84b623 B2）", () => {

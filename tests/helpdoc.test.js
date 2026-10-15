@@ -199,20 +199,7 @@ test("H19 peek 上界與遷移：只留最新 256 筆、壞的只丟那部分、
   assert.equal(D.serialize(n.entries, n.hidden, n.deleted), PRE.serialize(o.entries, o.hidden, o.deleted));
 });
 
-test("H20 兩台同步合併：unionPeek 取聯集、同題留較早時間、沒變回 false", () => {
-  const st = {peek: {[KK(1)]: 50, [KK(2)]: 60}};
-  assert.equal(D.unionPeek(st, {[KK(2)]: 40, [KK(3)]: 70}), true);
-  assert.deepEqual(plain(st.peek), {[KK(1)]: 50, [KK(2)]: 40, [KK(3)]: 70});
-  assert.equal(D.unionPeek(st, {[KK(1)]: 99}), false, "對方沒有多出來的、時間也不更早：不必再存");
-  const none = {}; assert.equal(D.unionPeek(none, {[KK(5)]: 1}), true); assert.deepEqual(plain(none.peek), {[KK(5)]: 1});
-  assert.equal(D.unionPeek({}, "壞資料"), false);
-  // 上界：已滿 256 筆時，併進來又會被丟的舊題不算變動（否則兩台一直互傳）
-  const full = {peek: {}}; for (let i = 0; i < 256; i++) full.peek[KK(i + 10)] = 1000 + i;
-  assert.equal(D.unionPeek(full, {[KK(1)]: 1}), false);
-});
-
-test("H21 紀錄世代 g：clean1 保留合法的 g、壞的丟掉；沒有 g 的舊存檔不多寫（Opus 審 e84b623 B1）", () => {
-  assert.equal(D.clean1({solved: 1, g: 1760000000000}).g, 1760000000000);
-  [0, -1, 1.5, "x", null].forEach((bad) => assert.equal(D.clean1({solved: 1, g: bad}).g, undefined));
-  assert.equal("g" in D.clean1({solved: 1}), false);
+test("H22 縮小範圍：不再有跨裝置合併 unionPeek、紀錄世代 g（7f88bbb 曾寫的 g 讀進來即丟）", () => {
+  assert.equal(D.unionPeek, undefined);
+  assert.equal("g" in D.clean1({solved: 1, g: 1760000000000}), false);
 });
