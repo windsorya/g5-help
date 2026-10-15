@@ -45,7 +45,8 @@ ship)
   # 推之前三道檢查（#2260 補審 70358bb 抓到的假綠：commit 漏了重建後的 index.html 時，HEAD 的 index.html 就是線上舊版，
   # 下面的雜湊比對第一輪就判「已是這一版」並送 --done——家長看到連結，新內容其實沒上線）。任何一道沒過就停，不推。
   pub=(src index.html tests sync.js qrcode.js upload.js)
-  dirty=$(git status --porcelain -- ${pub})
+  # 只看已追蹤檔案：推上去、會被伺服的只有已追蹤檔；工作樹裡大量 hook 自動備份的 *.bak.* 是未追蹤檔，不算改動（2026-10-15 正向實跑抓到的誤判）
+  dirty=$(git status --porcelain --untracked-files=no -- ${pub})
   [[ -z ${dirty} ]] || { print -r -- "下列改動還沒 commit（commit 要含 src、重建後的 index.html、tests/kidtext_harvest.json）：
 ${dirty}"; st "沒推"; exit 1 }
   ${PY} build.py > "${LOG}/build.log" 2>&1 || { cat "${LOG}/build.log"; exit 1 }
