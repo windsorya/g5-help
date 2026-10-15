@@ -66,7 +66,8 @@ ${dirty}"
     st "已回寫網頁進度清單（家長看得到連結）"
   fi
   ( ${PY} tests/e2e.py --base https://windsorya.github.io/g5-help/ > "${LOG}/live.log" 2>&1; print "live_rc=$?" >> "${LOG}/live.log" ) &!
-  st "正式網址端到端在背景跑，結果看 ${LOG}/live.log（最後一行 live_rc=0 才算全過）"
+  # 背景這一支讀的是本工作樹的 tests/：跑完前刪掉工作樹＝中途 ModuleNotFoundError（2026-10-15 實錄：219 項全過後中斷）
+  st "正式網址端到端在背景跑（約 5 分鐘），結果看 ${LOG}/live.log（最後一行 live_rc=0 才算全過）；跑完前不要刪這個工作樹"
   ;;
 *)
   print "用法：zsh tools/post.sh verify | ship <篇id> [傳題ID]"; exit 2
