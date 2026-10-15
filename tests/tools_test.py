@@ -65,6 +65,22 @@ class VideoCheck(unittest.TestCase):
         self.assertEqual(seen, ["DDDDDDDDDDD"])                      # 第一支出錯，第二支照做
         self.assertEqual(rc, 1)
 
+    def test_bad_metadata_does_not_stop_batch(self):
+        """Codex 審 556db59：第一支 yt-dlp 回壞 JSON（meta 丟例外），第二支照做、整批回 1。"""
+        good = {"id": "GGGGGGGGGGG", "embed": True, "availability": "public", "duration": 60}
+
+        def meta(v):
+            if v == "FFFFFFFFFFF":
+                raise ValueError("Expecting property name: line 1 column 2")
+            return dict(good)
+        video_check.meta = meta
+        video_check.fetch = lambda v, out: (out / f"{v}.mp4", out / f"{v}.wav")
+        video_check.transcribe = lambda v, wav, out: 5
+        seen = []
+        video_check.tiles = lambda v, mp4, times, out: seen.append(v) or out / f"{v}_tiles.jpg"
+        rc = video_check.check(["FFFFFFFFFFF", "GGGGGGGGGGG"], self.d)
+        self.assertEqual((rc, seen), (1, ["GGGGGGGGGGG"]))
+
     def test_all_good_is_zero(self):
         metas = {"EEEEEEEEEEE": {"id": "EEEEEEEEEEE", "embed": True, "availability": "public", "duration": 60}}
         rc, seen = self._check_with(metas)

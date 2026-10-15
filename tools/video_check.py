@@ -100,7 +100,13 @@ def check(specs, out):
     with cf.ThreadPoolExecutor(len(want) * 2) as ex:            # 查資料與下載同時進行
         metas = {v: ex.submit(meta, v) for v in want}
         files = {v: ex.submit(fetch, v, out) for v in want}
-        metas = {v: f.result() for v, f in metas.items()}
+        done = {}
+        for v, f in metas.items():                             # 查資料那一步出錯（例如 yt-dlp 回壞 JSON）也只記這一支，不中止整批（Codex 審 556db59）
+            try:
+                done[v] = f.result()
+            except Exception as e:                              # noqa: BLE001
+                done[v] = {"id": v, "error": f"查影片資料失敗：{e}"}
+        metas = done
         got = {}
         for v, f in files.items():
             try:
@@ -110,7 +116,7 @@ def check(specs, out):
     rows = []
     for v, m in metas.items():
         n, tile = 0, ""
-        if v in got:
+        if v in got and not m.get("error"):                     # 查資料就失敗的那一支不做轉寫抽格（結果不可信），直接列為不能用
             try:                                                # 一支轉寫或抽格出錯，記下來、繼續做下一支（Codex 審 41b02fe）
                 mp4, wav = got[v]
                 n = transcribe(v, wav, out)                     # whisper 一支一支跑（同時跑會搶 GPU）
