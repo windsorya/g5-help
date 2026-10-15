@@ -7,10 +7,14 @@
   ・自檢 B01–B19：把內容改壞（hard.js 資料用 G5Hard setter 改、app.html／frac.js 文案用回應內容替換），斷言閘門抓得到；正例斷言不誤判。
   ・U01：交付頁的「家長傳題目」進度，固定時鐘 15:00／15:01、lastFetch＝0／null／undefined，都只說「已送出，等電腦取回」。
 結果寫進 tests/kidtext_harvest.json（記 index.html、kidgate.js、本檔的 sha256；node 的 hard.test／standard.test 讀它，過期即紅）。
-跑法：python3.12 tests/e2e_kidtext.py [--only chromium|webkit]
+跑法：python3.12 tests/e2e_kidtext.py [--only chromium|webkit] [--parallel]
+  --parallel：Chromium、WebKit 各開一個行程同時跑（寫檔時上鎖、只換自己那一格），最後統一判定一次——
+  2026-10-15 #2259 復盤：兩個瀏覽器排隊跑一次 4.7–7.4 分鐘，是孩子等解說時最長的一段。
 """
+import fcntl
 import hashlib
 import json
+import time
 import subprocess
 import sys
 from datetime import datetime, timezone, timedelta
@@ -646,16 +650,28 @@ def run_browser(B):
     B.selftests["U01"] = u01(B)
 
 
+def final_check():
+    # 案例完整性與總判定交給 tests/kidtext.js（node 端同一套）
+    return subprocess.run(["node", "-e", "const K=require('./tests/kidtext.js');const p=K.harvestProblems(['word','length','unclassified']);"
+                           "p.forEach(x=>console.log('PROBLEM '+x));console.log(p.length?'kidtext: '+p.length+' 項問題':'kidtext: 全部通過');process.exit(p.length?1:0)"], cwd=ROOT).returncode
+
+
+def parallel():
+    t0 = time.time()
+    procs = [subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "--only", b, "--no-check"], cwd=ROOT) for b in ("chromium", "webkit")]
+    rcs = [p.wait() for p in procs]
+    say(f"兩個瀏覽器同時跑完：{time.time() - t0:.0f} 秒（各自結束碼 {rcs}）")
+    sys.exit(final_check() or max(rcs))
+
+
 def main():
+    if "--parallel" in sys.argv:
+        return parallel()
     only = sys.argv[sys.argv.index("--only") + 1] if "--only" in sys.argv else None
     # 正式上限固定（小五 40，tests/kidtext.js OFFICIAL_MAX）：不用執行當天的年級換算（第 8 輪 B19：隔年同一份 41 字會從紅變綠）
     limit = json.loads(subprocess.check_output(["node", "-e", "console.log(require('./tests/kidtext.js').OFFICIAL_MAX)"], cwd=ROOT))
     stamp = {"index_sha256": sha(ROOT / "index.html"), "kidgate_sha256": sha(ROOT / "tests" / "kidgate.js"), "driver_sha256": sha(Path(__file__)), "max": limit}
-    report = dict(stamp, self_max=SELF_MAX, browsers={})
-    if OUT.exists() and only:
-        # 只跑一個瀏覽器：另一個瀏覽器的結果原樣保留「它自己當時量的」hash（逐瀏覽器 stamp），由 tests/kidtext.js 逐瀏覽器判新鮮度；
-        # 採字器／driver／index.html 任一變了，那份舊結果就判過期，不會因為頂層 hash 換新而被沿用（第 8 輪）
-        report["browsers"] = {k: v for k, v in json.loads(OUT.read_text()).get("browsers", {}).items() if k != only}
+    results = {}
     with sync_playwright() as p:
         for name, launcher, device in (("chromium", p.chromium, {"viewport": {"width": 1280, "height": 900}}),
                                        ("webkit", p.webkit, p.devices["iPad (gen 7)"])):
@@ -672,16 +688,24 @@ def main():
             uniq = {}
             for v in B.viol:
                 uniq.setdefault((v["kind"], v.get("word"), v.get("text")), v)
-            report["browsers"][name] = {**stamp, "cases": sorted(B.cases), "branches": sorted(B.branches), "violations": list(uniq.values()),
+            results[name] = {**stamp, "cases": sorted(B.cases), "branches": sorted(B.branches), "violations": list(uniq.values()),
                                         "selftests": B.selftests, "errors": B.errors, "snapshots": B.snaps}
             for v in uniq.values():
                 say(f"VIOLATION {name} [{v['kind']}] {v['case']} @ {v['at']}：" + (f"「{v.get('word')}」…{v['text']}…" if v["kind"] == "word" else f"{v.get('chars', '')} 字：{v['text']}"))
             say(f"{name}：快照 {B.snaps} 次、案例 {len(B.cases)}、分支 {len(B.branches)}、違規 {len(uniq)}、自檢 {sum(1 for t in B.selftests.values() if t['ok'])}/{len(B.selftests)}、JS 錯誤 {len(B.errors)}")
-    OUT.write_text(json.dumps(report, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
-    # 案例完整性與總判定交給 tests/kidtext.js（node 端同一套）
-    rc = subprocess.run(["node", "-e", "const K=require('./tests/kidtext.js');const p=K.harvestProblems(['word','length','unclassified']);"
-                         "p.forEach(x=>console.log('PROBLEM '+x));console.log(p.length?'kidtext: '+p.length+' 項問題':'kidtext: 全部通過');process.exit(p.length?1:0)"], cwd=ROOT)
-    sys.exit(rc.returncode)
+    # 寫檔時上鎖、重讀現檔：--parallel 兩個行程同時跑，各自只換自己那一格，不會把對方剛寫的結果蓋回舊的
+    with open(OUT.with_name(OUT.name + ".lock"), "w") as lk:
+        fcntl.flock(lk, fcntl.LOCK_EX)
+        report = dict(stamp, self_max=SELF_MAX, browsers={})
+        if OUT.exists() and only:
+            # 只跑一個瀏覽器：另一個瀏覽器的結果原樣保留「它自己當時量的」hash（逐瀏覽器 stamp），由 tests/kidtext.js 逐瀏覽器判新鮮度；
+            # 採字器／driver／index.html 任一變了，那份舊結果就判過期，不會因為頂層 hash 換新而被沿用（第 8 輪）
+            report["browsers"] = {k: v for k, v in json.loads(OUT.read_text()).get("browsers", {}).items() if k != only}
+        report["browsers"].update(results)
+        OUT.write_text(json.dumps(report, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    if "--no-check" in sys.argv:
+        sys.exit(1 if any(r["errors"] or r["violations"] for r in results.values()) else 0)
+    sys.exit(final_check())
 
 
 if __name__ == "__main__":

@@ -144,3 +144,94 @@ test("用詞閘自檢：判準本身（node 端同一份 kidgate.js）＋案例�
   try { assert.ok(KT.harvestProblems(["word"], {indexPath: tmp}).some((p) => /過期/.test(p)), "index.html 改過、沒重跑採字 ⇒ 要紅"); } finally { fs.unlinkSync(tmp); }
   assert.ok(KT.fracBranches().includes("checkCommon:ok-not-lcm") && KT.fracBranches().includes("checkReduce:unequal-div"), "frac.js 判題代碼要推得出分支");
 });
+
+// ── 快篩（2026-10-15 交辦 #2259 復盤）：新增一篇時先跑 `node --test --test-name-pattern=快篩 tests/hard.test.js`，1 秒內抓出內容錯，
+// 不必等兩個瀏覽器採字跑完才發現（p40-2-5 那次：首頁那行 46 字、影片標題的「假分數」沒附白話，都是採字 5 分鐘後才看到，又整套重跑）。
+// 這裡只是快篩；主閘仍是真瀏覽器採字（tests/e2e_kidtext.py）。
+test("快篩：首頁卡片那一行（出處・重點・日期）每句不超過句長上限", () => {
+  const lim = H.readingAt(new Date()).maxSentence, problems = [];
+  H.LIST.forEach((e) => {
+    const line = e.source + (e.tag ? "・" + e.tag : "") + "・" + e.date.slice(5).replace("-", "/");   // 同 src/app.html 首頁卡片 meta
+    KG.sentences(line).forEach((s) => { if (KG.countChars(s) > lim) problems.push(e.id + " 首頁卡片那一行 " + KG.countChars(s) + " 字（上限 " + lim + "）：" + s + "——縮短 source 或 tag"); });
+  });
+  assert.deepEqual(problems, []);
+});
+
+test("快篩：影片標題與說明裡的難詞要在同一段附白話（影片區可以不看教學直接打開）", () => {
+  const lim = H.readingAt(new Date()).maxSentence, problems = [];
+  H.LIST.forEach((e) => {
+    // 開場白（lead）在影片區上方、一進頁就看得到：lead 已附白話的詞，主閘不會判影片區違規（板根那篇就是），快篩不比主閘嚴
+    const lead = String(e.lead || "");
+    const words = Object.keys(H.HARD_WORDS).concat(Object.keys(e.words || {})).filter((w) => !(lead.includes(w) && KG.glossed(lead, w, lead.indexOf(w))));
+    // 影片區照畫面順序（每段：標題、說明）接成一串；同主閘，只看每個難詞在影片區「第一次出現」有沒有附白話
+    const seq = (e.videos || []).map((v) => String(v.title || "") + "\n" + String(v.note || "")).join("\n");
+    words.forEach((w) => {
+      const at = seq.indexOf(w);
+      if (at >= 0 && !KG.glossed(seq, w, at)) problems.push(e.id + " 影片區第一次出現的「" + w + "」沒附白話（或換成白話）：" + seq.slice(Math.max(0, at - 12), at + 20).replace(/\n/g, " ／ "));
+    });
+    KG.sentences(seq).forEach((s) => { if (KG.countChars(s) > lim) problems.push(e.id + " 影片文字超過句長上限：" + s); });
+  });
+  assert.deepEqual(problems, []);
+});
+
+test("快篩：數學題的答案與每一題比大小，用 frac.js 再算一次", () => {
+  const two = (s) => { const m = String(s).match(/(\d+)\/(\d+)\D+?(\d+)\/(\d+)/); return m ? [{ n: +m[1], d: +m[2] }, { n: +m[3], d: +m[4] }] : null; };
+  const judge = (q, where) => {
+    const f = two(q.q); if (!f) return;
+    const sign = F.cmp(f[0], f[1]), txt = f.map(F.txt);
+    if (q.opts.every((o) => [">", "<", "="].includes(o))) assert.equal(q.opts[q.a], sign, where + "：" + q.q + " 應填 " + sign);
+    else if (/哪一個比較大/.test(q.q) && q.opts.length === 2 && q.opts.every((o) => txt.includes(o))) assert.equal(q.opts[q.a], sign === ">" ? txt[0] : txt[1], where + "：" + q.q);
+  };
+  H.LIST.filter((e) => e.subject === "數學" && e.kind === "steps").forEach((e) => {
+    const f = two(e.question);
+    if (f && /□/.test(e.question)) assert.ok(String(e.answer).includes(F.cmp(f[0], f[1])), e.id + " 答案和 frac.js 算的不一樣");
+    e.steps.forEach((s, i) => s.check && judge(s.check, e.id + " 第 " + (i + 1) + " 步"));
+    (e.practice || []).forEach((q, i) => judge(q, e.id + " 練習 " + (i + 1)));
+  });
+  // 判準自檢：答案故意弄反要抓得到（兩種題型各一）
+  const bad = JSON.parse(JSON.stringify(H.get("p40-2-5")));
+  bad.practice[2].a = 0; bad.practice[1].a = 0;
+  assert.throws(() => judge(bad.practice[2], "自檢 >< 題"));
+  assert.throws(() => judge(bad.practice[1], "自檢 哪一個比較大"));
+});
+
+// Opus 審 p40-2-5（2026-10-15）抓到：10 組比較全部是「數字大的反而小」，只學會「選數字小的」也能 6/6 全對；4 題確認題的正解又全是第一個選項
+// （前端不打亂選項）。這種事 Sonnet 與 Codex 都沒抓到，所以改成機器檢查，不靠審稿模型夠不夠強。
+test("快篩：作答不能用同一個表面捷徑全部答對（一律選第一個；比大小一律選數字小的或數字大的）", () => {
+  const two = (s) => { const m = String(s).match(/(\d+)\/(\d+)\D+?(\d+)\/(\d+)/); return m ? [{ n: +m[1], d: +m[2] }, { n: +m[3], d: +m[4] }] : null; };
+  const shortcutProblems = (list) => {
+    const problems = [];
+    list.filter((e) => e.kind === "steps").forEach((e) => {
+      const checks = e.steps.filter((s) => s.check).map((s) => s.check), items = checks.concat(e.practice || []);
+      [["確認題", checks], ["練習題", e.practice || []]].forEach(([name, g]) => {
+        if (g.length >= 3 && g.every((q) => q.a === 0)) problems.push(e.id + "：" + name + "的正解全是第一個選項（前端不打亂選項）");
+      });
+      if (e.subject !== "數學") return;
+      // 比大小題：數字比較小的那一個（分子分母都不比較大、至少一個比較小）是不是比較大；分子分母一大一小的題，兩種捷徑都不適用
+      const le = (x, y) => x.n <= y.n && x.d <= y.d && (x.n < y.n || x.d < y.d);
+      const sides = items.map((q) => {
+        const f = two(q.q); if (!f) return null;
+        const small = le(f[0], f[1]) ? 0 : le(f[1], f[0]) ? 1 : null;
+        const sign = F.cmp(f[0], f[1]); if (sign === "=") return null;
+        return { small: small, larger: sign === ">" ? 0 : 1 };
+      }).filter(Boolean);
+      if (sides.length >= 3 && sides.every((x) => x.small !== null && x.larger === x.small)) problems.push(e.id + "：每一題比大小都是「數字小的比較大」，只學會「選數字小的」也能全對——加一題數字大的比較大");
+      if (sides.length >= 3 && sides.every((x) => x.small !== null && x.larger !== x.small)) problems.push(e.id + "：每一題比大小都是「數字大的比較大」，只學會「選數字大的」也能全對");
+    });
+    return problems;
+  };
+  assert.deepEqual(shortcutProblems(H.LIST), []);
+  // 判準自檢：上線版（b3daf54）的 p40-2-5 兩種毛病都要抓到
+  const old = JSON.parse(JSON.stringify(H.get("p40-2-5")));
+  old.steps.forEach((s) => { if (s.check) { s.check.opts = [s.check.opts[s.check.a]].concat(s.check.opts.filter((_, i) => i !== s.check.a)); s.check.a = 0; } });
+  old.practice = old.practice.filter((q) => !/53\/50|13\/10/.test(q.q));
+  const got = shortcutProblems([old]);
+  assert.ok(got.some((p) => /確認題的正解全是第一個選項/.test(p)) && got.some((p) => /數字小的比較大/.test(p)), "上線版的兩種毛病都要抓到：" + got.join("；"));
+  assert.ok(!got.some((p) => /練習題的正解全是第一個/.test(p)), "練習題正解位置有錯開，不該誤報");
+});
+
+test("審稿模型不得比原設計弱：2026-10-15 起 readReview.by 只能是 codex 或 claude-opus", () => {
+  // 律師 2026-10-15：「為何複審模型反而變弱？」——Codex 額度用完時我改派 Sonnet 審稿。Codex 不能用就用 Opus，不得降級。
+  const STRONG = ["codex", "claude-opus"];
+  H.LIST.filter((e) => e.date >= "2026-10-15").forEach((e) => assert.ok(e.readReview && STRONG.includes(e.readReview.by), e.id + " 的 readReview.by 是 " + (e.readReview && e.readReview.by) + "，要用 " + STRONG.join(" 或 ")));
+});

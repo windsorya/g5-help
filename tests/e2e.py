@@ -360,7 +360,10 @@ def flow_home(browser):
     math = page.locator('.subj[data-subj="數學"] .hcard[href="#h/p38-6-2"]')
     check("數學也列出第 2 篇（26/25 和 31/30）", page.locator('.subj[data-subj="數學"] .hcard[href="#h/p40-2-5"]').count() == 1)
     check("數學有第 1 篇（28/42），狀態還沒看（數學已不只一篇，指定那一篇）", math.count() == 1 and "28/42 和 27/45 比大小" in math.inner_text() and "還沒看" in math.inner_text(), math.inner_text())
-    check("國語目前寫「還沒有題目」", "還沒有題目" in page.locator('.subj[data-subj="國語"]').inner_text())
+    # 哪幾科還沒有題目要看當下的清單（新增第一篇國語題時，寫死「國語還沒有題目」會誤紅；2026-10-15 #2259 復盤）
+    used = set(page.evaluate("G5Hard.LIST.map(function(e){return e.subject})"))
+    empty_ok = all(("還沒有題目" in page.locator('.subj[data-subj="%s"]' % s).inner_text()) == (s not in used) for s in ["國語", "數學", "自然", "社會", "英文", "其他"])
+    check("沒有題目的科目寫「還沒有題目」、有題目的科目不寫", empty_ok, sorted(used))
     math.click()
     page.wait_for_selector("#entry:not([hidden])")
     check("點進去網址變成 #h/p38-6-2、標題是那一篇", page.url.endswith("#h/p38-6-2") and "28/42" in page.title(), page.url)
@@ -389,7 +392,7 @@ def flow_migrate(browser):
 def flow_steps(browser, label, device=None, shots=False):
     """通用 steps 格式（任何科目）：確認題答錯說原因、答對才往下、沒確認題按「我懂了」、答案、同型練習到學會。"""
     ctx, page, errors = open_page(browser, device, init=FIXTURE, url=HOME)
-    card = page.locator('.subj[data-subj="國語"] .hcard')
+    card = page.locator('.subj[data-subj="國語"] .hcard[href="#h/t-guoyu"]')
     check(f"{label} 國語出現測試題", card.count() == 1 and "測試：成語填空" in card.inner_text())
     card.click()
     page.wait_for_selector("#entry:not([hidden])")
@@ -414,7 +417,7 @@ def flow_steps(browser, label, device=None, shots=False):
     if shots:
         shot(page, f"{label}-steps")
     page.locator("#backHome").click()
-    check(f"{label} 回列表後國語那篇顯示學會了", "學會了" in page.locator('.subj[data-subj="國語"] .hcard').inner_text())
+    check(f"{label} 回列表後國語那篇顯示學會了", "學會了" in page.locator('.subj[data-subj="國語"] .hcard[href="#h/t-guoyu"]').inner_text())
     check(f"{label} steps 格式沒有 JS 錯誤", not errors, errors)
     ctx.close()
 
@@ -795,7 +798,7 @@ def flow_hide(browser, label="Chromium"):
     ctx, pg, errors = open_page(browser, init=FIXTURE + seed, url=HOME)
     pg.wait_for_function("window.G5HelpWriter && G5HelpWriter()")
     G = '.subj[data-subj="國語"]'
-    card = lambda: pg.locator(G + " .hcard")
+    card = lambda: pg.locator(G + ' .hcard[href="#h/t-guoyu"]')
     btn = pg.locator('button[data-hide="t-guoyu"]')
     check(f"{label} 隱藏H1 舊存檔沒有 hidden 欄位：每篇照常列出、沒有「已隱藏」", card().count() == 1 and pg.locator("#hidBox").count() == 0 and "練習中" in card().inner_text())
     check(f"{label} 隱藏H2 每張篇卡片都有「隱藏這篇」", btn.count() == 1 and btn.inner_text() == "隱藏這篇" and pg.locator('button[data-hide="p38-6-2"]').count() == 1)
@@ -864,16 +867,16 @@ def flow_delete(browser, label="Chromium"):
     check(f"{label} 刪除D4 5 秒沒再按：自動回到「刪除」", dbtn.inner_text() == "刪除", dbtn.inner_text())
     dbtn.click(); dbtn.click()
     d = db_of(pg)
-    check(f"{label} 刪除D5 確定後：已隱藏剩 1 篇、國語那科說「還沒有題目」",
-          pg.locator("#hidBox summary").inner_text() == "顯示已隱藏的 1 篇" and "還沒有題目" in pg.locator(G).inner_text(), (pg.locator("#hidBox summary").inner_text(), pg.locator(G).inner_text()))
+    check(f"{label} 刪除D5 確定後：已隱藏剩 1 篇、國語那篇不再列出",
+          pg.locator("#hidBox summary").inner_text() == "顯示已隱藏的 1 篇" and pg.locator(G + ' .hcard[href="#h/t-guoyu"]').count() == 0, (pg.locator("#hidBox summary").inner_text(), pg.locator(G).inner_text()))
     check(f"{label} 刪除D6 存檔：deleted 記這篇、hidden 仍留這篇、作答紀錄歸零",
           isinstance(d.get("hidden", {}).get("_del_t-guoyu"), int) and d["hidden"].get("t-guoyu") == 5 and d["entries"]["t-guoyu"]["solved"] == 0 and d["entries"]["t-guoyu"]["lessonDone"] is False, d)
     pg.reload(); pg.wait_for_function("window.G5HelpWriter && G5HelpWriter()")
-    check(f"{label} 刪除D7 重新整理後仍刪掉、紀錄沒被舊資料併回來", card_count(pg, G) == 0 and db_of(pg)["entries"]["t-guoyu"]["solved"] == 0, db_of(pg))
+    check(f"{label} 刪除D7 重新整理後仍刪掉、紀錄沒被舊資料併回來", pg.locator(G + ' .hcard[href="#h/t-guoyu"]').count() == 0 and db_of(pg)["entries"]["t-guoyu"]["solved"] == 0, db_of(pg))
     pg.locator("#setBox summary").click(); pg.locator("#unhideAll").click()
     d = db_of(pg)
     check(f"{label} 刪除D8 「恢復全部隱藏的篇」只帶回數學那篇，刪掉的不回來",
-          pg.locator('.subj[data-subj="數學"] .hcard[href="#h/p38-6-2"]').count() == 1 and card_count(pg, G) == 0 and pg.locator("#hidBox").count() == 0 and sorted(d["hidden"].keys()) == ["_del_t-guoyu", "t-guoyu"], d)
+          pg.locator('.subj[data-subj="數學"] .hcard[href="#h/p38-6-2"]').count() == 1 and pg.locator(G + ' .hcard[href="#h/t-guoyu"]').count() == 0 and pg.locator("#hidBox").count() == 0 and sorted(d["hidden"].keys()) == ["_del_t-guoyu", "t-guoyu"], d)
     txt = pg.locator("#home").inner_text()
     check(f"{label} 刪除D9 新字每句不超過 40 字", not sentences_over(txt), sentences_over(txt))
     check(f"{label} 刪除 沒有 JS 錯誤", not errors, errors)
@@ -887,7 +890,7 @@ def flow_clear(browser, label="Chromium"):
             "localStorage.setItem('g5help.v1',JSON.stringify({v:1,entries:{'p38-6-2':{lessonDone:true,solved:5,idx:5,streak:3,mastered:true,r:4},'t-guoyu':{lessonDone:true,r:1}},hidden:{'p38-6-2':5}}));}")
     ctx, pg, errors = open_page(browser, init=FIXTURE + seed, url=HOME)
     pg.wait_for_function("window.G5HelpWriter && G5HelpWriter()")
-    G = '.subj[data-subj="國語"] .hcard'
+    G = '.subj[data-subj="國語"] .hcard[href="#h/t-guoyu"]'
     check(f"{label} 清除C1 首頁有「家長設定」", pg.locator("#setBox summary").inner_text() == "家長設定")
     pg.locator("#setBox summary").click()
     clr = pg.locator("#clearAll")
@@ -950,13 +953,13 @@ def flow_hide_sync(browser):
     check("同步S1 A 隱藏後，雲端那份 g5help.v1 也有 hidden", "t-guoyu" in (cloud.get("hidden") or {}), cloud)
     b = dev(); pb = b.new_page(); pb.on("pageerror", lambda e: errors.append(str(e)))
     pb.goto(HOME + "#sync=" + code); pb.wait_for_timeout(3000)
-    check("同步S2 B 加入後：國語那篇也隱藏、有「顯示已隱藏的 1 篇」", pb.locator('.subj[data-subj="國語"] .hcard').count() == 0 and pb.locator("#hidBox summary").inner_text() == "顯示已隱藏的 1 篇")
+    check("同步S2 B 加入後：國語那篇也隱藏、有「顯示已隱藏的 1 篇」", pb.locator('.subj[data-subj="國語"] .hcard[href="#h/t-guoyu"]').count() == 0 and pb.locator("#hidBox summary").inner_text() == "顯示已隱藏的 1 篇")
     pb.locator("#hidBox summary").click(); pb.locator("#hidBox").get_by_role("button", name="恢復").click()
     pb.wait_for_timeout(5500)
     cloud = json.loads((STORE.get((code, "g5help.v1")) or (0, "{}"))[1] or "{}")
     check("同步S3 B 恢復 → 雲端那份 hidden 清空", cloud.get("hidden") == {}, cloud)
     pa.reload(); pa.wait_for_timeout(3000)   # 同步只在開頁時抓雲端新版（sync.js 現行設計；與 e2e_sync「第一台重開拿到」同）
-    check("同步S4 A 重開後也恢復（由本頁 accept 換上，不是 sync 直接寫）", pa.locator('.subj[data-subj="國語"] .hcard').count() == 1 and not db_of(pa).get("hidden"), db_of(pa))
+    check("同步S4 A 重開後也恢復（由本頁 accept 換上，不是 sync 直接寫）", pa.locator('.subj[data-subj="國語"] .hcard[href="#h/t-guoyu"]').count() == 1 and not db_of(pa).get("hidden"), db_of(pa))
     check("同步 沒有 JS 錯誤", not errors, errors)
     a.close(); b.close()
 
