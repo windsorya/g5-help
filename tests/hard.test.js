@@ -232,6 +232,12 @@ const SHORTCUTS = (() => {
       pick: (f) => { if (plusOne(f[0]) && plusOne(f[1])) return correct(f); const s = smaller(f); if (s === null) return null; const big = 1 - s; return f[big].d >= 10 ? s : big; },
       valid: (f) => plusOne(f[0]) && plusOne(f[1]) }
   };
+  // 會「跟一半比」（1 又 1/2 對上別的，用正確估算）、其他題照錯規則答：Opus 審第 3 套抓到——C 型都是 3/2 時這種孩子連對 3 題（#2274）
+  const halfPick = (f) => { const a = extra(f[0]), b = extra(f[1]); if (a[0] !== b[0]) return null; const h0 = 2 * a[1] === f[0].d, h1 = 2 * b[1] === f[1].d; return h0 === h1 ? null : correct(f); };
+  [["跟一半比＋都只多 1 就選數字小的、其他選數字大的", "都只多 1 就選數字小的、其他選數字大的"], ["跟一半比＋多出來的分子大的比較大", "多出來的分子大的比較大"]].forEach(([name, base]) => {
+    const b = rules[base];
+    rules[name] = { pick: (f) => { const h = halfPick(f); return h !== null ? h : b.pick(f); }, valid: (f) => halfPick(f) !== null };
+  });
   // 這一題用某條規則答，會不會答對（題目不是兩個分數比大小 ⇒ 數學規則不適用＝答不對）
   const rightBy = (q, pick) => {
     const f = two(q.q); if (!f || F.cmp(f[0], f[1]) === "=") return false;
@@ -300,6 +306,12 @@ test("快篩：作答不能用同一個表面捷徑拿到「學會」（一律�
   const got5 = SHORTCUTS([v0d]);
   assert.ok(got5.some((p) => /3 份以上就選它/.test(p)) && got5.some((p) => /分母是兩位數就輸/.test(p)), "0d5cf8e 版要抓到 T、D''：" + got5.join("；"));
   assert.ok(got5.some((p) => /第 12–14 題.*跟上一題正解換到另一邊/.test(p)), "0d5cf8e 版要抓到 Codex 那個「選上一題正解的另一邊」（第 12–14 題）：" + got5.join("；"));
+  // efa05fe 版第 3 套：C 型兩題都是 3/2——「跟一半比」組合規則要在第 3 套抓到（Opus 審，#2274）
+  const vef = JSON.parse(JSON.stringify(H.get("p40-2-5")));
+  vef.practiceAlt[1][2] = q("3/2 和 10/7，哪一個比較大？", ["3/2", "10/7"], 0);
+  vef.practiceAlt[1][5] = q("3/2 和 13/9，哪一個比較大？", ["3/2", "13/9"], 0);
+  const got6 = SHORTCUTS([vef]);
+  assert.ok(got6.some((p) => /跟一半比＋都只多 1/.test(p)) && got6.some((p) => /跟一半比＋多出來的分子/.test(p)), "efa05fe 版第 3 套要抓到「跟一半比」組合：" + got6.join("；"));
 });
 
 test("審稿模型不得比原設計弱：2026-10-15 起 readReview.by 只能是 codex 或 claude-opus", () => {
