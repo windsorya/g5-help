@@ -26,6 +26,7 @@ verify)
   nq=$(grep -E '^ℹ pass [0-9]+' "${LOG}/quick.log" | grep -oE '[0-9]+' | head -1)
   (( ${nq:-0} >= 4 )) || { st "快篩一條都沒跑到（只跑到 ${nq:-0} 條）：這個工作樹的 tests/hard.test.js 還沒有快篩？"; exit 1 }
   st "快篩通過（${nq} 條）"
+  ${PY} tests/tools_test.py > "${LOG}/tools.log" 2>&1 || { tail -15 "${LOG}/tools.log"; st "工具故障注入測試沒過"; exit 1 }
   ${PY} tests/e2e_kidtext.py --parallel > "${LOG}/kid.log" 2>&1 & kid=$!
   ${PY} tests/e2e.py > "${LOG}/e2e.log" 2>&1 & e2e=$!
   wait ${kid}; krc=$?

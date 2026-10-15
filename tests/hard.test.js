@@ -223,7 +223,14 @@ const SHORTCUTS = (() => {
     "分母成倍數就選數字大的、不成倍數就選數字小的": { pick: (f) => { const s = smaller(f); return s === null ? null : (mult(f) ? 1 - s : s); } },
     "兩邊分母都要換時只比多出來那塊的分母（分母小的比較大）": {
       pick: (f) => { if (mult(f)) return correct(f); const a = extra(f[0]), b = extra(f[1]); if (a[0] !== b[0] || a[1] === b[1]) return correct(f); return f[0].d < f[1].d ? 0 : f[1].d < f[0].d ? 1 : null; },
-      valid: (f) => { if (mult(f)) return true; const a = extra(f[0]), b = extra(f[1]); return a[0] !== b[0] || a[1] === b[1]; } }
+      valid: (f) => { if (mult(f)) return true; const a = extra(f[0]), b = extra(f[1]); return a[0] !== b[0] || a[1] === b[1]; } },
+    // 以下兩條是 Opus 複核 0d5cf8e 另測的（#2274）：只在「一個只多 1、另一個多更多」時用，都只多 1 時她用的是正確算法
+    "另一個多出來 2 份就選只多 1 的、3 份以上就選它": {
+      pick: (f) => { const p0 = plusOne(f[0]), p1 = plusOne(f[1]); if (p0 && p1) return correct(f); if (p0 === p1) return null; const o = p0 ? 1 : 0, e = extra(f[o])[1]; return e === 2 ? 1 - o : e >= 3 ? o : null; },
+      valid: (f) => plusOne(f[0]) && plusOne(f[1]) },
+    "數字大的那個分母是兩位數就輸、個位數就贏": {
+      pick: (f) => { if (plusOne(f[0]) && plusOne(f[1])) return correct(f); const s = smaller(f); if (s === null) return null; const big = 1 - s; return f[big].d >= 10 ? s : big; },
+      valid: (f) => plusOne(f[0]) && plusOne(f[1]) }
   };
   // 這一題用某條規則答，會不會答對（題目不是兩個分數比大小 ⇒ 數學規則不適用＝答不對）
   const rightBy = (q, pick) => {
@@ -243,7 +250,11 @@ const SHORTCUTS = (() => {
       // 一路排到「最後一套接回第一套換數字題」，所有連續 w 題的段落都檢查到（含第 1 輪接第 2 輪的交界）
       const seq = Array.from({ length: n * (alts.length + 2) }, (_, i) => H.practiceAt(e, i));
       // ok＝這題用它答會對；bogus＝這題靠的是錯的推理（全段都對、而且至少一題是靠錯推理碰對的，才算錯規則拿到學會）
-      const all = { "一律選第一個": { ok: (q) => q.a === 0, bogus: () => true }, "一律選第二個": { ok: (q) => q.a === 1, bogus: () => true } };
+      // 位置猜法也看上一題的正解（孩子答完就看得到）：Codex 審 41b02fe 用「選上一題正解的另一邊」在第 12～14 題拿到學會（#2274）
+      const two2 = (q) => q.opts.length === 2;
+      const all = { "一律選第一個": { ok: (q) => q.a === 0, bogus: () => true }, "一律選第二個": { ok: (q) => q.a === 1, bogus: () => true },
+        "跟上一題正解同一邊": { ok: (q, i) => i > 0 && q.a === seq[i - 1].a, bogus: () => true },
+        "跟上一題正解換到另一邊": { ok: (q, i) => i > 0 && two2(q) && two2(seq[i - 1]) && q.a === 1 - seq[i - 1].a, bogus: () => true } };
       if (e.subject === "數學") Object.keys(rules).forEach((name) => {
         const r = rules[name];
         all[name] = { ok: (q) => rightBy(q, r.pick), bogus: (q) => { const f = two(q.q); return !r.valid || !f || !r.valid(f); } };
@@ -251,7 +262,7 @@ const SHORTCUTS = (() => {
       Object.keys(all).forEach((name) => {
         for (let s = 0; s + w <= seq.length; s++) {
           const win = seq.slice(s, s + w);
-          if (win.every((q) => all[name].ok(q)) && win.some((q) => all[name].bogus(q))) { out.push(e.id + "：出題順序第 " + (s + 1) + "–" + (s + w) + " 題連續答對只靠「" + name + "」就做得到"); break; }
+          if (win.every((q, j) => all[name].ok(q, s + j)) && win.some((q) => all[name].bogus(q))) { out.push(e.id + "：出題順序第 " + (s + 1) + "–" + (s + w) + " 題連續答對只靠「" + name + "」就做得到"); break; }
         }
       });
     });
@@ -281,6 +292,14 @@ test("快篩：作答不能用同一個表面捷徑拿到「學會」（一律�
   v41.practiceAlt[0][4] = q("3/2 和 17/10，哪一個比較大？", ["17/10", "3/2"], 0);
   const got4 = SHORTCUTS([v41]);
   assert.ok(got4.some((p) => /分母成倍數就選數字大的/.test(p)) && got4.some((p) => /只比多出來那塊的分母/.test(p)), "41b02fe 版要抓到 Opus 那兩條：" + got4.join("；"));
+  // 0d5cf8e 上線版：只有一套換數字題、B 型是 4/3 和 11/8、5/4 和 10/7——T、D'' 兩條要在第 2 輪抓到（#2274）
+  const v0d = JSON.parse(JSON.stringify(H.get("p40-2-5")));
+  v0d.practiceAlt = [v0d.practiceAlt[0].slice()];
+  v0d.practiceAlt[0][1] = q("4/3 和 11/8，哪一個比較大？", ["4/3", "11/8"], 1);
+  v0d.practiceAlt[0][4] = q("5/4 和 10/7，哪一個比較大？", ["10/7", "5/4"], 0);
+  const got5 = SHORTCUTS([v0d]);
+  assert.ok(got5.some((p) => /3 份以上就選它/.test(p)) && got5.some((p) => /分母是兩位數就輸/.test(p)), "0d5cf8e 版要抓到 T、D''：" + got5.join("；"));
+  assert.ok(got5.some((p) => /第 12–14 題.*跟上一題正解換到另一邊/.test(p)), "0d5cf8e 版要抓到 Codex 那個「選上一題正解的另一邊」（第 12–14 題）：" + got5.join("；"));
 });
 
 test("審稿模型不得比原設計弱：2026-10-15 起 readReview.by 只能是 codex 或 claude-opus", () => {

@@ -121,6 +121,7 @@ function requiredCases(list = H.LIST) {
       out.push(e.id + ":lesson", e.id + ":direct");
       H.practiceAll(e).forEach((_, q) => out.push(e.id + ":resume" + q));   // 含 practiceAlt（第 2 輪起換數字的題，#2270）：每一題都要實際走到
       if ((e.practice || []).length) out.push(e.id + ":mastery");
+      if ((e.practice || []).length && (e.practiceAlt || []).length) out.push(e.id + ":revisit");   // 以前答錯過的題再出現、答對不算（#2274）
     } else {
       out.push(e.id + ":lesson", e.id + ":alt", e.id + ":direct", e.id + ":practice", e.id + ":resume");
     }

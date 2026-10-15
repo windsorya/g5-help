@@ -690,13 +690,17 @@ function choicePractice(){
     if (k !== q.a) { cur.wrongs++; save(); bt.classList.remove("shake"); void bt.offsetWidth; bt.classList.add("shake", "tried"); fb(out, false, (q.why && q.why[k]) || "再想想看。"); return; }
     each(bs, function(x){ x.disabled = true; }); bt.classList.add("picked"); fb(out, true, q.ok || "對了！");
     var clean = cur.wrongs === 0, was = st.mastered;
-    st.solved++; if (clean) { st.clean++; st.streak++; } else st.streak = 0;
+    // 有換數字題（practiceAlt）的篇：這題以前答錯過＝看過答案，這次答對不算進連續答對（Codex 審 41b02fe：題目重播時背答案就能拿到學會，交辦 #2274）。
+    // 從作答紀錄推（log 記第幾題、有沒有一次就對），不另加存檔欄位。沒有換數字題的篇照舊——沒有新題可換，算了會永遠學不會。
+    var key = H.practiceKey(E, st.idx), seenBefore = !!(E.practiceAlt || []).length && st.log.some(function(l){ return l && l.clean === false && H.practiceKey(E, l.q) === key; });
+    var counts = clean && !seenBefore;
+    st.solved++; if (counts) { st.clean++; st.streak++; } else st.streak = 0;
     st.idx++; st.cur = null;
     if (st.streak >= need()) st.mastered = true;
     st.log.push({t:Date.now(), q:st.idx - 1, clean:clean, wrongs:cur.wrongs}); st.log = st.log.slice(-100);
     var saved = save(), PE = $("#pend", P); PE.hidden = false;
     PE.innerHTML = (st.mastered && !was ? '<div class="win"><b class="t">這種題你會了！</b><span>連續 ' + need() + ' 題自己做對。回到' + esc(E.source) + '，把它寫完吧。</span></div>' :
-      '<div class="fb ok">' + (clean ? "第一次就選對！連續 " + st.streak + " 題。" : "做完了！這題有改過答案，下一題試試一次選對。") + '</div>') +
+      '<div class="fb ok">' + (counts ? "第一次就選對！連續 " + st.streak + " 題。" : clean ? "答對了！這題之前看過答案，這次不算進連續答對。" : "做完了！這題有改過答案，下一題試試一次選對。") + '</div>') +
       (saved ? "" : '<p class="small muted">這台裝置存不了紀錄（可能是私密瀏覽），重新整理後會從頭開始，題目照常可以做。</p>') +
       '<div class="row"><button class="btn" type="button" id="nextQ">下一題</button><button class="btn ghost" type="button" id="toLesson">再看一次教學</button></div>';
     $("#nextQ", PE).onclick = guard(function(){ choicePractice(); reveal(P); });

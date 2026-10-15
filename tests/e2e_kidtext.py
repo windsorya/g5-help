@@ -217,6 +217,20 @@ def steps_cases(B, eid):
                 tap(r.pg, r.pg.locator(f'#practice .chip[data-k="{k}"]')); r.snap(f"第 {q + 1} 題選錯 {k}"); r.mark(f"{eid}:prac{q + 1}:{k}")
         tap(r.pg, r.pg.locator(f'#practice .chip[data-k="{pq["a"]}"]')); r.snap(f"第 {q + 1} 題選對"); r.mark(f"{eid}:prac{q + 1}:{pq['a']}")
         B.absorb(r.close(), [f"{eid}:resume{q}"])
+    # 有換數字題的篇：同一題再出現、以前答錯過（看過答案）時答對，不算進連續答對（#2274）——採到提示字、而且 streak 真的歸零
+    alts = e.get("practiceAlt") or []
+    if alts and n:
+        again = n * (1 + len(alts))   # 第一套換數字題再出現的第一題（題庫編號＝n）
+        r = Run(B, B.device, f"{eid}:revisit")
+        r.go(f"#h/{eid}"); r.seed(eid, fresh_state(lessonDone=True, idx=again, solved=again, streak=2, log=[{"t": 0, "q": n, "clean": False, "wrongs": 1}]))
+        tap(r.pg, r.pg.locator("#goPractice"))
+        pq = allp[n]
+        assert r.pg.locator("#practice .qtext").inner_text().strip() == pq["q"].strip(), f"{eid} 第 {again + 1} 題應該是題庫第 {n + 1} 題再出現"
+        tap(r.pg, r.pg.locator(f'#practice .chip[data-k="{pq["a"]}"]')); r.snap("以前答錯過、這次答對")
+        st = r.pg.evaluate("(id) => G5HelpPage.state(id)", eid)
+        if "之前看過答案" in r.pg.locator("#pend").inner_text() and st["streak"] == 0 and not st["mastered"]:
+            r.mark(f"{eid}:revisit")
+        B.absorb(r.close(), [f"{eid}:revisit"])
     # 學會了（連續 need 題）：答對最後一題出現「這種題你會了」；重開後上方顯示已學會
     if n:
         r = Run(B, B.device, f"{eid}:mastery")
@@ -671,7 +685,13 @@ def parallel():
     procs = [subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "--only", b, "--no-check"], cwd=ROOT) for b in ("chromium", "webkit")]
     rcs = [p.wait() for p in procs]
     say(f"兩個瀏覽器同時跑完：{time.time() - t0:.0f} 秒（各自結束碼 {rcs}）")
-    sys.exit(final_check() or max(rcs))
+    sys.exit(overall_rc(final_check(), rcs))
+
+
+def overall_rc(final_rc, rcs):
+    """任一個瀏覽器行程不是 0（含被砍掉的負數，例如 -9）就算失敗——那個瀏覽器這一輪沒跑完，判定讀到的可能是上一輪的結果。
+    舊版 final_check() or max(rcs)：[-9, 0] 的 max 是 0，配上一輪留下、雜湊仍有效的採字結果就回 0（Codex 審 41b02fe，#2274）。"""
+    return final_rc or (1 if any(rc != 0 for rc in rcs) else 0)
 
 
 def main():
