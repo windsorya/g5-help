@@ -314,6 +314,18 @@ test("快篩：作答不能用同一個表面捷徑拿到「學會」（一律�
   assert.ok(got6.some((p) => /跟一半比＋都只多 1/.test(p)) && got6.some((p) => /跟一半比＋多出來的分子/.test(p)), "efa05fe 版第 3 套要抓到「跟一半比」組合：" + got6.join("；"));
 });
 
+// 選項全是整數的練習題（角度等）：Codex 審 q6-1-angle-x 3 輪、每輪抓到新猜法不收斂，改用 Codex 設計者封版的 230 條（tests/numshortcuts.js，#2528）
+const NS = require("./numshortcuts.js");
+test("快篩：選項是整數的練習題，不能靠 230 條固定猜法連對 3 題", () => {
+  assert.equal(NS.STRATEGIES.length, 230, "矩陣封版：增減要先跟審稿者重訂");
+  assert.deepEqual(NS.problems(H.LIST), []);
+  // 判準自檢：第 3 輪被 Codex 判 FAIL 的那版（「小於 90 裡選最大」連對 6 題）要被抓到；分數題不套用
+  const r3 = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures", "q6_practice_codex_r3_fail.json"), "utf8"));
+  const got = NS.problems([Object.assign({}, H.get("q6-1-angle-x"), { practice: r3.practice, practiceAlt: r3.practiceAlt })]);
+  assert.ok(got.some((p) => /「小於 90」裡選最大/.test(p)), "第 3 輪 FAIL 版要抓到 Codex 指出的猜法：" + got.slice(0, 3).join("；"));
+  assert.ok(!NS.isNumeric(H.get("p40-2-5").practice[0]), "分數題（11/10）不套這份矩陣，照 SHORTCUTS");
+});
+
 test("審稿模型不得比原設計弱：2026-10-15 起 readReview.by 只能是 codex 或 claude-opus", () => {
   // 律師 2026-10-15：「為何複審模型反而變弱？」——Codex 額度用完時我改派 Sonnet 審稿。Codex 不能用就用 Opus，不得降級。
   const STRONG = ["codex", "claude-opus"];
