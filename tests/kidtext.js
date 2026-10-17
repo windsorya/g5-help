@@ -118,7 +118,8 @@ function requiredCases(list = H.LIST) {
   const out = ["home", "home:hide", "home:settings", "home:withdraw", ...Object.keys(NOTICES)];   // 家長功能（2026-10-13）：隱藏這篇、家長設定、撤回傳題，每個狀態都要真的採到字
   list.forEach((e) => {
     if (e.kind === "steps") {
-      out.push(e.id + ":lesson", e.id + ":direct");
+      out.push(e.id + ":lesson");
+      if ((e.practice || []).length) out.push(e.id + ":direct");   // 沒有練習題的篇（先上解說，#2528）頁面不放「直接練習」
       H.practiceAll(e).forEach((_, q) => out.push(e.id + ":resume" + q));   // 含 practiceAlt（第 2 輪起換數字的題，#2270）：每一題都要實際走到
       if ((e.practice || []).length) out.push(e.id + ":mastery");
       if ((e.practice || []).length && (e.practiceAlt || []).length) out.push(e.id + ":revisit");   // 以前答錯過的題再出現、答對不算（#2274）

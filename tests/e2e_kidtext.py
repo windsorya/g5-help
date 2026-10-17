@@ -199,11 +199,12 @@ def steps_cases(B, eid):
     B.absorb(r.close(), [f"{eid}:lesson"])
     n = len(e.get("practice") or [])
     need = min(3, n)
-    # 直接練習（全新紀錄、沒看教學）
-    r = Run(B, B.device, f"{eid}:direct")
-    r.go(f"#h/{eid}")
-    tap(r.pg, r.pg.get_by_role("button", name="我已經會了，直接練習")); r.snap("直接練習第 1 題")
-    B.absorb(r.close(), [f"{eid}:direct"])
+    # 直接練習（全新紀錄、沒看教學）。沒有練習題的篇（先上解說、練習題第二階段補，#2528）頁面不放這顆按鈕（app.html drawTopBtns）
+    if n:
+        r = Run(B, B.device, f"{eid}:direct")
+        r.go(f"#h/{eid}")
+        tap(r.pg, r.pg.get_by_role("button", name="我已經會了，直接練習")); r.snap("直接練習第 1 題")
+        B.absorb(r.close(), [f"{eid}:direct"])
     # 每一題：重開續練（第 k 題）、每個錯選項、答對。含 practiceAlt（第 2 輪起換數字的題，#2270）：idx＝q 時前端出的就是 allp[q]
     allp = (e.get("practice") or []) + [q for s in (e.get("practiceAlt") or []) for q in s]
     for q in range(len(allp)):
