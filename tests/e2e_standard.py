@@ -9,8 +9,9 @@ standard.test.js 的②④⑤靜態判準留作秒級粗篩；兩者不一致時
 ③的主閘是 tests/e2e_kidtext.py 的瀏覽器採字。
 
 走法：Chromium 390 寬、減少動態效果；首頁量④⑤；每一篇通用格式（kind=steps）照孩子的順序走完每一步（確認題選對、其餘按「我懂了」），
-量每一步的圖②，教學頁再量一次④⑤；第一篇拿來做 std_selftest（把頁面 DOM 改成 Codex 報告的反例，斷言抓得到、合法線段不誤判）。
-跑法：python3.12 tests/e2e_standard.py [--base https://windsorya.github.io/g5-help/]
+每一步剛出現（還是目前這一步）時就量那一步的圖②、走完回頭再量一次，教學頁再量一次④⑤；第一篇拿來做 std_selftest
+（把頁面 DOM 改成 Codex 報告的反例，斷言抓得到、合法線段不誤判）與 timing_selftest（目前這一步沒圖的反例）。
+跑法：python3.12 tests/e2e_standard.py [--base https://windsorya.github.io/g5-help/]；tools/post.sh verify 會跑（#2191 前漏接，主閘不在上線路徑上）。
 """
 import json
 import re
@@ -72,7 +73,8 @@ STD_FIG_JS = """(sel) => {
         bb.x + bb.width >= vb.x + vb.width * 0.98 && bb.y + bb.height >= vb.y + vb.height * 0.98) return '';
     const fillOn = !noPaint(cs.fill) && num(cs.fillOpacity) > 0, strokeOn = !noPaint(cs.stroke) && num(cs.strokeWidth) > 0 && num(cs.strokeOpacity) > 0;
     if (tag === 'text') return (el.textContent || '').trim() && bb.width > 0 && bb.height > 0 && (fillOn || strokeOn) ? 'text' : '';
-    if (tag === 'image' || tag === 'use') return bb.width > 0 && bb.height > 0 ? tag : '';
+    // <image>／<use> 不算：量得到寬高，量不到它真的畫了什麼——<use href="#r" fill="none" stroke="none"> 什麼都沒畫也有寬高
+    // （Codex 審 g5-help 5d3cf6f2），<image> 圖檔讀不到也一樣。三站內容 0 處用到（2026-10-18 實查），畫圖一律用基本圖形或 <text>。
     if (!GEO.has(tag) || (AREA.has(tag) && !(bb.width > 0 && bb.height > 0))) return '';
     if (strokeOn && typeof el.getTotalLength === 'function' && el.getTotalLength() > 0) return tag + '描邊';
     if (fillOn && tag !== 'line' && bb.width > 0 && bb.height > 0)
@@ -142,6 +144,8 @@ STD_FIG_CASES = [
     ("畫在圖框外", '<rect x="-5000" y="-5000" width="50" height="50" fill="black"/>', False),
     ("只有填色的斜直線（沒有面積）", '<path d="M10 10 L60 60" fill="black"/>', False),
     ("transform=scale(0)", '<rect x="10" y="10" width="50" height="50" fill="black" transform="scale(0)"/>', False),
+    ("<use> 參照的圖形沒填色也沒描邊", '<defs><rect id="stdUseR" x="10" y="10" width="40" height="30"/></defs><use href="#stdUseR" fill="none" stroke="none"/>', False),
+    ("<image> 圖檔讀不到", '<image href="data:image/png;base64,AAAA" x="10" y="10" width="40" height="30"/>', False),
     ('合法線段 <line x1="50" y1="50" x2="0" y2="50">', '<line x1="50" y1="50" x2="0" y2="50" stroke="black" stroke-width="4"/>', True),
     ("合法小方塊", '<rect x="10" y="10" width="40" height="30" fill="black"/>', True),
     ("合法圓", '<circle cx="50" cy="50" r="10" fill="black"/>', True),
@@ -230,6 +234,41 @@ def std_selftest(page, label, self_key, fig_sel):
 # ===== 共通「標準 DOM」判準到此 =====
 
 
+def walk_lesson(page, steps):
+    """照孩子的順序走完每一步（確認題選對才往下，沒有確認題按「我懂了，下一步」），停在答案卡。
+    每一步剛出現、還是「目前這一步」的當下就量圖，回傳 [(第幾步, 問題)]。
+    由來：Codex 審 5d3cf6f2——走完才量，「#lesson .lstep:last-child svg{visibility:hidden}」這種「正在學的那一步沒圖、
+    答案卡出來後圖才出現」會被放過。"""
+    now = []
+    for k, s in enumerate(steps, 1):
+        sec = f'#lesson section[data-step="{k}"]'
+        page.wait_for_selector(sec)
+        now += [(k, p) for p in std_fig_problems(page.evaluate(STD_FIG_JS, sec))]
+        if s["a"] is not None:
+            last_ask(page).locator(f'.chip[data-i="{s["a"]}"]').click()
+        else:
+            page.locator(f"{sec} button[data-next]").click()
+    page.wait_for_selector(f'#lesson section[data-step="{len(steps) + 1}"]')   # 最後一張是「答案」，不在每步一圖的範圍
+    return now
+
+
+STEP_HIDE_CSS = "#lesson .lstep:last-child svg{visibility:hidden}"   # Codex 審 5d3cf6f2 的反例：目前這一步沒圖，答案卡出來後圖才出現
+
+
+def timing_selftest(browser, post):
+    """自檢：注入 Codex 的時機反例，斷言「每一步當下就量」每一步都抓得到；走完才量的結果印出來對照。"""
+    ctx, page, _ = open_page(browser, MOBILE, url=HOME + "#h/" + post["id"], reduced_motion="reduce")
+    page.wait_for_selector("#entry:not([hidden])")
+    page.add_style_tag(content=STEP_HIDE_CSS)
+    page.get_by_role("button", name="開始學").click()
+    n = len(post["steps"])
+    flagged = {k for k, _ in walk_lesson(page, post["steps"])}
+    after = std_fig_problems(page.evaluate(STD_FIG_JS, ", ".join(f'#lesson section[data-step="{k}"]' for k in range(1, n + 1))), min_conts=n)
+    ctx.close()
+    print(f"  （對照：同一個反例，走完才量的舊做法{'也抓得到' if after else '全部放過'}）")
+    check(f"{post['id']} 標準DOM自檢② 時機反例「{STEP_HIDE_CSS}」：每一步當下就量，{n} 步都抓得到", flagged == set(range(1, n + 1)), sorted(flagged))
+
+
 def flow_standard_dom(browser):
     """三站共通標準的主閘（真瀏覽器 DOM，Chromium 390 寬）：④切換列 ⑤noindex ②每一步都有圖，每條附自檢（std_selftest）。"""
     ctx, page, errors = open_page(browser, MOBILE, url=HOME, reduced_motion="reduce")
@@ -245,19 +284,15 @@ def flow_standard_dom(browser):
         ctx, page, errors = open_page(browser, MOBILE, url=HOME + "#h/" + pid, reduced_motion="reduce")
         page.wait_for_selector("#entry:not([hidden])")
         page.get_by_role("button", name="開始學").click()
-        for k, s in enumerate(steps, 1):   # 照孩子的順序：確認題選對才往下，沒有確認題按「我懂了，下一步」
-            page.wait_for_selector(f'#lesson section[data-step="{k}"]')
-            if s["a"] is not None:
-                last_ask(page).locator(f'.chip[data-i="{s["a"]}"]').click()
-            else:
-                page.locator(f'#lesson section[data-step="{k}"] button[data-next]').click()
-        page.wait_for_selector(f'#lesson section[data-step="{len(steps) + 1}"]')   # 最後一張是「答案」，不在每步一圖的範圍
+        now = [f"第 {k} 步當下：{p}" for k, p in walk_lesson(page, steps)]
+        check(f"{pid} 標準DOM② 每一步剛出現（還是目前這一步）時，就有看得見、真的畫出東西的圖", not now, now)
         cont_sel = ", ".join(f'#lesson section[data-step="{k}"]' for k in range(1, len(steps) + 1))
         figs = std_fig_problems(page.evaluate(STD_FIG_JS, cont_sel), min_conts=len(steps))
-        check(f"{pid} 標準DOM② 走完 {len(steps)} 步，每一步都有看得見、真的畫出東西的圖", not figs, figs)
+        check(f"{pid} 標準DOM② 走完 {len(steps)} 步回頭看，每一步的圖都還在", not figs, figs)
         std_page_check(page, f"{pid} 教學頁", "help")
         if not tested:
             std_selftest(page, pid, "help", ('#lesson section[data-step="1"] svg[role="img"]', '#lesson section[data-step="1"]'))
+            timing_selftest(browser, post)
             tested = True
         check(f"{pid} 標準DOM 走教學沒有 JS 錯誤", not errors, errors)
         ctx.close()

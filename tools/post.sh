@@ -1,7 +1,7 @@
 #!/bin/zsh
 # 難題解說新增一篇：檢查與上線（交辦 #2259 復盤，2026-10-15 p40-2-5 那次孩子等了 51 分鐘，其中約 22 分鐘是測試一套一套排隊跑）。
 #
-#   zsh tools/post.sh verify                 建置 → 快篩（1 秒內抓內容錯）→ 採字（Chromium、WebKit 同時）與本機端到端同時跑 → node 全部
+#   zsh tools/post.sh verify                 建置 → 快篩（1 秒內抓內容錯）→ 採字（Chromium、WebKit 同時）、本機端到端、標準 DOM 主閘同時跑 → node 全部
 #   zsh tools/post.sh ship <篇id> [傳題ID]    推上 main → 等正式網址出現這一篇 → 回寫網頁進度清單 → 正式網址端到端在背景跑
 #
 # 每一段印出經過秒數；log 放在印出的資料夾。commit 由人寫訊息，不在這裡做。
@@ -29,14 +29,18 @@ verify)
   ${PY} tests/tools_test.py > "${LOG}/tools.log" 2>&1 || { tail -15 "${LOG}/tools.log"; st "工具故障注入測試沒過"; exit 1 }
   ${PY} tests/e2e_kidtext.py --parallel > "${LOG}/kid.log" 2>&1 & kid=$!
   ${PY} tests/e2e.py > "${LOG}/e2e.log" 2>&1 & e2e=$!
+  # ②每步有圖／④切換列／⑤noindex 的主閘（standard.test.js 只是粗篩，兩者不一致以這支為準）。#2191 前這裡沒跑它＝主閘不在上線路徑上
+  ${PY} tests/e2e_standard.py > "${LOG}/std.log" 2>&1 & std=$!
   wait ${kid}; krc=$?
   st "採字結束 rc=${krc}"; grep -E 'VIOLATION|PROBLEM|快照|同時跑完|kidtext:' "${LOG}/kid.log"
   wait ${e2e}; erc=$?
   st "本機端到端結束 rc=${erc}"; grep -E '^FAIL|Error' "${LOG}/e2e.log" | head; tail -1 "${LOG}/e2e.log"
+  wait ${std}; drc=$?
+  st "標準 DOM 主閘結束 rc=${drc}"; grep -E '^FAIL|Error' "${LOG}/std.log" | head; tail -1 "${LOG}/std.log"
   node --test tests/*.test.js > "${LOG}/node.log" 2>&1; nrc=$?
   st "node 全部 rc=${nrc}"; grep -E '^ℹ (pass|fail)|^✖' "${LOG}/node.log" | head
   print -r -- "log：${LOG}"
-  (( krc == 0 && erc == 0 && nrc == 0 )) || { st "有沒過的，不能上線"; exit 1 }
+  (( krc == 0 && erc == 0 && drc == 0 && nrc == 0 )) || { st "有沒過的，不能上線"; exit 1 }
   st "全部通過：git add 這一篇的檔案、寫 commit 訊息，再 zsh tools/post.sh ship <篇id> [傳題ID]"
   ;;
 ship)
