@@ -75,6 +75,10 @@ class Case:
         self.ctx.route(ORIGIN + "**", serve)
         self.ctx.route(lambda u: u.startswith(EP), self.be.route)
         self.ctx.clock.install()
+        # #2188：seed8() 重新整理後，WebKit 會在 load 後約 0.1–1.2 秒把頁面捲回重新整理前的位置（頂端）；Playwright 1.60 只檢查
+        # 第一個滑鼠事件的目標，捲動若落在按下與 click 之間，click 就落到 #home，按鈕沒被按到（家庭碼空，或面板沒開→點擊逾時 30 秒）。
+        # 2026-10-18 前置探針 WebKit-iPad：原樣 19/500 落空、149/200 次有跳回頂端；設 manual 後 0/400 落空、0/400 跳動。同步程式不碰捲動。
+        self.ctx.add_init_script("history.scrollRestoration = 'manual';")
         self.pg = None
 
     def open(self, frag=""):
@@ -103,8 +107,13 @@ class Case:
         self.pg.reload(); self.pg.wait_for_function("window.G5HelpWriter && G5HelpWriter()", timeout=15000)
 
     def enable(self):
+        # 兩次點擊各自讀回效果（details.open 與按鈕寫碼都是同步的）：點空就直接講點空，不留到下游變成看不懂的紅
         self.pg.locator("#syncBox summary").click()
+        if not self.pg.evaluate("document.querySelector('#syncBox').open"):
+            raise AssertionError("前置點擊落空：點了同步面板標題但面板沒打開（scrollY=%s）" % self.pg.evaluate("scrollY"))
         self.pg.get_by_role("button", name="開啟跨裝置同步（這台是第一台）").click()
+        if not self.pg.evaluate("localStorage.getItem('g5sync.code')"):
+            raise AssertionError("前置點擊落空：按了「這台是第一台」但沒有家庭碼（scrollY=%s）" % self.pg.evaluate("scrollY"))
         self.tick(2000)
         return self.pg.evaluate("localStorage.getItem('g5sync.code')")
 
