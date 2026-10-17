@@ -64,10 +64,10 @@ function cost(st) {
   return { c, A, B };
 }
 function search(ms) {
-  const t0 = Date.now();
-  while (Date.now() - t0 < ms) {
+  const end = Date.now() + ms;   // 期限每一步都看（Codex 審 fb632f3：只在重來時看，search(20000) 可跑到 63 秒）
+  while (Date.now() < end) {
     let st = { A: TYPES.map(g), B: TYPES.map(g), pa: [0, 1, 2, 0, 1, 2], pb: [2, 0, 1, 2, 0, 1] }, cur = cost(st).c;
-    for (let it = 0; it < 3000 && cur > 0; it++) {   // 爬山：換一題或對調兩題的正解位置，不變差就接受
+    for (let it = 0; it < 3000 && cur > 0 && Date.now() < end; it++) {   // 爬山：換一題或對調兩題的正解位置，不變差就接受
       const nx = { A: st.A.slice(), B: st.B.slice(), pa: st.pa.slice(), pb: st.pb.slice() }, set = Math.random() < 0.5 ? "A" : "B", i = Math.floor(Math.random() * 6);
       if (Math.random() < 0.6) nx[set][i] = g(TYPES[i]); else { const P = set === "A" ? nx.pa : nx.pb, j = Math.floor(Math.random() * 6); [P[i], P[j]] = [P[j], P[i]]; }
       const c = cost(nx).c; if (c <= cur) { st = nx; cur = c; }

@@ -327,8 +327,18 @@ test("快篩：選項是整數的練習題，不能靠 230 條固定猜法連對
 });
 // 角度題練習的找數字程式（tools/practice_search.js）：搜得到、搜到的兩套 230 條全擋、答案對、why 只有正解留白（重開機曾把暫存區的版本清掉，#2528）
 test("找數字程式：角度題兩套練習搜得到，且 230 條猜法連對不了 3 題", () => {
-  const out = require("../tools/practice_search.js").search(20000);
+  const PS = require("../tools/practice_search.js");
+  let t = Date.now();
+  const out = PS.search(20000);
+  assert.ok(Date.now() - t < 21000, "說好最多 20 秒就不能超過");
   assert.ok(out && out.practice.length === 6 && out.practiceAlt[0].length === 6, "20 秒內要搜到兩套各 6 題");
+  // 期限每一步都看（Codex 審 fb632f3：舊版只在重來時看時間，一輪 3,000 步跑完才停）：讓它永遠找不到解、每看一次時間假裝過 5 毫秒，
+  // 給 300 毫秒 ⇒ 約 60 步就要收手、回 null
+  const realNow = Date.now, realProblems = NS.problems;
+  let fake = realNow(), steps = 0;
+  Date.now = () => (fake += 5);
+  NS.problems = () => { steps++; return ["永遠不合格"]; };
+  try { assert.equal(PS.search(300), null); assert.ok(steps < 200, "期限 300 毫秒卻走了 " + steps + " 步"); } finally { Date.now = realNow; NS.problems = realProblems; }
   assert.deepEqual(NS.problems([{ id: "search", kind: "steps", steps: [], practice: out.practice, practiceAlt: out.practiceAlt }]), []);
   out.practice.concat(out.practiceAlt[0]).forEach((q) => {
     const n = (q.q.match(/\d+/g) || []).map(Number);
