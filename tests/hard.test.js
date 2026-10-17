@@ -325,6 +325,18 @@ test("快篩：選項是整數的練習題，不能靠 230 條固定猜法連對
   assert.ok(got.some((p) => /「小於 90」裡選最大/.test(p)), "第 3 輪 FAIL 版要抓到 Codex 指出的猜法：" + got.slice(0, 3).join("；"));
   assert.ok(!NS.isNumeric(H.get("p40-2-5").practice[0]), "分數題（11/10）不套這份矩陣，照 SHORTCUTS");
 });
+// 角度題練習的找數字程式（tools/practice_search.js）：搜得到、搜到的兩套 230 條全擋、答案對、why 只有正解留白（重開機曾把暫存區的版本清掉，#2528）
+test("找數字程式：角度題兩套練習搜得到，且 230 條猜法連對不了 3 題", () => {
+  const out = require("../tools/practice_search.js").search(20000);
+  assert.ok(out && out.practice.length === 6 && out.practiceAlt[0].length === 6, "20 秒內要搜到兩套各 6 題");
+  assert.deepEqual(NS.problems([{ id: "search", kind: "steps", steps: [], practice: out.practice, practiceAlt: out.practiceAlt }]), []);
+  out.practice.concat(out.practiceAlt[0]).forEach((q) => {
+    const n = (q.q.match(/\d+/g) || []).map(Number);
+    const r = /三個角/.test(q.q) ? 180 - n[0] - n[1] : /三角形疊/.test(q.q) ? 180 - n[0] : /直角/.test(q.q) ? 90 - n[0] : 180 - n[0];
+    assert.equal(parseInt(q.opts[q.a], 10), r, q.q);
+    q.why.forEach((w, i) => assert.equal(w === "", i === q.a, q.q + " 第 " + (i + 1) + " 個選項的 why"));
+  });
+});
 
 test("審稿模型不得比原設計弱：2026-10-15 起 readReview.by 只能是 codex 或 claude-opus", () => {
   // 律師 2026-10-15：「為何複審模型反而變弱？」——Codex 額度用完時我改派 Sonnet 審稿。Codex 不能用就用 Opus，不得降級。
