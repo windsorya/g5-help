@@ -29,7 +29,7 @@
     // 家長功能（2026-10-13）：撤回按鈕與訊息、家長設定也量句長（家長設定在首頁，兩道閘都套）
     ['#upWMsg', 'label', 'parent'], ['#upList .hact', 'label', 'parent'], ['#setBox', 'kid', 'home'],
     ['#upBox', 'parent', 'parent'], ['#syncBox', 'parent', 'parent'], ['.g5s-banner', 'parent', 'parent'], ['#parentBox', 'parent', 'parent'],
-    ['#siteNav', 'kid', 'nav'], ['.hero', 'kid', 'nav'], ['#entry > .back', 'kid', 'nav'],
+    ['.brandbar', 'kid', 'nav'], ['#siteNav', 'kid', 'nav'], ['.hero', 'kid', 'nav'], ['#entry > .back', 'kid', 'nav'],   // .brandbar＝六站共同站名「荳荳研究所」（2026-10-18）
     ['#subjects .hcard', 'label', 'home'], ['#subjects', 'kid', 'home'], ['#home > .panel', 'kid', 'home'],
     ['#src', 'exam', 'top'], ['#prob', 'exam', 'top'], ['#lead', 'kid', 'top'], ['#topBtns', 'kid', 'top'], ['#mastery', 'kid', 'top'],
     ['#lesson', 'kid', 'lesson'], ['#practice', 'kid', 'practice'], ['#vidBox', 'kid', 'video']
