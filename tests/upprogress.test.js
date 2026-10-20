@@ -23,8 +23,11 @@ test('最晚取回時間剛好整分不進位；有秒數一律進位到下一�
   assert.match(P.view({ status: 'new', time: T0 }, [], T0 + 1000, T0 + 10000).text, /最晚 14:02 前/);
 });
 
-test('電腦健康：3 分鐘內取過＝正常；超過＝警告；從沒取過另說（Codex 審 27b7d84：停 10 分鐘還說正常）', () => {
-  assert.equal(P.health(T0, T0 + 3 * MIN).state, 'ok');
+test('電腦健康：未滿 3 分鐘＝正常；滿 3 分鐘＝警告；從沒取過另說（Codex 審 27b7d84：停 10 分鐘還說正常；審 c00ef6a：剛好 3 分鐘仍說正常）', () => {
+  assert.equal(P.health(T0, T0 + 3 * MIN - 1000).state, 'ok');
+  assert.equal(P.health(T0, T0 + 3 * MIN - 1).state, 'ok');
+  assert.equal(P.health(T0, T0 + 3 * MIN).state, 'late');
+  assert.equal(P.health(T0, T0 + 3 * MIN).ago, 3);
   assert.equal(P.health(T0, T0 + 3 * MIN + 1000).state, 'late');
   assert.equal(P.health(T0, T0 + 10 * MIN + 29000).state, 'late');
   assert.equal(P.health(T0, T0 + 10 * MIN + 29000).ago, 10);

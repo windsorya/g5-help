@@ -28,11 +28,12 @@
     var pct = 66 + Math.floor(29 * Math.max(0, now - start) / total);
     return { pct: Math.min(95, pct), text: "製作中，預計 " + hhmm(eta) + " 前做好" };
   }
-  // 電腦健康：每分鐘取一次，超過 HEALTH_LATE 沒取＝至少漏了兩輪，就要警告（Codex 審 27b7d84：沿用 10 分容忍窗＝停了 10 分鐘還說正常）
+  // 電腦健康：每分鐘取一次，滿 HEALTH_LATE 沒取＝至少漏了兩輪，就要警告（Codex 審 27b7d84：沿用 10 分容忍窗＝停了 10 分鐘還說正常）
+  // 剛好滿 3 分鐘就算 late（Codex 審 c00ef6a：用 <= 會讓 14:00 取題、14:03 整仍說正常）
   var HEALTH_LATE = 3 * MIN;   // cap-why: 取題 StartInterval 60 秒＋一輪網路失敗重試的餘裕
   function health(lastFetch, now) {
     if (!num(lastFetch)) return { state: "never" };
-    return { state: now - lastFetch <= HEALTH_LATE ? "ok" : "late", ago: Math.round((now - lastFetch) / MIN) };
+    return { state: now - lastFetch < HEALTH_LATE ? "ok" : "late", ago: Math.round((now - lastFetch) / MIN) };
   }
   var api = { view: view, estimate: estimate, hhmm: hhmm, health: health };
   if (typeof module !== "undefined" && module.exports) module.exports = api; else root.G5UpProgress = api;
