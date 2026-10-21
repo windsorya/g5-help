@@ -1,0 +1,532 @@
+#!/opt/homebrew/opt/python@3.12/bin/python3.12
+"""最新完整 verify → 固定內容快照 → commit → DOM 重跑 → 固定 SHA。
+
+No test-mode switch. Offline tests replace files/executables in standalone
+fixture repos. Local receipts are evidence, not adversarial signatures.
+"""
+import concurrent.futures
+import contextlib
+import fcntl
+import hashlib
+from importlib.metadata import version
+import json
+import os
+from pathlib import Path, PurePosixPath
+import re
+import shutil
+import signal
+import subprocess
+import sys
+import time
+import uuid
+
+ROOT = Path(__file__).absolute().parent.parent
+SCHEMA = 1
+ALGORITHM = 'sha256-manifest-v1'
+STATE = '.post-state'
+SNAPSHOTS = '.post-snapshots'
+HARVEST = 'tests/kidtext_harvest.json'
+OUTPUTS = {'index.html', 'sync.js', 'qrcode.js', 'upload.js', HARVEST}
+GATES = {'build', 'quick', 'tools', 'kid', 'e2e', 'standard', 'node'}
+GATE_TIMEOUT = 900
+LIVE_URL = 'https://windsorya.github.io/g5-help/'
+# cap-why: 每輪 verify／ship 各留一份約 2.6 MB 快照（2026-10-22 實測）；ship 的正式站背景 e2e 從快照跑約 5 分鐘（2026-10-15 實測）⇒ 留 1 天遠大於此
+RETENTION = 24 * 3600
+
+
+class Rejected(Exception):
+    pass
+
+
+def sha(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def canonical(value):
+    return json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(',', ':'), allow_nan=False).encode()
+
+
+def strict_json(data):
+    def pairs(items):
+        result = {}
+        for key, value in items:
+            if key in result:
+                raise ValueError('JSON 重複鍵：' + key)
+            result[key] = value
+        return result
+
+    def constant(value):
+        raise ValueError('JSON 非法值：' + value)
+    return json.loads(data, object_pairs_hook=pairs, parse_constant=constant)
+
+
+def normalized(rel, data):
+    if rel == HARVEST:
+        try:
+            return canonical(strict_json(data))
+        except (ValueError, UnicodeError) as exc:
+            raise Rejected(f'採字內容不合格：{exc}') from exc
+    return data
+
+
+def excluded(rel):
+    parts = PurePosixPath(rel).parts
+    return parts[0] in {'.git', STATE, SNAPSHOTS} or '__pycache__' in parts or rel == HARVEST + '.lock'
+
+
+def safe_name(rel):
+    path = PurePosixPath(rel)
+    if path.is_absolute() or '..' in path.parts or not path.parts or str(path) != rel:
+        raise Rejected(f'來源路徑不合法：{rel}')
+    for part in path.parts:
+        low = part.lower()
+        if ('.env' in low or low.endswith(('.pem', '.key', '.p12', '.pfx'))
+                or low in {'id_rsa', 'id_ed25519', 'credentials', 'credentials.json', 'secrets.json'}):
+            raise Rejected(f'來源含金鑰／.env 路徑，未讀取：{rel}')
+
+
+def git(root, *args):
+    p = subprocess.run(['git', *args], cwd=root, capture_output=True, timeout=30)
+    if p.returncode:
+        raise Rejected('Git 內容檢查失敗：' + p.stderr.decode(errors='replace').strip())
+    return p.stdout
+
+
+def index_entries(root):
+    entries = {}
+    for row in git(root, 'ls-files', '-s', '-z').split(b'\0'):
+        if not row:
+            continue
+        meta, name = row.split(b'\t', 1)
+        mode, oid, stage = meta.decode().split()
+        rel = name.decode()
+        if stage != '0':
+            raise Rejected(f'暫存區尚有衝突：{rel}')
+        safe_name(rel)
+        if mode not in {'100644', '100755'}:
+            raise Rejected(f'來源不是一般檔案／有 symlink：{rel}')
+        if not excluded(rel):
+            entries[rel] = (mode, oid)
+    return entries
+
+
+def working_files(root, tracked):
+    """Include ignored/untracked assets too; never follow any symlink.
+
+    Only untracked *.bak.* and named runtime artifacts are excluded.
+    """
+    out = {}
+
+    def walk(folder, prefix=''):
+        for child in sorted(os.scandir(folder), key=lambda x: x.name):
+            rel = prefix + child.name
+            if excluded(rel):
+                continue
+            safe_name(rel)
+            if child.is_symlink():
+                raise Rejected(f'來源有 symlink，未展開：{rel}')
+            if child.is_dir(follow_symlinks=False):
+                walk(child.path, rel + '/')
+            elif child.is_file(follow_symlinks=False):
+                if '.bak.' in child.name and rel not in tracked:
+                    continue
+                mode = '100755' if child.stat(follow_symlinks=False).st_mode & 0o111 else '100644'
+                out[rel] = (mode, Path(child.path).read_bytes())
+            else:
+                raise Rejected(f'來源不是一般檔案：{rel}')
+    walk(root)
+    return out
+
+
+def blob_files(root, commit=None):
+    if commit is None:
+        entries = index_entries(root)
+    else:
+        entries = {}
+        for row in git(root, 'ls-tree', '-rz', commit).split(b'\0'):
+            if not row:
+                continue
+            meta, name = row.split(b'\t', 1)
+            mode, kind, oid = meta.decode().split(); rel = name.decode()
+            safe_name(rel)
+            if kind != 'blob' or mode not in {'100644', '100755'}:
+                raise Rejected(f'commit 有非一般檔案／symlink：{rel}')
+            if not excluded(rel):
+                entries[rel] = (mode, oid)
+    return {rel: (mode, git(root, 'cat-file', 'blob', oid)) for rel, (mode, oid) in entries.items()}
+
+
+def manifest(files):
+    return {rel: {'mode': mode, 'sha256': sha(normalized(rel, data))}
+            for rel, (mode, data) in sorted(files.items())}
+
+
+def changes(a, b):
+    return sorted(rel for rel in a.keys() | b.keys() if a.get(rel) != b.get(rel))
+
+
+def atomic_receipt(path, data):
+    """Failed write/readback cannot leave a success authorizing ship."""
+    tmp = path.with_name(path.name + '.' + uuid.uuid4().hex + '.tmp')
+    try:
+        with tmp.open('xb') as f:
+            f.write(canonical(data)); f.flush(); os.fsync(f.fileno())
+        os.replace(tmp, path)
+        if strict_json(path.read_bytes()) != data:
+            raise OSError('寫入後讀回不符')
+        fd = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+    except (OSError, ValueError) as exc:
+        with contextlib.suppress(OSError):
+            path.unlink()
+        raise Rejected(f'收據儲存失敗：{exc}') from exc
+    finally:
+        with contextlib.suppress(OSError):
+            tmp.unlink()
+
+
+def safe_directory(root, rel):
+    p = root / rel
+    if p.is_symlink():
+        raise Rejected(f'執行產物目錄是 symlink：{rel}')
+    p.mkdir(exist_ok=True)
+    return p
+
+
+def prune(root):
+    """持鎖時清掉超過 RETENTION 的本工具執行產物（快照、log 目錄）；只碰兩個具名目錄的直屬子目錄，不跟 symlink。
+
+    清理失敗只警告：清不掉舊快照不影響這一輪受測內容。
+    """
+    cutoff = time.time() - RETENTION
+    for rel in (SNAPSHOTS, STATE):
+        base = root / rel
+        if base.is_symlink() or not base.is_dir():
+            continue
+        for child in os.scandir(base):
+            try:
+                if child.is_symlink() or not child.is_dir(follow_symlinks=False):
+                    continue
+                if child.stat(follow_symlinks=False).st_mtime < cutoff:
+                    shutil.rmtree(child.path)
+            except OSError as exc:
+                print(f'警告：舊執行產物清不掉（不影響本輪）：{child.path}：{exc}', flush=True)
+
+
+@contextlib.contextmanager
+def lock(root):
+    state = safe_directory(root, STATE)
+    path = state / 'lock'
+    if path.is_symlink() or (state / 'latest.json').is_symlink():
+        raise Rejected('收據／鎖有 symlink，未讀取')
+    with path.open('a') as f:
+        try:
+            fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise Rejected('驗證／發布進行中，請等目前這輪結束') from exc
+        yield state / 'latest.json'
+
+
+# 只管「改變 git 讀哪份內容」的變數；編輯器／分頁器／推送傳輸不影響受測內容。
+# 2026-10-22 真入口首跑：Claude Code 的 shell 一律帶 GIT_EDITOR，原寫法讓 CC 每次 verify 都被拒（離線替身測試的 env 是乾淨的，抓不到）。
+GIT_ENV_OK = {'GIT_CONFIG_NOSYSTEM', 'GIT_CONFIG_GLOBAL', 'GIT_EDITOR', 'GIT_SEQUENCE_EDITOR', 'GIT_PAGER',
+              'GIT_TERMINAL_PROMPT', 'GIT_ASKPASS', 'GIT_SSH', 'GIT_SSH_COMMAND'}
+
+
+def environment_check():
+    bad = [k for k in os.environ if k.startswith(('G5_', 'GIT_')) and k not in GIT_ENV_OK]
+    bad += [k for k in ('PYTHONPATH', 'PYTHONHOME', 'NODE_OPTIONS', 'NODE_PATH', 'BASH_ENV', 'ENV', 'ZDOTDIR') if os.environ.get(k)]
+    if bad:
+        raise Rejected('非正式來源／執行環境：' + ', '.join(sorted(set(bad))))
+
+
+def runtime():
+    p = subprocess.run(['node', '--version'], capture_output=True, text=True, timeout=30)
+    if p.returncode or not p.stdout.strip():
+        raise Rejected('無法確認 node 執行版本')
+    return {'python': sys.version, 'node': p.stdout.strip(), 'playwright': version('playwright')}
+
+
+def snapshot(root, run_id, files):
+    base = safe_directory(root, SNAPSHOTS)
+    target = base / run_id; target.mkdir()
+    for rel, (mode, data) in files.items():
+        safe_name(rel)
+        p = target / rel; p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(data); p.chmod(0o755 if mode == '100755' else 0o644)
+    if manifest(working_files(target, files)) != manifest(files):
+        raise Rejected('快照寫入後內容不符')
+    return target
+
+
+def run_gate(name, command, cwd, logs):
+    """Own process group: timeout also kills children; nonzero/signal is failure."""
+    log = logs / (name + '.log'); started = time.time()
+    with log.open('wb') as f:
+        p = subprocess.Popen(command, cwd=cwd, stdout=f, stderr=subprocess.STDOUT, start_new_session=True)
+        try:
+            rc = p.wait(timeout=GATE_TIMEOUT)
+        except BaseException as exc:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(p.pid, signal.SIGKILL)
+            p.wait()
+            if not isinstance(exc, subprocess.TimeoutExpired):
+                raise
+            rc = 124
+    print(f'{name} rc={rc}', flush=True)
+    if rc:
+        print(log.read_text(errors='replace')[-12000:], flush=True)
+    return {'rc': rc, 'completed': True, 'started': started, 'finished': time.time()}
+
+
+def need_gate(name, result, prefix='驗證失敗'):
+    if result['rc'] != 0:
+        raise Rejected(f'{prefix}：{name} rc={result["rc"]}')
+
+
+def node_tests(files):
+    return sorted(rel for rel in files if PurePosixPath(rel).parent == PurePosixPath('tests') and rel.endswith('.test.js'))
+
+
+def harvest_evidence(files):
+    try:
+        h = strict_json(files[HARVEST][1])
+        if h['max'] != 40 or h['self_max'] != 40 or set(h['browsers']) != {'chromium', 'webkit'}:
+            raise ValueError('缺少本輪兩個瀏覽器或正式上限不符')
+        expected = {'index_sha256': sha(files['index.html'][1]), 'kidgate_sha256': sha(files['tests/kidgate.js'][1]),
+                    'driver_sha256': sha(files['tests/e2e_kidtext.py'][1])}
+        for field, value in expected.items():
+            if h[field] != value:
+                raise ValueError('頂層採字雜湊不符：' + field)
+        evidence = {}
+        for name, b in h['browsers'].items():
+            if b['max'] != 40 or b['errors'] != [] or b['violations'] != []:
+                raise ValueError(name + ' 採字不合格')
+            if not isinstance(b['cases'], list) or not b['cases'] or not isinstance(b['branches'], list):
+                raise ValueError(name + ' 缺少案例／分支')
+            if not b['selftests'] or any(v['ok'] is not True for v in b['selftests'].values()):
+                raise ValueError(name + ' 自檢未成功')
+            if type(b['snapshots']) is not int or b['snapshots'] <= 0:
+                raise ValueError(name + ' 沒有採字快照')
+            for field, value in expected.items():
+                if b[field] != value:
+                    raise ValueError(name + ' 採字過期：' + field)
+            evidence[name] = {'sha256': sha(canonical(b)), **expected}
+        return evidence
+    except (KeyError, ValueError, TypeError, AttributeError) as exc:
+        raise Rejected(f'採字內容改變／不合格：{exc}') from exc
+
+
+def read_receipt(path):
+    if not path.exists():
+        raise Rejected('缺少完整成功收據，請跑 verify')
+    try:
+        r = strict_json(path.read_bytes())
+        if r.get('status') == 'running':
+            raise Rejected('最近 verify 未完成，請重新跑 verify')
+        if r.get('status') == 'failed':
+            raise Rejected('最近 verify 未成功：' + r.get('reason', '未知原因'))
+        for key in ('schema', 'algorithm', 'status', 'run_id', 'manifest', 'digest', 'gates', 'finished', 'harvest', 'node_tests', 'runtime'):
+            if key not in r:
+                raise ValueError('缺少 ' + key)
+        if r['schema'] != SCHEMA or r['algorithm'] != ALGORITHM or r['status'] != 'success':
+            raise ValueError('schema／algorithm／status')
+        if not isinstance(r['run_id'], str) or not r['run_id'] or type(r['finished']) not in {float, int} or r['finished'] <= 0:
+            raise ValueError('run_id／finished')
+        if not isinstance(r['manifest'], dict) or not r['manifest'] or r['digest'] != sha(canonical(r['manifest'])):
+            raise ValueError('digest／manifest')
+        for rel, entry in r['manifest'].items():
+            safe_name(rel)
+            if set(entry) != {'mode', 'sha256'} or entry['mode'] not in {'100644', '100755'} or not re.fullmatch('[a-f0-9]{64}', entry['sha256']):
+                raise ValueError('manifest entry ' + rel)
+        if set(r['gates']) != GATES:
+            raise ValueError('gate 名單不完整')
+        for name, g in r['gates'].items():
+            if type(g['rc']) is not int or g['rc'] != 0 or g['completed'] is not True or not (0 < g['started'] <= g['finished'] <= r['finished']):
+                raise ValueError('gate 未成功／未完成：' + name)
+        if r['node_tests'] != node_tests(r['manifest']) or not r['node_tests']:
+            raise ValueError('node_tests')
+        if set(r['harvest']) != {'chromium', 'webkit'}:
+            raise ValueError('harvest')
+        if set(r['runtime']) != {'python', 'node', 'playwright'} or not all(isinstance(v, str) and v for v in r['runtime'].values()):
+            raise ValueError('runtime')
+        return r
+    except (ValueError, TypeError, KeyError, AttributeError) as exc:
+        raise Rejected(f'收據無效：{exc}') from exc
+
+
+def verify(root, receipt):
+    run_id = uuid.uuid4().hex
+    running = {'status': 'running', 'run_id': run_id, 'started': time.time()}
+    atomic_receipt(receipt, running)  # Revoke prior success before any validation.
+    try:
+        environment_check()
+        files = working_files(root, index_entries(root)); before = manifest(files)
+        versions = runtime(); snap = snapshot(root, run_id, files)
+        logs = safe_directory(root, STATE) / run_id; logs.mkdir()
+        print(f'快照：{snap}\nlog：{logs}', flush=True)
+        (snap / HARVEST).unlink(missing_ok=True)
+        gates = {}
+        commands = {
+            'build': [sys.executable, 'build.py'],
+            'quick': ['node', '--test', '--test-name-pattern=快篩', 'tests/hard.test.js'],
+            'tools': [sys.executable, 'tests/tools_test.py'],
+            'kid': [sys.executable, 'tests/e2e_kidtext.py', '--parallel'],
+            'e2e': [sys.executable, 'tests/e2e.py'],
+            'standard': [sys.executable, 'tests/e2e_standard.py'],
+            'node': ['node', '--test', *node_tests(files)],
+        }
+        for name in ('build', 'quick', 'tools'):
+            gates[name] = run_gate(name, commands[name], snap, logs); need_gate(name, gates[name])
+            if name == 'build':
+                built = manifest(working_files(snap, files))
+                if set(changes(before, built)) - OUTPUTS:
+                    raise Rejected('build 改寫非建置產物')
+            if name == 'quick':
+                found = re.findall(r'^(?:ℹ |# )?pass (\d+)\s*$', (logs/'quick.log').read_text(), re.M)
+                if not found or int(found[-1]) < 4:
+                    raise Rejected('quick 快篩實際執行不足四條')
+        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
+            jobs = {name: pool.submit(run_gate, name, commands[name], snap, logs) for name in ('kid', 'e2e', 'standard')}
+            for name, job in jobs.items():
+                gates[name] = job.result()
+        for name in ('kid', 'e2e', 'standard'):
+            need_gate(name, gates[name])
+        gates['node'] = run_gate('node', commands['node'], snap, logs); need_gate('node', gates['node'])
+        after_files = working_files(snap, files); after = manifest(after_files)
+        unexpected = set(changes(built, after)) - {HARVEST}
+        if unexpected:
+            raise Rejected('測試改寫非產物檔案：' + ', '.join(sorted(unexpected)))
+        evidence = harvest_evidence(after_files)
+        if manifest(working_files(root, index_entries(root))) != before:
+            raise Rejected('測試期間原工作區內容已變，未回填；請重新 verify')
+        for rel in sorted(OUTPUTS & after_files.keys()):
+            if manifest(working_files(root, index_entries(root))) != before:
+                raise Rejected('回填期間原工作區內容已變，停止回填')
+            mode, data = after_files[rel]
+            dest = root / rel; dest.parent.mkdir(parents=True, exist_ok=True)
+            temp = dest.with_name(dest.name + '.post-tmp-' + run_id)
+            try:
+                temp.write_bytes(data); temp.chmod(0o755 if mode == '100755' else 0o644)
+                os.replace(temp, dest)
+            finally:
+                temp.unlink(missing_ok=True)
+            before[rel] = after[rel]
+        if manifest(working_files(root, index_entries(root))) != after:
+            raise Rejected('回填後與受測產物不符')
+        record = {'schema': SCHEMA, 'algorithm': ALGORITHM, 'status': 'success', 'run_id': run_id,
+                  'manifest': after, 'digest': sha(canonical(after)), 'gates': gates, 'finished': time.time(),
+                  'harvest': evidence, 'node_tests': node_tests(after), 'runtime': versions}
+        atomic_receipt(receipt, record)
+        if read_receipt(receipt) != record:
+            raise Rejected('收據讀回不符')
+        print('全部通過：請完整 add／commit，再 zsh tools/post.sh ship <篇id> [傳題ID]')
+    except BaseException as exc:
+        with contextlib.suppress(Exception):
+            atomic_receipt(receipt, {**running, 'status': 'failed', 'reason': str(exc), 'finished': time.time()})
+        raise
+
+
+def check_worktree(root, expected):
+    current = manifest(working_files(root, index_entries(root)))
+    if current.keys() != expected.keys():
+        raise Rejected('候選檔案清單改變：' + ', '.join(changes(current, expected)))
+    diff = changes(current, expected)
+    if diff:
+        label = '採字內容改變／不合格' if HARVEST in diff else '工作區內容與收據不符'
+        raise Rejected(label + '：' + ', '.join(diff))
+    staged = manifest(blob_files(root))
+    if staged != expected:
+        raise Rejected('暫存區內容與受測 commit 不符：' + ', '.join(changes(staged, expected)))
+
+
+def ship(root, receipt, pid, inbox):
+    environment_check()
+    commit = git(root, 'rev-parse', 'HEAD').decode().strip()
+    r = read_receipt(receipt)
+    files = blob_files(root, commit); committed = manifest(files)
+    missing = r['manifest'].keys() - committed.keys()
+    if missing:
+        raise Rejected('受測內容不符：HEAD 缺少受測檔案：' + ', '.join(sorted(missing)))
+    diff = changes(committed, r['manifest'])
+    if diff:
+        raise Rejected('受測內容不符，內容與收據不符：' + ', '.join(diff))
+    check_worktree(root, committed)
+    if runtime() != r['runtime']:
+        raise Rejected('執行版本與收據不同，請重新 verify')
+    if harvest_evidence(files) != r['harvest']:
+        raise Rejected('收據無效：採字證據不符')
+    if not re.search(r'\bid:\s*' + re.escape(json.dumps(pid, ensure_ascii=False)), files['src/hard.js'][1].decode()):
+        raise Rejected('src/hard.js 沒有這一篇：' + pid)
+    print('採字內容相同（按 JSON 值核對，忽略物件鍵順序／縮排）', flush=True)
+    run_id = 'ship-' + uuid.uuid4().hex
+    snap = snapshot(root, run_id, files)
+    logs = safe_directory(root, STATE) / run_id; logs.mkdir()
+    print(f'固定 commit：{commit}\nlog：{logs}', flush=True)
+    result = run_gate('build', [sys.executable, 'build.py'], snap, logs); need_gate('build', result)
+    if manifest(working_files(snap, files)) != committed:
+        raise Rejected('commit 的建置產物與來源不符，請重新 verify 並提交')
+    result = run_gate('node', ['node', '--test', *r['node_tests']], snap, logs); need_gate('node', result)
+    result = run_gate('standard', [sys.executable, 'tests/e2e_standard.py'], snap, logs)
+    need_gate('standard', result, '推前 DOM 主閘失敗')
+    if manifest(working_files(snap, files)) != committed:
+        raise Rejected('推前檢查改變受測快照，沒推')
+    if git(root, 'rev-parse', 'HEAD').decode().strip() != commit:
+        raise Rejected('檢查期間 HEAD 已改變，沒推；請重新 ship')
+    check_worktree(root, committed)
+    if read_receipt(receipt) != r:
+        raise Rejected('檢查期間收據已改變，沒推')
+    # HEAD may change after the last check; the pushed object still cannot.
+    p = subprocess.run(['git', 'push', '-q', 'origin', commit + ':main'], cwd=root)
+    if p.returncode:
+        raise Rejected('推不上去，請確認遠端版本與連線')
+    want = sha(files['index.html'][1])
+    # 判準＝正式網址 index.html 與這個 commit 逐位元組相同（只找篇 id 對改寫舊篇沒有鑑別力）；先存檔再算雜湊（curl | grep -q 在 pipefail 下會空轉，2026-10-15）
+    for attempt in range(120):   # cap-why: GitHub Pages 平常 80–140 秒，2026-10-16 efa05fe 建置超過 6 分鐘 ⇒ 等到 10 分鐘（120×5 秒）
+        output = logs / 'live.html'
+        p = subprocess.run(['curl', '-sS', '--max-time', '20', '-o', str(output), LIVE_URL + '?nc=' + run_id + str(attempt)],
+                           cwd=root, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        if p.returncode == 0 and output.is_file() and sha(output.read_bytes()) == want:
+            break
+        time.sleep(5)
+    else:
+        raise Rejected(f'已推送 {commit}，但等待後仍未確認正式網址是這一版；尚未回寫進度')
+    print(f'已確認此版本上線：{commit}\n{LIVE_URL}#h/{pid}', flush=True)
+    if inbox:
+        p = subprocess.run(['python3', str(Path.home()/'scripts/g5_help_inbox.py'), '--done', inbox, pid], cwd=root)
+        if p.returncode:
+            raise Rejected('已上線，但回寫網頁進度清單失敗')
+        print('已回寫網頁進度清單')
+    # Background diagnostics use the pinned snapshot. Never authorize push.
+    with (logs/'live.log').open('wb') as log:
+        subprocess.Popen([sys.executable, 'tests/e2e.py', '--base', LIVE_URL], cwd=snap,
+                         stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+    print(f'正式站背景檢查已啟動；結果尚未確認：{logs / "live.log"}')
+
+
+def main(argv=None):
+    args = sys.argv[1:] if argv is None else argv
+    if not args or args[0] not in {'verify', 'ship'} or (args[0] == 'verify' and len(args) != 1) or (args[0] == 'ship' and len(args) not in {2, 3}):
+        print('用法：zsh tools/post.sh verify | ship <篇id> [傳題ID]')
+        return 2
+    started = time.monotonic()
+    try:
+        with lock(ROOT) as receipt:
+            prune(ROOT)
+            if args[0] == 'verify':
+                verify(ROOT, receipt)
+            else:
+                ship(ROOT, receipt, args[1], args[2] if len(args) == 3 else None)
+    except (Rejected, OSError, ValueError, subprocess.SubprocessError, KeyboardInterrupt) as exc:
+        print(f'停止：{exc}；未完成發布', flush=True)
+        return 1
+    finally:
+        print(f'耗時 {time.monotonic() - started:.2f} 秒', flush=True)
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

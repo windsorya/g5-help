@@ -1,0 +1,437 @@
+#!/opt/homebrew/opt/python@3.12/bin/python3.12
+"""T01–T22: offline acceptance through the real zsh tools/post.sh entry.
+
+Only disposable standalone Git repos are used. No remote is configured. PATH
+adapters reject unexpected commands; browser/IO faults exist only in fixtures.
+Run: /opt/homebrew/opt/python@3.12/bin/python3.12 tests/post_ship_test.py
+"""
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+import unittest
+
+ROOT = Path(__file__).absolute().parent.parent
+PY = '/opt/homebrew/opt/python@3.12/bin/python3.12'
+GIT = shutil.which('git')
+
+# These adapters are fixture files, never imported by production code. The
+# environment selects fault inputs, not gates to omit from the actual pipeline.
+ADAPTER = r'''
+import json, os, sys, subprocess, time
+from pathlib import Path
+name = Path(sys.argv[0]).name
+args = sys.argv[1:]
+cfg = json.loads(Path(os.environ['FIX_CONFIG']).read_text())
+def record(kind):
+    fd = os.open(os.environ['FIX_CALLS'], os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+    os.write(fd, (json.dumps([kind, args, os.getcwd()])+'\n').encode()); os.close(fd)
+def deny():
+    record('UNEXPECTED'); sys.exit(97)
+if name == 'git':
+    if args and args[0] == 'push':
+        if len(args) != 4 or args[:3] != ['push', '-q', 'origin'] or not args[3].endswith(':main'): deny()
+        if not cfg.get('allow_delivery'): deny()
+        if cfg.get('late_head'):
+            subprocess.check_call([os.environ['FIX_GIT'], 'update-ref', 'HEAD', cfg['late_head']])
+        record('push'); sys.exit(0)
+    if not args or args[0] not in ['ls-files','ls-tree','show','rev-parse','cat-file','diff','status']: deny()
+    sys.exit(subprocess.call([os.environ['FIX_GIT'], *args]))
+elif name == 'node':
+    if args == ['--version']: print('v22.0.0-fixture'); sys.exit(0)
+    if args == ['--test','--test-name-pattern=快篩','tests/hard.test.js']: gate = 'quick'
+    elif args == ['--test', *sorted(str(p) for p in Path('tests').glob('*.test.js'))]: gate = 'node'
+    else: deny()
+    record(gate)
+    print('ℹ pass 4\nℹ fail 0')
+    sys.exit(cfg.get(gate, 0))
+elif name == 'curl':
+    if not cfg.get('allow_delivery') or len(args) != 6 or args[:4] != ['-sS','--max-time','20','-o'] or not args[-1].startswith('https://windsorya.github.io/g5-help/?nc='): deny()
+    record('curl')
+    Path(args[args.index('-o')+1]).write_bytes(subprocess.check_output([os.environ['FIX_GIT'], 'show', cfg['live_sha']+':index.html'], cwd=os.environ['FIX_REPO']))
+elif name == 'python3':
+    if args != [str(Path.home()/'scripts/g5_help_inbox.py'),'--done','inbox-1','fixture'] or not cfg.get('allow_delivery'): deny()
+    record('progress')
+else: deny()
+'''
+
+BROWSER = r'''
+import hashlib, json, os, signal, sys, time
+from pathlib import Path
+cfg = json.loads(Path(os.environ['FIX_CONFIG']).read_text())
+root = Path(__file__).absolute().parent.parent
+name = Path(__file__).name
+gate = {'e2e.py':'e2e','e2e_standard.py':'standard','e2e_kidtext.py':'kid','tools_test.py':'tools'}[name]
+if '--base' in sys.argv:
+    gate = 'background'
+expected = ['--parallel'] if gate == 'kid' else (['--base','https://windsorya.github.io/g5-help/'] if gate == 'background' else [])
+unexpected = sys.argv[1:] != expected or (gate == 'background' and (name != 'e2e.py' or not cfg.get('allow_delivery')))
+fd = os.open(os.environ['FIX_CALLS'], os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+os.write(fd, (json.dumps(['UNEXPECTED' if unexpected else gate, sys.argv[1:], str(root)])+'\n').encode()); os.close(fd)
+if unexpected: sys.exit(97)
+if cfg.get('hold') == gate:
+    Path(os.environ['FIX_READY']).touch()
+    while not Path(os.environ['FIX_RELEASE']).exists(): time.sleep(.01)
+if cfg.get('kill') == gate: os.kill(os.getpid(), signal.SIGKILL)
+if cfg.get('timeout') == gate: time.sleep(20)
+if gate == 'standard' and cfg.get('probe'):
+    import runpy
+    ns = runpy.run_path(str(root/'tests/post_probe.py'))
+    sys.exit(ns['probe'](root/'tests/standard_source.py', cfg['probe']))
+if gate == 'kid' and not cfg.get('kid'):
+    def sha(p): return hashlib.sha256((root/p).read_bytes()).hexdigest()
+    stamp = dict(index_sha256=sha('index.html'), kidgate_sha256=sha('tests/kidgate.js'), driver_sha256=sha('tests/e2e_kidtext.py'), max=40)
+    result = dict(**stamp, cases=['home','fixture:lesson'], branches=['a','b'], violations=[], errors=[], snapshots=2,
+                  selftests={k:{'ok':True} for k in ['B01a','B01b','B02a','B02b','B03','B04','B05','B06','B07','B09','B10-judged','B12','B13','B14','B15','B16','B18','B19','unclassified','U01']})
+    browsers = {'chromium':result, 'webkit':result}
+    if cfg.get('missing_browser'): del browsers['webkit']
+    (root/'tests/kidtext_harvest.json').write_text(json.dumps(dict(**stamp, self_max=40, browsers=browsers)))
+sys.exit(cfg.get(gate, 0))
+'''
+
+PROBE = r'''
+import contextlib, sys, types
+def probe(source, mutation):
+    # Browser double supplies actual measurement data. No replacement of the
+    # flow, check(), timing_selftest(), or exit-code consumer (except mutants).
+    fake = types.ModuleType('playwright.sync_api')
+    fake.sync_playwright = lambda: None
+    sys.modules['playwright'] = types.ModuleType('playwright')
+    sys.modules['playwright.sync_api'] = fake
+    e = types.ModuleType('e2e'); e.HOME = 'file:///fixture/index.html'
+    e.open_page = lambda *a, **kw: (types.SimpleNamespace(close=lambda: None), Page(), [])
+    e.last_ask = lambda p: p
+    sys.modules['e2e'] = e
+    text = source.read_text()
+    changes = {
+      'drop-now': ('now = [f"第 {k} 步當下：{p}" for k, p in walk_lesson(page, steps)]', 'now = []; walk_lesson(page, steps)'),
+      'skip-check': ('check(f"{pid} 標準DOM② 每一步剛出現', 'unused_check(f"{pid} 標準DOM② 每一步剛出現'),
+      'zero-rc': ('return 1 if any(not row[1] for row in results) else 0', 'return 0'),
+    }
+    if mutation in changes:
+        before, after = changes[mutation]
+        assert text.count(before) == 1, 'mutation anchor absent'
+        text = text.replace(before, after)
+    ns = {'__file__':str(source), '__name__':'fixture_standard', 'unused_check':lambda *a: None}
+    exec(compile(text, str(source), 'exec'), ns)
+    class Page:
+        def __init__(self): self.hidden = False; self.done = False
+        def wait_for_selector(self, *a, **k): pass
+        def add_style_tag(self, **kw): self.hidden = True
+        def get_by_role(self, *a, **kw): return self
+        def locator(self, sel):
+            if 'data-next' in sel: self.done = True
+            return self
+        def click(self): pass
+        def evaluate(self, script, arg=None):
+            if 'window.G5Hard.LIST' in script: return [{'id':'fixture', 'steps':[{'a':None}]}]
+            if script == ns['STD_NAV_JS']:
+                return dict(navs=1, hrefs=[v[0] for k,v in ns['STD_SITES'].items() if k != 'help'], hidden=[], current=[ns['STD_SITES']['help'][1]])
+            if script == ns['STD_ROBOTS_JS']: return [dict(content='noindex', inHead=True)]
+            if script == ns['STD_FIG_JS']:
+                return [dict(where='fixture step 1', figs=[dict(label='測試用圖', seen=True, n=0 if self.hidden and not self.done else 1)])]
+            raise AssertionError('unexpected browser call')
+    ns['std_selftest'] = lambda *a: ns['check']('fixture static selftest', True)
+    try:
+        rc, results = ns['run_standard'](object(), css=ns['STEP_HIDE_CSS'] if mutation == 'hidden' else None)
+    except AssertionError as exc:
+        print(str(exc)); return 1
+    return rc
+'''
+
+
+class PostShip(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(prefix='post-ship-')
+        self.addCleanup(self.tmp.cleanup)
+        self.base = Path(self.tmp.name)
+        self.repo = self.base / 'repo'; self.repo.mkdir()
+        self.bin = self.base / 'bin'; self.bin.mkdir()
+        self.calls = self.base / 'calls.jsonl'
+        self.config = self.base / 'config.json'
+        self.cfg = {}; self.configure()
+        self.env = {k:v for k,v in os.environ.items() if not k.startswith(('GIT_', 'G5_', 'PYTHON', 'NODE_'))}
+        self.env.update(PATH=str(self.bin)+os.pathsep+os.environ['PATH'], HOME=str(self.base),
+                        GIT_CONFIG_NOSYSTEM='1', GIT_CONFIG_GLOBAL='/dev/null',
+                        FIX_CONFIG=str(self.config), FIX_CALLS=str(self.calls), FIX_GIT=GIT,
+                        FIX_REPO=str(self.repo), FIX_READY=str(self.base/'ready'), FIX_RELEASE=str(self.base/'release'))
+        for name in ('git','node','curl','python3'):
+            p = self.bin/name; p.write_text('#!'+PY+'\n'+ADAPTER); p.chmod(0o755)
+        for rel in ('tools/post.sh','tools/post_gate.py'):
+            p = ROOT/rel
+            if p.exists(): self.write(rel, p.read_text())
+        self.write('tests/standard_source.py', (ROOT/'tests/e2e_standard.py').read_text())
+        self.write('tests/post_probe.py', PROBE)
+        for name in ('e2e.py','e2e_standard.py','e2e_kidtext.py','tools_test.py'):
+            self.write('tests/'+name, BROWSER)
+        self.write('.gitignore', '.post-state/\n.post-snapshots/\n__pycache__/\ntests/kidtext_harvest.json.lock\n')
+        self.write('src/hard.js', 'id: "fixture"\n')
+        self.write('src/app.html', 'hello\n')
+        for rel in ('tests/hard.test.js','tests/kidgate.js','tests/kidtext.js','tests/fixtures/example.json'):
+            self.write(rel, '{}\n')
+        self.write('build.py', "from pathlib import Path\np=Path('src')\nPath('index.html').write_text(''.join(x.read_text() for x in sorted(p.glob('*.js')) if '.bak.' not in x.name))\n")
+        self.write('index.html', 'id: "fixture"\n')
+        self.git('init','-q'); self.git('config','user.email','fixture@example.invalid'); self.git('config','user.name','fixture')
+        self.commit()
+
+    def write(self, rel, content):
+        p = self.repo/rel; p.parent.mkdir(parents=True, exist_ok=True); p.write_text(content); return p
+
+    def git(self, *args):
+        return subprocess.check_output([GIT, *args], cwd=self.repo, env=self.env, text=True).strip()
+
+    def commit(self):
+        self.git('add','.'); self.git('commit','-qm','fixture', '--allow-empty')
+        return self.git('rev-parse','HEAD')
+
+    def configure(self, **kw):
+        self.cfg.update(kw); self.config.write_text(json.dumps(self.cfg))
+
+    def run_post(self, cmd, expected, contains=None, extra_env=None):
+        args = ['zsh','tools/post.sh',cmd] + (['fixture','inbox-1'] if cmd == 'ship' else [])
+        p = subprocess.run(args, cwd=self.repo, env={**self.env, **(extra_env or {})}, capture_output=True, text=True, timeout=30)
+        self.assertEqual(p.returncode, expected, p.stdout+p.stderr)
+        if contains: self.assertIn(contains, p.stdout+p.stderr)
+        return p
+
+    def events(self, kind):
+        rows = [json.loads(s) for s in self.calls.read_text().splitlines()] if self.calls.exists() else []
+        return [r for r in rows if r[0] == kind]
+
+    def no_delivery(self):
+        for k in ('push','curl','progress','background','UNEXPECTED'):
+            self.assertEqual(self.events(k), [], k)
+
+    def verified(self):
+        self.run_post('verify', 0)
+        return self.commit()
+
+    def shipped(self):
+        sha = self.git('rev-parse','HEAD')
+        self.configure(allow_delivery=True, live_sha=sha)
+        p = self.run_post('ship', 0, '已確認此版本上線')
+        deadline = time.monotonic()+3
+        while not self.events('background') and time.monotonic() < deadline: time.sleep(.01)
+        for k in ('push','curl','progress','background'): self.assertEqual(len(self.events(k)), 1, k)
+        self.assertEqual(self.events('push')[0][1], ['push','-q','origin',sha+':main'])
+        self.assertEqual(self.events('UNEXPECTED'), [])
+        return p
+
+    def receipt(self):
+        return self.repo/'.post-state/latest.json'
+
+    def test_T01_missing_receipt(self):
+        self.run_post('ship',1,'缺少完整成功收據'); self.no_delivery()
+
+    def test_T02_standard_failed(self):
+        self.configure(standard=1)
+        self.run_post('verify',1); self.run_post('ship',1,'standard'); self.no_delivery()
+
+    def test_T03_source_commit_changed(self):
+        self.verified(); self.write('src/hard.js','id: "fixture"\n// changed\n'); self.commit()
+        self.run_post('ship',1,'src/hard.js'); self.no_delivery()
+
+    def test_T04_success_fixed_commit(self):
+        self.verified(); self.shipped()
+        self.assertEqual(len(self.events('standard')),2)
+        self.assertEqual(len(self.events('e2e')),1)
+        self.assertEqual(len(self.events('kid')),1)
+        self.assertEqual(len(self.events('quick')),1)
+        self.assertEqual(len(self.events('tools')),1)
+        self.assertEqual(len(self.events('node')),2)
+
+    def test_T05_invalid_receipt(self):
+        self.verified(); valid = self.receipt().read_text()
+        for mode in ('json','digest','gates','schema','runtime','node_tests','harvest','finished'):
+            with self.subTest(mode=mode):
+                data = json.loads(valid)
+                if mode == 'json': text = '{'
+                else:
+                    if mode == 'schema': data['schema'] = 'wrong'
+                    else: data.pop(mode, None)
+                    text = json.dumps(data)
+                self.receipt().write_text(text); self.run_post('ship',1,'收據無效'); self.no_delivery()
+
+    def test_T06_untracked_backups_excluded(self):
+        self.verified(); self.write('src/hard.js.bak.test','backup')
+        self.shipped()
+
+    def test_T06_tracked_backup_is_not_excluded(self):
+        self.write('src/hard.js.bak.tracked','tracked backup')
+        self.write('tests/fixtures.bak.tracked/value.json','{}')
+        self.commit(); self.verified()
+        for rel in ('src/hard.js.bak.tracked','tests/fixtures.bak.tracked/value.json'):
+            with self.subTest(rel=rel):
+                p = self.repo/rel; old = p.read_text(); p.write_text(old+'changed')
+                self.run_post('ship',1,rel); p.write_text(old)
+        self.no_delivery()
+
+    def test_T07_harvest_key_order(self):
+        for committed in (False, True):
+            with self.subTest(committed=committed):
+                if committed: self.calls.unlink()
+                else: self.verified()
+                p = self.repo/'tests/kidtext_harvest.json'
+                p.write_text(json.dumps(json.loads(p.read_text()), sort_keys=True, indent=4))
+                if committed: self.commit()
+                self.assertIn('採字內容相同', self.shipped().stdout)
+
+    def test_T08_old_receipt_other_head(self):
+        old = self.git('rev-parse','HEAD'); self.write('src/hard.js','id: "fixture"\nnew\n'); self.verified()
+        self.git('checkout','-q',old)
+        self.run_post('ship',1,'受測內容不符'); self.no_delivery()
+
+    def test_T09_amend_same_content(self):
+        old = self.verified(); self.git('commit','--amend','-qm','new message')
+        self.assertNotEqual(old,self.git('rev-parse','HEAD')); self.shipped()
+
+    def test_T10_missing_committed_source(self):
+        self.write('src/new-post.js','new post\n'); self.run_post('verify',0)
+        self.git('add','index.html','tests/kidtext_harvest.json'); self.git('commit','-qm','omit new source')
+        self.run_post('ship',1,'HEAD 缺少受測檔案：src/new-post.js'); self.no_delivery()
+
+    def test_T11_new_untracked_candidate(self):
+        self.verified()
+        for rel in ('src/new-post.js','tests/new.test.js','new-asset.svg'):
+            with self.subTest(rel=rel):
+                self.write(rel,'new'); self.run_post('ship',1,'候選檔案清單改變'); (self.repo/rel).unlink()
+        self.no_delivery()
+
+    def test_T12_changed_dependencies(self):
+        base = self.verified()
+        for rel in ('build.py','tools/post.sh','tests/kidtext.js','tests/fixtures/example.json'):
+            with self.subTest(rel=rel):
+                p = self.repo/rel; p.write_text(p.read_text()+'\n'); self.commit()
+                self.run_post('ship',1,rel); self.git('reset','--hard',base)
+        self.no_delivery()
+
+    def test_T13_new_harvest_bound_after_run(self):
+        self.write('tests/kidtext_harvest.json','{"old":true}')
+        self.verified(); receipt = json.loads(self.receipt().read_text())
+        self.assertEqual(set(receipt['harvest']), {'chromium','webkit'})
+        self.shipped()
+
+    def test_T14_harvest_semantic_change(self):
+        self.verified(); p = self.repo/'tests/kidtext_harvest.json'; valid = p.read_text()
+        for mode in ('bool','hash','violations','array','duplicate','nan'):
+            with self.subTest(mode=mode):
+                d = json.loads(valid); b = d['browsers']['chromium']
+                if mode == 'bool': b['selftests']['B01a']['ok'] = False
+                if mode == 'hash': b['index_sha256'] = '0'*64
+                if mode == 'violations': b['violations'] = [{'kind':'word','text':'bad'}]
+                if mode == 'array': b['branches'].reverse()
+                text = json.dumps(d)
+                if mode == 'duplicate': text = text[:-1]+',"max":40}'
+                if mode == 'nan': text = text[:-1]+',"illegal":NaN}'
+                p.write_text(text); self.run_post('ship',1,'採字'); p.write_text(valid)
+        self.no_delivery()
+
+    def test_T15_incomplete_gate(self):
+        for fault in ({'e2e':1},{'node':1},{'kill':'kid'},{'timeout':'standard'},{'missing_browser':True}):
+            with self.subTest(fault=fault):
+                self.cfg = {}; self.configure(**fault)
+                # Shorten the production timeout only in this disposable source.
+                helper = self.repo/'tools/post_gate.py'
+                if helper.exists(): helper.write_text(helper.read_text().replace('GATE_TIMEOUT = 900','GATE_TIMEOUT = 1'))
+                self.run_post('verify',1); self.run_post('ship',1); self.no_delivery()
+
+    def test_T16_latest_attempt_invalidates_success(self):
+        self.verified(); self.configure(e2e=1); self.run_post('verify',1)
+        self.run_post('ship',1,'最近 verify 未成功'); self.no_delivery()
+        self.receipt().write_text(json.dumps({'status':'running','run_id':'interrupted'}))
+        self.run_post('ship',1,'未完成'); self.no_delivery()
+
+    def start_held(self, cmd):
+        self.configure(hold='standard')
+        p = subprocess.Popen(['zsh','tools/post.sh',cmd]+(['fixture'] if cmd=='ship' else []), cwd=self.repo, env=self.env,
+                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        self.addCleanup(lambda: p.poll() is None and p.kill())
+        deadline = time.monotonic()+10
+        while not (self.base/'ready').exists() and p.poll() is None and time.monotonic()<deadline: time.sleep(.01)
+        self.assertTrue((self.base/'ready').exists(), 'gate not reached')
+        return p
+
+    def release(self, p):
+        (self.base/'release').touch(); out = p.communicate(timeout=15)[0]
+        self.assertEqual(p.returncode,1,out); return out
+
+    def test_T17_snapshot_and_mutex(self):
+        p = self.start_held('verify')
+        self.run_post('verify',1,'進行中'); self.run_post('ship',1,'進行中')
+        self.write('src/hard.js','id: "fixture"\nchanged during test')
+        snap = Path(self.events('standard')[0][2])
+        self.assertEqual((snap/'src/hard.js').read_text(),'id: "fixture"\n')
+        self.assertIn('內容已變',self.release(p)); self.run_post('ship',1); self.no_delivery()
+
+    def test_T18_ship_dom_failure(self):
+        self.verified(); self.configure(standard=1)
+        self.run_post('ship',1,'推前 DOM 主閘失敗'); self.no_delivery()
+
+    def test_T19_timing_consumed_by_flow(self):
+        self.configure(probe='hidden')
+        self.run_post('verify',1,'FAIL fixture 標準DOM② 每一步剛出現'); self.run_post('ship',1); self.no_delivery()
+
+    def test_T20_consumer_mutations_rejected(self):
+        # Positive control also exercises the real selftest with separate sinks.
+        self.configure(probe='normal'); self.run_post('verify',0)
+        for mutation in ('drop-now','skip-check','zero-rc'):
+            with self.subTest(mutation=mutation):
+                self.configure(probe=mutation)
+                self.run_post('verify',1,'反例未使正式主流程失敗'); self.run_post('ship',1); self.no_delivery()
+
+    def test_T21_head_changes_before_push(self):
+        self.verified(); p = self.start_held('ship')
+        self.write('src/hard.js','id: "fixture"\nunverified'); self.commit()
+        self.assertIn('HEAD 已改變',self.release(p)); self.no_delivery()
+
+    def test_T21_late_head_still_pushes_pinned_sha(self):
+        approved = self.verified()
+        self.write('src/hard.js','id: "fixture"\nunverified late change')
+        other = self.commit(); self.git('reset','--hard',approved)
+        self.configure(late_head=other); self.shipped()
+        self.assertEqual(self.git('rev-parse','HEAD'), other)
+
+    def test_T23_interactive_git_env_allowed(self):
+        """CC 的 shell 帶 GIT_EDITOR／GIT_PAGER：不影響受測內容，不得拒跑；GIT_DIR 這類換內容來源的仍要拒。"""
+        self.run_post('verify',1,'GIT_INDEX_FILE',extra_env={'GIT_INDEX_FILE':str(self.base/'other.index')})
+        self.run_post('verify',0,extra_env={'GIT_EDITOR':'true','GIT_PAGER':'cat'})
+
+    def test_T24_old_runtime_artifacts_pruned(self):
+        """快照每輪約 2.6 MB：超過一天的快照／log 目錄被清掉，一天內的（含背景 e2e 正在用的）保留。"""
+        old = [self.repo/'.post-snapshots/old-run', self.repo/'.post-state/old-run']
+        new = [self.repo/'.post-snapshots/new-run', self.repo/'.post-state/new-run']
+        for d in old + new:
+            d.mkdir(parents=True, exist_ok=True); (d/'x').write_text('x')
+        stamp = time.time() - 2*86400
+        for d in old: os.utime(d, (stamp, stamp))
+        self.run_post('verify',0)
+        for d in old: self.assertFalse(d.exists(), d)
+        for d in new: self.assertTrue(d.exists(), d)
+        self.assertTrue(self.receipt().is_file())
+
+    def test_T22_storage_and_source_rejection(self):
+        self.run_post('verify',1,'G5_UPLOAD_SRC',extra_env={'G5_UPLOAD_SRC':'src/upload.js'})
+        self.run_post('ship',1); self.no_delivery()
+        self.write('src/outside.js','placeholder').unlink()
+        (self.repo/'src/outside.js').symlink_to(self.base/'never-read')
+        self.run_post('verify',1,'symlink'); self.run_post('ship',1); self.no_delivery()
+        (self.repo/'src/outside.js').unlink()
+        helper = self.repo/'tools/post_gate.py'; original = helper.read_text()
+        for mode in ('write','readback'):
+            with self.subTest(mode=mode):
+                anchor = 'os.replace(tmp, path)'
+                # Fault only at SUCCESS persistence, after every gate ran.
+                fault = ('if data.get("status") == "success": raise OSError("fixture write failure")\n        os.replace(tmp, path)'
+                         if mode == 'write' else 'os.replace(tmp, path)\n        if data.get("status") == "success": path.write_text("{}")')
+                self.assertIn(anchor,original)
+                helper.write_text(original.replace(anchor,fault))
+                self.run_post('verify',1,'收據'); self.run_post('ship',1); self.no_delivery()
+        helper.write_text(original)
+
+
+if __name__ == '__main__':
+    unittest.main(verbosity=2)

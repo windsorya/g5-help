@@ -16,12 +16,26 @@ standard.test.js 的②④⑤靜態判準留作秒級粗篩；兩者不一致時
 import json
 import re
 import sys
+from contextvars import ContextVar
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from e2e import HOME, RESULTS, check, last_ask, open_page  # noqa: E402  （e2e.py 只在 __main__ 才跑）
+from e2e import HOME, last_ask, open_page  # noqa: E402
+
+# Each formal/probe run owns its results. Nested expected failures cannot leak
+# into the real run, and e2e.py's global RESULTS is never reused here.
+_RESULTS = ContextVar('standard_results')
+
+
+def check(name, cond, detail=''):
+    _RESULTS.get().append((name, bool(cond), detail))
+    print(('PASS ' if cond else 'FAIL ') + name + ('' if cond else f'  ← {detail}'))
+
+
+def result_rc(results):
+    return 1 if any(not row[1] for row in results) else 0
 
 MOBILE = {"viewport": {"width": 390, "height": 844}, "is_mobile": True, "has_touch": True}
 
@@ -256,26 +270,38 @@ STEP_HIDE_CSS = "#lesson .lstep:last-child svg{visibility:hidden}"   # Codex 審
 
 
 def timing_selftest(browser, post):
-    """自檢：注入 Codex 的時機反例，斷言「每一步當下就量」每一步都抓得到；走完才量的結果印出來對照。"""
-    ctx, page, _ = open_page(browser, MOBILE, url=HOME + "#h/" + post["id"], reduced_motion="reduce")
-    page.wait_for_selector("#entry:not([hidden])")
-    page.add_style_tag(content=STEP_HIDE_CSS)
-    page.get_by_role("button", name="開始學").click()
-    n = len(post["steps"])
-    flagged = {k for k, _ in walk_lesson(page, post["steps"])}
-    after = std_fig_problems(page.evaluate(STD_FIG_JS, ", ".join(f'#lesson section[data-step="{k}"]' for k in range(1, n + 1))), min_conts=n)
-    ctx.close()
-    print(f"  （對照：同一個反例，走完才量的舊做法{'也抓得到' if after else '全部放過'}）")
-    check(f"{post['id']} 標準DOM自檢② 時機反例「{STEP_HIDE_CSS}」：每一步當下就量，{n} 步都抓得到", flagged == set(range(1, n + 1)), sorted(flagged))
+    """Use the same flow and exit calculation as the CLI, including consumers.
+
+    Only input CSS differs. A browser-start exception cannot satisfy the probe;
+    the exact lesson/steps must fail while all unrelated checks remain green.
+    """
+    positive_rc, positive = run_standard(browser, posts=[post], selftests=False)
+    negative_rc, negative = run_standard(browser, posts=[post], css=STEP_HIDE_CSS, selftests=False)
+    label = f"{post['id']} 標準DOM② 每一步剛出現"
+    good = [r for r in positive if r[0].startswith(label)]
+    bad = [r for r in negative if r[0].startswith(label)]
+    expected = set(range(1, len(post['steps']) + 1))
+    flagged = {int(m.group(1)) for row in bad for detail in row[2]
+               if (m := re.match(r'第 (\d+) 步當下：', detail))}
+    ok = (positive_rc == 0 and len(good) == 1 and good[0][1]
+          and negative_rc == 1 and len(bad) == 1 and not bad[0][1]
+          and flagged == expected and all(r[1] for r in negative if not r[0].startswith(label)))
+    message = f"{post['id']} 標準DOM自檢② 反例未使正式主流程失敗"
+    check(message, ok, {'positive_rc': positive_rc, 'negative_rc': negative_rc, 'flagged': sorted(flagged)})
+    # Independent assertion catches a mutated final rc=0 too. It is not a
+    # substitute for the formal result check: both routes are exercised above.
+    if not ok:
+        raise AssertionError(message)
 
 
-def flow_standard_dom(browser):
+def flow_standard_dom(browser, posts=None, css=None, selftests=True):
     """三站共通標準的主閘（真瀏覽器 DOM，Chromium 390 寬）：④切換列 ⑤noindex ②每一步都有圖，每條附自檢（std_selftest）。"""
     ctx, page, errors = open_page(browser, MOBILE, url=HOME, reduced_motion="reduce")
     page.wait_for_selector("#siteNav")
     std_page_check(page, "首頁", "help")
-    posts = page.evaluate("window.G5Hard.LIST.filter((e) => e.kind === 'steps' && (e.steps || []).length)"
-                          ".map((e) => ({id: e.id, steps: e.steps.map((s) => ({a: s.check ? s.check.a : null}))}))")
+    if posts is None:
+        posts = page.evaluate("window.G5Hard.LIST.filter((e) => e.kind === 'steps' && (e.steps || []).length)"
+                              ".map((e) => ({id: e.id, steps: e.steps.map((s) => ({a: s.check ? s.check.a : null}))}))")
     ctx.close()
     check("標準DOM② 至少有一篇通用格式（每一步要有圖的那種）可以量", len(posts) >= 1, posts)
     tested = False
@@ -283,6 +309,8 @@ def flow_standard_dom(browser):
         pid, steps = post["id"], post["steps"]
         ctx, page, errors = open_page(browser, MOBILE, url=HOME + "#h/" + pid, reduced_motion="reduce")
         page.wait_for_selector("#entry:not([hidden])")
+        if css:
+            page.add_style_tag(content=css)
         page.get_by_role("button", name="開始學").click()
         now = [f"第 {k} 步當下：{p}" for k, p in walk_lesson(page, steps)]
         check(f"{pid} 標準DOM② 每一步剛出現（還是目前這一步）時，就有看得見、真的畫出東西的圖", not now, now)
@@ -290,24 +318,38 @@ def flow_standard_dom(browser):
         figs = std_fig_problems(page.evaluate(STD_FIG_JS, cont_sel), min_conts=len(steps))
         check(f"{pid} 標準DOM② 走完 {len(steps)} 步回頭看，每一步的圖都還在", not figs, figs)
         std_page_check(page, f"{pid} 教學頁", "help")
-        if not tested:
+        if selftests and not tested:
             std_selftest(page, pid, "help", ('#lesson section[data-step="1"] svg[role="img"]', '#lesson section[data-step="1"]'))
             timing_selftest(browser, post)
             tested = True
         check(f"{pid} 標準DOM 走教學沒有 JS 錯誤", not errors, errors)
         ctx.close()
-    check("標準DOM 自檢至少在一篇真頁面上跑過", tested)
+    if selftests:
+        check("標準DOM 自檢至少在一篇真頁面上跑過", tested)
+
+
+def run_standard(browser, posts=None, css=None, selftests=True):
+    """Formal CLI body and selftest body; every invocation has an isolated sink."""
+    results = []
+    token = _RESULTS.set(results)
+    try:
+        flow_standard_dom(browser, posts=posts, css=css, selftests=selftests)
+        return result_rc(results), results
+    finally:
+        _RESULTS.reset(token)
 
 
 def main():
     with sync_playwright() as p:
         cr = p.chromium.launch()
-        flow_standard_dom(cr)
-        cr.close()
-    bad = [r for r in RESULTS if not r[1]]
-    print(f"\n{len(RESULTS) - len(bad)}/{len(RESULTS)} PASS")
-    sys.exit(1 if bad else 0)
+        try:
+            rc, results = run_standard(cr)
+        finally:
+            cr.close()
+    bad = [r for r in results if not r[1]]
+    print(f"\n{len(results) - len(bad)}/{len(results)} PASS")
+    return rc
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
