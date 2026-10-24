@@ -9,12 +9,13 @@
 # 這支把三件事固定下來：圍籬自動加在檔首、prompt 一律在 -i 前、在 brief 所在目錄跑。
 set -u
 if (( $# < 2 )); then print -u2 '用法：zsh tools/codex_send.sh <brief.md> <輸出.txt> [照片 ...]'; exit 2; fi
-brief=$1; out=$2; shift 2
+brief=$1; out=${2:A}; shift 2   # 先轉絕對路徑：下面會 cd 到 brief 所在目錄（Codex 審 d18b20f P2）
 [[ -f $brief ]] || { print -u2 "找不到 brief：$brief"; exit 2; }
+[[ -d ${out:h} ]] || { print -u2 "輸出目錄不存在：${out:h}"; exit 2; }
 dir=${brief:A:h}
 for img in "$@"; do [[ -f $img ]] || { print -u2 "找不到照片：$img"; exit 2; }; done
 final=$dir/.${brief:t}.fenced.md
-if grep -q '讀取範圍硬邊界' $brief; then
+if head -n 1 $brief | grep -q '^## 🔒 讀取範圍硬邊界'; then   # 只認檔首那一行的圍籬標題，內文提到不算（Codex 審 d18b20f P2）
   cp $brief $final
 else
   { cat <<EOF

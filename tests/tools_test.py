@@ -153,6 +153,21 @@ class CodexSend(unittest.TestCase):   # 交辦 #4293：prompt 一定在 -i 前�
         self.assertEqual(self.run_send(str(self.d / "none.md"), str(self.d / "o.txt")).returncode, 2)
         self.assertEqual(self.run_send(str(self.brief), str(self.d / "o.txt"), str(self.d / "no.jpg")).returncode, 2)
 
+    def test_fence_word_in_body_still_gets_fence(self):   # Codex 審 d18b20f：內文提到「讀取範圍硬邊界」不等於已有圍籬
+        self.brief.write_text("請確認讀取範圍硬邊界是否足夠。\n")
+        self.assertEqual(self.run_send(str(self.brief), str(self.d / "o.txt")).returncode, 0)
+        args = (self.d / "args.txt").read_text().split("\n")
+        self.assertTrue(args[args.index("read-only") + 1].startswith("## 🔒 讀取範圍硬邊界"), args[:6])
+
+    def test_relative_output_path(self):   # Codex 審 d18b20f：相對輸出路徑不能因 cd 錯位
+        sub = self.d / "docs"; sub.mkdir(); (sub / "b.md").write_text("x\n")
+        env = dict(self.os.environ, PATH=str(self.bin) + ":" + self.os.environ["PATH"], FAKE_ARGS=str(self.d / "args.txt"))
+        p = self.sp.run(["zsh", str(ROOT / "tools/codex_send.sh"), "docs/b.md", "docs/r.txt"], cwd=self.d, env=env, capture_output=True, text=True, timeout=30)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertTrue((sub / "r.txt").is_file()); self.assertTrue((sub / "r.answer.txt").is_file())
+        self.assertFalse((sub / "docs").exists())
+        self.assertEqual(self.run_send(str(self.brief), str(self.d / "nodir" / "o.txt")).returncode, 2)
+
 
 if __name__ == "__main__":
     unittest.main()
