@@ -1,671 +1,12 @@
 {
- "index_sha256": "eeef26f77e9369eb28ef654129536972c954574adf961561e277ad8360662a9c",
+ "index_sha256": "1e21983327d12677b36104f80d3fff72797c69722cb2e233d191030836dfa6ea",
  "kidgate_sha256": "91c518ad54e254da967b5b983bebe443bdee4a950557d3a7aca8d9865f68a936",
  "driver_sha256": "d3fa91f0a78f9bf65d7a7ae35b197d3ba19a27288ecb15c31122a8df05a109e9",
  "max": 40,
  "self_max": 40,
  "browsers": {
-  "chromium": {
-   "index_sha256": "eeef26f77e9369eb28ef654129536972c954574adf961561e277ad8360662a9c",
-   "kidgate_sha256": "91c518ad54e254da967b5b983bebe443bdee4a950557d3a7aca8d9865f68a936",
-   "driver_sha256": "d3fa91f0a78f9bf65d7a7ae35b197d3ba19a27288ecb15c31122a8df05a109e9",
-   "max": 40,
-   "cases": [
-    "home",
-    "home:hide",
-    "home:settings",
-    "home:withdraw",
-    "p38-6-2:alt",
-    "p38-6-2:direct",
-    "p38-6-2:lesson",
-    "p38-6-2:practice",
-    "p38-6-2:resume",
-    "p38-6-2:video",
-    "p40-2-5:allseen",
-    "p40-2-5:direct",
-    "p40-2-5:lesson",
-    "p40-2-5:mastery",
-    "p40-2-5:resume0",
-    "p40-2-5:resume1",
-    "p40-2-5:resume10",
-    "p40-2-5:resume11",
-    "p40-2-5:resume12",
-    "p40-2-5:resume13",
-    "p40-2-5:resume14",
-    "p40-2-5:resume15",
-    "p40-2-5:resume16",
-    "p40-2-5:resume17",
-    "p40-2-5:resume2",
-    "p40-2-5:resume3",
-    "p40-2-5:resume4",
-    "p40-2-5:resume5",
-    "p40-2-5:resume6",
-    "p40-2-5:resume7",
-    "p40-2-5:resume8",
-    "p40-2-5:resume9",
-    "p40-2-5:revisit",
-    "p40-2-5:video",
-    "q6-1-angle-x:allseen",
-    "q6-1-angle-x:direct",
-    "q6-1-angle-x:lesson",
-    "q6-1-angle-x:mastery",
-    "q6-1-angle-x:resume0",
-    "q6-1-angle-x:resume1",
-    "q6-1-angle-x:resume10",
-    "q6-1-angle-x:resume11",
-    "q6-1-angle-x:resume2",
-    "q6-1-angle-x:resume3",
-    "q6-1-angle-x:resume4",
-    "q6-1-angle-x:resume5",
-    "q6-1-angle-x:resume6",
-    "q6-1-angle-x:resume7",
-    "q6-1-angle-x:resume8",
-    "q6-1-angle-x:resume9",
-    "q6-1-angle-x:revisit",
-    "q6-1-angle-x:video",
-    "readonly:lockfail",
-    "readonly:nolocks",
-    "readonly:second-tab",
-    "sci-q5-bangen:direct",
-    "sci-q5-bangen:lesson",
-    "sci-q5-bangen:mastery",
-    "sci-q5-bangen:resume0",
-    "sci-q5-bangen:resume1",
-    "sci-q5-bangen:resume2",
-    "sci-q5-bangen:resume3",
-    "sci-q5-bangen:video",
-    "zh-q27-typo:direct",
-    "zh-q27-typo:lesson",
-    "zh-q27-typo:mastery",
-    "zh-q27-typo:resume0",
-    "zh-q27-typo:resume1",
-    "zh-q27-typo:resume2",
-    "zh-q27-typo:resume3",
-    "zh-q27-typo:resume4",
-    "zh-q27-typo:resume5",
-    "zh-q27-typo:resume6",
-    "zh-q27-typo:resume7",
-    "zh-q27-typo:video"
-   ],
-   "branches": [
-    "app:alt",
-    "app:confused-fail",
-    "app:confused-net",
-    "app:confused-nocode",
-    "app:confused-ok",
-    "app:confused-sending",
-    "app:finish-clean",
-    "app:finish-hint",
-    "app:finish-wrong",
-    "app:form-bad",
-    "app:form-empty",
-    "app:hint-r1-1",
-    "app:hint-r1-2",
-    "app:hint-r2-1",
-    "app:hint-r2-2",
-    "app:nums-bad",
-    "app:nums-empty",
-    "app:nums-third",
-    "app:nums-wrong",
-    "app:r1-ok",
-    "app:step1-mul",
-    "app:step1-num",
-    "app:step1-red",
-    "app:step4-common",
-    "app:step4-else",
-    "app:step4-le0",
-    "app:step5-ok",
-    "app:step5-wrong",
-    "app:step5b-ok",
-    "app:step5b-wrong",
-    "app:step6-n",
-    "app:step6-ok",
-    "app:step6-x",
-    "app:win",
-    "checkCommon:diff-den",
-    "checkCommon:invalid-d0",
-    "checkCommon:invalid-n0",
-    "checkCommon:left-changed",
-    "checkCommon:ok",
-    "checkCommon:ok-not-lcm",
-    "checkCommon:right-changed",
-    "checkReduce:changed",
-    "checkReduce:invalid-d0",
-    "checkReduce:invalid-n0",
-    "checkReduce:not-simplest",
-    "checkReduce:ok",
-    "checkReduce:unequal-div",
-    "checkSign:ok-eq",
-    "checkSign:ok-neq",
-    "checkSign:wrong-eq",
-    "checkSign:wrong-neq",
-    "p38-6-2:direct",
-    "p40-2-5:allseen",
-    "p40-2-5:check1:0",
-    "p40-2-5:check1:1",
-    "p40-2-5:check2:0",
-    "p40-2-5:check2:1",
-    "p40-2-5:check3:0",
-    "p40-2-5:check3:1",
-    "p40-2-5:check4:0",
-    "p40-2-5:check4:1",
-    "p40-2-5:check4:2",
-    "p40-2-5:mastery",
-    "p40-2-5:prac10:0",
-    "p40-2-5:prac10:1",
-    "p40-2-5:prac11:0",
-    "p40-2-5:prac11:1",
-    "p40-2-5:prac12:0",
-    "p40-2-5:prac12:1",
-    "p40-2-5:prac13:0",
-    "p40-2-5:prac13:1",
-    "p40-2-5:prac14:0",
-    "p40-2-5:prac14:1",
-    "p40-2-5:prac15:0",
-    "p40-2-5:prac15:1",
-    "p40-2-5:prac16:0",
-    "p40-2-5:prac16:1",
-    "p40-2-5:prac17:0",
-    "p40-2-5:prac17:1",
-    "p40-2-5:prac18:0",
-    "p40-2-5:prac18:1",
-    "p40-2-5:prac1:0",
-    "p40-2-5:prac1:1",
-    "p40-2-5:prac2:0",
-    "p40-2-5:prac2:1",
-    "p40-2-5:prac3:0",
-    "p40-2-5:prac3:1",
-    "p40-2-5:prac4:0",
-    "p40-2-5:prac4:1",
-    "p40-2-5:prac5:0",
-    "p40-2-5:prac5:1",
-    "p40-2-5:prac6:0",
-    "p40-2-5:prac6:1",
-    "p40-2-5:prac7:0",
-    "p40-2-5:prac7:1",
-    "p40-2-5:prac8:0",
-    "p40-2-5:prac8:1",
-    "p40-2-5:prac9:0",
-    "p40-2-5:prac9:1",
-    "p40-2-5:revisit",
-    "pickDivisor:bad",
-    "pickDivisor:none-ok",
-    "pickDivisor:none-wrong",
-    "pickDivisor:ok",
-    "q6-1-angle-x:allseen",
-    "q6-1-angle-x:check1:0",
-    "q6-1-angle-x:check1:1",
-    "q6-1-angle-x:check2:0",
-    "q6-1-angle-x:check2:1",
-    "q6-1-angle-x:check2:2",
-    "q6-1-angle-x:check3:0",
-    "q6-1-angle-x:check3:1",
-    "q6-1-angle-x:check3:2",
-    "q6-1-angle-x:check4:0",
-    "q6-1-angle-x:check4:1",
-    "q6-1-angle-x:mastery",
-    "q6-1-angle-x:prac10:0",
-    "q6-1-angle-x:prac10:1",
-    "q6-1-angle-x:prac10:2",
-    "q6-1-angle-x:prac11:0",
-    "q6-1-angle-x:prac11:1",
-    "q6-1-angle-x:prac11:2",
-    "q6-1-angle-x:prac12:0",
-    "q6-1-angle-x:prac12:1",
-    "q6-1-angle-x:prac12:2",
-    "q6-1-angle-x:prac1:0",
-    "q6-1-angle-x:prac1:1",
-    "q6-1-angle-x:prac1:2",
-    "q6-1-angle-x:prac2:0",
-    "q6-1-angle-x:prac2:1",
-    "q6-1-angle-x:prac2:2",
-    "q6-1-angle-x:prac3:0",
-    "q6-1-angle-x:prac3:1",
-    "q6-1-angle-x:prac3:2",
-    "q6-1-angle-x:prac4:0",
-    "q6-1-angle-x:prac4:1",
-    "q6-1-angle-x:prac4:2",
-    "q6-1-angle-x:prac5:0",
-    "q6-1-angle-x:prac5:1",
-    "q6-1-angle-x:prac5:2",
-    "q6-1-angle-x:prac6:0",
-    "q6-1-angle-x:prac6:1",
-    "q6-1-angle-x:prac6:2",
-    "q6-1-angle-x:prac7:0",
-    "q6-1-angle-x:prac7:1",
-    "q6-1-angle-x:prac7:2",
-    "q6-1-angle-x:prac8:0",
-    "q6-1-angle-x:prac8:1",
-    "q6-1-angle-x:prac8:2",
-    "q6-1-angle-x:prac9:0",
-    "q6-1-angle-x:prac9:1",
-    "q6-1-angle-x:prac9:2",
-    "q6-1-angle-x:revisit",
-    "sci-q5-bangen:check1:0",
-    "sci-q5-bangen:check1:1",
-    "sci-q5-bangen:check2:0",
-    "sci-q5-bangen:check2:1",
-    "sci-q5-bangen:check3:0",
-    "sci-q5-bangen:check3:1",
-    "sci-q5-bangen:mastery",
-    "sci-q5-bangen:prac1:0",
-    "sci-q5-bangen:prac1:1",
-    "sci-q5-bangen:prac2:0",
-    "sci-q5-bangen:prac2:1",
-    "sci-q5-bangen:prac3:0",
-    "sci-q5-bangen:prac3:1",
-    "sci-q5-bangen:prac4:0",
-    "sci-q5-bangen:prac4:1",
-    "zh-q27-typo:check1:0",
-    "zh-q27-typo:check1:1",
-    "zh-q27-typo:check2:0",
-    "zh-q27-typo:check2:1",
-    "zh-q27-typo:check3:0",
-    "zh-q27-typo:check3:1",
-    "zh-q27-typo:check4:0",
-    "zh-q27-typo:check4:1",
-    "zh-q27-typo:check5:0",
-    "zh-q27-typo:check5:1",
-    "zh-q27-typo:check6:0",
-    "zh-q27-typo:check6:1",
-    "zh-q27-typo:mastery",
-    "zh-q27-typo:prac1:0",
-    "zh-q27-typo:prac1:1",
-    "zh-q27-typo:prac1:2",
-    "zh-q27-typo:prac2:0",
-    "zh-q27-typo:prac2:1",
-    "zh-q27-typo:prac2:2",
-    "zh-q27-typo:prac3:0",
-    "zh-q27-typo:prac3:1",
-    "zh-q27-typo:prac3:2",
-    "zh-q27-typo:prac4:0",
-    "zh-q27-typo:prac4:1",
-    "zh-q27-typo:prac4:2",
-    "zh-q27-typo:prac5:0",
-    "zh-q27-typo:prac5:1",
-    "zh-q27-typo:prac5:2",
-    "zh-q27-typo:prac6:0",
-    "zh-q27-typo:prac6:1",
-    "zh-q27-typo:prac6:2",
-    "zh-q27-typo:prac7:0",
-    "zh-q27-typo:prac7:1",
-    "zh-q27-typo:prac7:2",
-    "zh-q27-typo:prac8:0",
-    "zh-q27-typo:prac8:1",
-    "zh-q27-typo:prac8:2"
-   ],
-   "violations": [],
-   "selftests": {
-    "B10-judged": {
-     "ok": true,
-     "detail": ""
-    },
-    "B01a": {
-     "ok": true,
-     "detail": [
-      {
-       "kind": "word",
-       "unit": "top",
-       "word": "板根",
-       "text": "先弄清楚板根（）。\n開始學\n我已",
-       "case": "self",
-       "at": "開篇"
-      },
-      {
-       "kind": "word",
-       "unit": "video",
-       "word": "板根",
-       "text": "先弄清楚板根（）。\n開始學\n我已",
-       "case": "self",
-       "at": "開篇"
-      }
-     ]
-    },
-    "B01b": {
-     "ok": true,
-     "detail": [
-      {
-       "kind": "word",
-       "unit": "top",
-       "word": "板根",
-       "text": "先弄清楚板根（ ）。\n開始學\n我",
-       "case": "self",
-       "at": "開篇"
-      },
-      {
-       "kind": "word",
-       "unit": "video",
-       "word": "板根",
-       "text": "先弄清楚板根（ ）。\n開始學\n我",
-       "case": "self",
-       "at": "開篇"
-      }
-     ]
-    },
-    "B02a": {
-     "ok": true,
-     "detail": [
-      {
-       "kind": "word",
-       "unit": "lesson",
-       "word": "蒸散",
-       "text": "部分突出地面，看得到\n再想想蒸散。\n這步看不懂",
-       "case": "self",
-       "at": "第1步選錯"
-      }
-     ]
-    },
-    "B02b": {
-     "ok": true,
-     "detail": [
-      {
-       "kind": "word",
-       "unit": "practice",
-       "word": "蒸散",
-       "text": "\n又扁又寬，突出地面\n再想想蒸散。",
-       "case": "self",
-       "at": "練習選錯"
-      }
-     ]
-    },
-    "B03": {
-     "ok": true,
-     "detail": [
-      {
-       "kind": "word",
-       "unit": "top",
-       "word": "光合作用",
-       "text": "先認識光合作用。\n開始學\n我已經會",
-       "case": "self",
-       "at": "開篇"
-      },
-      {
-       "kind": "word",
-       "unit": "video",
-       "word": "光合作用",
-       "text": "先認識光合作用。\n開始學\n我已經會",
-       "case": "self",
-       "at": "開篇"
-      }
-     ]
-    },
-    "B04": {
-     "ok": true,
-     "detail": [
-      {
-       "kind": "word",
-       "unit": "lesson",
-       "word": "光合作用",
-       "text": "部分突出地面，看得到\n再想想光合作用。\n這步看不懂",
-       "case": "self",
-       "at": "第1步先答錯"
-      }
-     ]
-    },
-    "B05": {
-     "ok": true,
-     "detail": [
-      {
-       "kind": "word",
-       "unit": "lesson",
-       "word": "最小公倍數",
-       "text": "數字小多了！\n3 和 5 的最小公倍數是多少？\n檢查\n這步",
-       "case": "self",
-       "at": "第3步完成"
-      },
-      {
-       "kind": "word",
-       "unit": "lesson",
-       "word": "最小公倍數",
-       "text": "數字小多了！\n3 和 5 的最小公倍數是多少？\n檢查\n要找",
-       "case": "self",
-       "at": "最小公倍數填 0"
-      }
-     ]
-    },
-    "B06": {
-     "ok": true,
-     "detail": [
-      {
-       "kind": "word",
-       "unit": "practice",
-       "word": "蒸散",
-       "text": "扁又寬，突出地面\n對！這就是蒸散。\n第一次就選對！連",
-       "case": "self",
-       "at": "練習答對"
-      }
-     ]
-    },
-    "B07": {
-     "ok": true,
-     "detail": [
-      {
-       "kind": "length",
-       "unit": "top",
-       "chars": 100,
-       "text": "字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字",
-       "case": "self",
-       "at": "開篇"
-      }
-     ]
-    },
-    "B09": {
-     "ok": true,
-     "detail": {
-      "答對": [
-       {
-        "kind": "word",
-        "unit": "lesson",
-        "word": "光合作用",
-        "text": "子，28 比 27 大\n對！光合作用。\n這步看不懂\n2\n",
-        "case": "self",
-        "at": "第一次就答對"
-       }
-      ],
-      "答錯": [],
-      "再答對": [
-       {
-        "kind": "word",
-        "unit": "lesson",
-        "word": "光合作用",
-        "text": "子，28 比 27 大\n對！光合作用。\n這步看不懂\n2\n",
-        "case": "self",
-        "at": "再答對"
-       }
-      ]
-     }
-    },
-    "B12": {
-     "ok": true,
-     "detail": [
-      {
-       "kind": "word",
-       "unit": "lesson",
-       "word": "光合作用",
-       "text": "已經會了，直接練習\n1\n先看光合作用\n大部分的根都埋在土",
-       "case": "self",
-       "at": "開始學"
-      }
-     ]
-    },
-    "B13": {
-     "ok": true,
-     "detail": [
-      {
-       "kind": "word",
-       "unit": "lesson",
-       "word": "光合作用",
-       "text": "：突出地面、像三角形的翅膀\n光合作用\n板根長在哪裡？\n全",
-       "case": "self",
-       "at": "開始學"
-      }
-     ]
-    },
-    "B14": {
-     "ok": true,
-     "detail": [
-      {
-       "kind": "length",
-       "unit": "lesson",
-       "chars": 100,
-       "text": "字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字",
-       "case": "self",
-       "at": "開始學"
-      }
-     ]
-    },
-    "B15": {
-     "ok": true,
-     "detail": {
-      "span": [
-       {
-        "kind": "length",
-        "unit": "lesson",
-        "chars": 50,
-        "text": "甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙",
-        "case": "self",
-        "at": "開始學"
-       }
-      ],
-      "br": [],
-      "br-narrow": [],
-      "plain-narrow": [
-       {
-        "kind": "length",
-        "unit": "lesson",
-        "chars": 50,
-        "text": "丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙",
-        "case": "self",
-        "at": "開始學"
-       }
-      ],
-      "preline-newline": [],
-      "normal-newline": [
-       {
-        "kind": "length",
-        "unit": "lesson",
-        "chars": 50,
-        "text": "甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙",
-        "case": "self",
-        "at": "開始學"
-       }
-      ]
-     }
-    },
-    "B18": {
-     "ok": true,
-     "detail": [
-      {
-       "kind": "length",
-       "unit": "lesson",
-       "chars": 105,
-       "text": "很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很",
-       "case": "self",
-       "at": "按「這步看不懂」（107 字回饋）"
-      }
-     ]
-    },
-    "B16": {
-     "ok": true,
-     "detail": {
-      "hidden": [
-       {
-        "kind": "word",
-        "unit": "lesson",
-        "word": "光合作用",
-        "text": "面。\n開始學\n1\n測試步驟\n光合作用很重要。\n我懂了，下",
-        "case": "self",
-        "at": "開始學"
-       }
-      ],
-      "closed": [
-       {
-        "kind": "word",
-        "unit": "lesson",
-        "word": "光合作用",
-        "text": "始學\n1\n測試步驟\n看解釋\n光合作用很重要。\n我懂了，下",
-        "case": "self",
-        "at": "開始學"
-       }
-      ],
-      "opened": []
-     }
-    },
-    "B19": {
-     "ok": true,
-     "detail": {
-      "len": {
-       "40": [
-        false,
-        false
-       ],
-       "41": [
-        true,
-        true
-       ],
-       "bold40": [
-        false,
-        false
-       ],
-       "bold41": [
-        true,
-        true
-       ],
-       "entity40": [
-        false,
-        false
-       ],
-       "entity41": [
-        true,
-        true
-       ],
-       "svg41": [
-        true,
-        true
-       ],
-       "svg40": [
-        false,
-        false
-       ]
-      },
-      "gloss": []
-     }
-    },
-    "unclassified": {
-     "ok": true,
-     "detail": [
-      {
-       "kind": "unclassified",
-       "text": "新加的說明文字",
-       "tag": "div",
-       "case": "self",
-       "at": "加一塊沒分類的字"
-      }
-     ]
-    },
-    "U01": {
-     "ok": true,
-     "detail": {
-      "0": [
-       "已送出，等電腦取回",
-       "已送出，等電腦取回"
-      ],
-      "null": [
-       "已送出，等電腦取回",
-       "已送出，等電腦取回"
-      ],
-      "undefined": [
-       "已送出，等電腦取回",
-       "已送出，等電腦取回"
-      ]
-     }
-    }
-   },
-   "errors": [],
-   "snapshots": 334
-  },
   "webkit": {
-   "index_sha256": "eeef26f77e9369eb28ef654129536972c954574adf961561e277ad8360662a9c",
+   "index_sha256": "1e21983327d12677b36104f80d3fff72797c69722cb2e233d191030836dfa6ea",
    "kidgate_sha256": "91c518ad54e254da967b5b983bebe443bdee4a950557d3a7aca8d9865f68a936",
    "driver_sha256": "d3fa91f0a78f9bf65d7a7ae35b197d3ba19a27288ecb15c31122a8df05a109e9",
    "max": 40,
@@ -744,7 +85,9 @@
     "zh-q27-typo:resume5",
     "zh-q27-typo:resume6",
     "zh-q27-typo:resume7",
-    "zh-q27-typo:video"
+    "zh-q27-typo:video",
+    "zh-q34-typo:lesson",
+    "zh-q34-typo:video"
    ],
    "branches": [
     "app:alt",
@@ -951,7 +294,17 @@
     "zh-q27-typo:prac7:2",
     "zh-q27-typo:prac8:0",
     "zh-q27-typo:prac8:1",
-    "zh-q27-typo:prac8:2"
+    "zh-q27-typo:prac8:2",
+    "zh-q34-typo:check1:0",
+    "zh-q34-typo:check1:1",
+    "zh-q34-typo:check2:0",
+    "zh-q34-typo:check2:1",
+    "zh-q34-typo:check3:0",
+    "zh-q34-typo:check3:1",
+    "zh-q34-typo:check4:0",
+    "zh-q34-typo:check4:1",
+    "zh-q34-typo:check5:0",
+    "zh-q34-typo:check5:1"
    ],
    "violations": [],
    "selftests": {
@@ -1321,7 +674,678 @@
     }
    },
    "errors": [],
-   "snapshots": 334
+   "snapshots": 349
+  },
+  "chromium": {
+   "index_sha256": "1e21983327d12677b36104f80d3fff72797c69722cb2e233d191030836dfa6ea",
+   "kidgate_sha256": "91c518ad54e254da967b5b983bebe443bdee4a950557d3a7aca8d9865f68a936",
+   "driver_sha256": "d3fa91f0a78f9bf65d7a7ae35b197d3ba19a27288ecb15c31122a8df05a109e9",
+   "max": 40,
+   "cases": [
+    "home",
+    "home:hide",
+    "home:settings",
+    "home:withdraw",
+    "p38-6-2:alt",
+    "p38-6-2:direct",
+    "p38-6-2:lesson",
+    "p38-6-2:practice",
+    "p38-6-2:resume",
+    "p38-6-2:video",
+    "p40-2-5:allseen",
+    "p40-2-5:direct",
+    "p40-2-5:lesson",
+    "p40-2-5:mastery",
+    "p40-2-5:resume0",
+    "p40-2-5:resume1",
+    "p40-2-5:resume10",
+    "p40-2-5:resume11",
+    "p40-2-5:resume12",
+    "p40-2-5:resume13",
+    "p40-2-5:resume14",
+    "p40-2-5:resume15",
+    "p40-2-5:resume16",
+    "p40-2-5:resume17",
+    "p40-2-5:resume2",
+    "p40-2-5:resume3",
+    "p40-2-5:resume4",
+    "p40-2-5:resume5",
+    "p40-2-5:resume6",
+    "p40-2-5:resume7",
+    "p40-2-5:resume8",
+    "p40-2-5:resume9",
+    "p40-2-5:revisit",
+    "p40-2-5:video",
+    "q6-1-angle-x:allseen",
+    "q6-1-angle-x:direct",
+    "q6-1-angle-x:lesson",
+    "q6-1-angle-x:mastery",
+    "q6-1-angle-x:resume0",
+    "q6-1-angle-x:resume1",
+    "q6-1-angle-x:resume10",
+    "q6-1-angle-x:resume11",
+    "q6-1-angle-x:resume2",
+    "q6-1-angle-x:resume3",
+    "q6-1-angle-x:resume4",
+    "q6-1-angle-x:resume5",
+    "q6-1-angle-x:resume6",
+    "q6-1-angle-x:resume7",
+    "q6-1-angle-x:resume8",
+    "q6-1-angle-x:resume9",
+    "q6-1-angle-x:revisit",
+    "q6-1-angle-x:video",
+    "readonly:lockfail",
+    "readonly:nolocks",
+    "readonly:second-tab",
+    "sci-q5-bangen:direct",
+    "sci-q5-bangen:lesson",
+    "sci-q5-bangen:mastery",
+    "sci-q5-bangen:resume0",
+    "sci-q5-bangen:resume1",
+    "sci-q5-bangen:resume2",
+    "sci-q5-bangen:resume3",
+    "sci-q5-bangen:video",
+    "zh-q27-typo:direct",
+    "zh-q27-typo:lesson",
+    "zh-q27-typo:mastery",
+    "zh-q27-typo:resume0",
+    "zh-q27-typo:resume1",
+    "zh-q27-typo:resume2",
+    "zh-q27-typo:resume3",
+    "zh-q27-typo:resume4",
+    "zh-q27-typo:resume5",
+    "zh-q27-typo:resume6",
+    "zh-q27-typo:resume7",
+    "zh-q27-typo:video",
+    "zh-q34-typo:lesson",
+    "zh-q34-typo:video"
+   ],
+   "branches": [
+    "app:alt",
+    "app:confused-fail",
+    "app:confused-net",
+    "app:confused-nocode",
+    "app:confused-ok",
+    "app:confused-sending",
+    "app:finish-clean",
+    "app:finish-hint",
+    "app:finish-wrong",
+    "app:form-bad",
+    "app:form-empty",
+    "app:hint-r1-1",
+    "app:hint-r1-2",
+    "app:hint-r2-1",
+    "app:hint-r2-2",
+    "app:nums-bad",
+    "app:nums-empty",
+    "app:nums-third",
+    "app:nums-wrong",
+    "app:r1-ok",
+    "app:step1-mul",
+    "app:step1-num",
+    "app:step1-red",
+    "app:step4-common",
+    "app:step4-else",
+    "app:step4-le0",
+    "app:step5-ok",
+    "app:step5-wrong",
+    "app:step5b-ok",
+    "app:step5b-wrong",
+    "app:step6-n",
+    "app:step6-ok",
+    "app:step6-x",
+    "app:win",
+    "checkCommon:diff-den",
+    "checkCommon:invalid-d0",
+    "checkCommon:invalid-n0",
+    "checkCommon:left-changed",
+    "checkCommon:ok",
+    "checkCommon:ok-not-lcm",
+    "checkCommon:right-changed",
+    "checkReduce:changed",
+    "checkReduce:invalid-d0",
+    "checkReduce:invalid-n0",
+    "checkReduce:not-simplest",
+    "checkReduce:ok",
+    "checkReduce:unequal-div",
+    "checkSign:ok-eq",
+    "checkSign:ok-neq",
+    "checkSign:wrong-eq",
+    "checkSign:wrong-neq",
+    "p38-6-2:direct",
+    "p40-2-5:allseen",
+    "p40-2-5:check1:0",
+    "p40-2-5:check1:1",
+    "p40-2-5:check2:0",
+    "p40-2-5:check2:1",
+    "p40-2-5:check3:0",
+    "p40-2-5:check3:1",
+    "p40-2-5:check4:0",
+    "p40-2-5:check4:1",
+    "p40-2-5:check4:2",
+    "p40-2-5:mastery",
+    "p40-2-5:prac10:0",
+    "p40-2-5:prac10:1",
+    "p40-2-5:prac11:0",
+    "p40-2-5:prac11:1",
+    "p40-2-5:prac12:0",
+    "p40-2-5:prac12:1",
+    "p40-2-5:prac13:0",
+    "p40-2-5:prac13:1",
+    "p40-2-5:prac14:0",
+    "p40-2-5:prac14:1",
+    "p40-2-5:prac15:0",
+    "p40-2-5:prac15:1",
+    "p40-2-5:prac16:0",
+    "p40-2-5:prac16:1",
+    "p40-2-5:prac17:0",
+    "p40-2-5:prac17:1",
+    "p40-2-5:prac18:0",
+    "p40-2-5:prac18:1",
+    "p40-2-5:prac1:0",
+    "p40-2-5:prac1:1",
+    "p40-2-5:prac2:0",
+    "p40-2-5:prac2:1",
+    "p40-2-5:prac3:0",
+    "p40-2-5:prac3:1",
+    "p40-2-5:prac4:0",
+    "p40-2-5:prac4:1",
+    "p40-2-5:prac5:0",
+    "p40-2-5:prac5:1",
+    "p40-2-5:prac6:0",
+    "p40-2-5:prac6:1",
+    "p40-2-5:prac7:0",
+    "p40-2-5:prac7:1",
+    "p40-2-5:prac8:0",
+    "p40-2-5:prac8:1",
+    "p40-2-5:prac9:0",
+    "p40-2-5:prac9:1",
+    "p40-2-5:revisit",
+    "pickDivisor:bad",
+    "pickDivisor:none-ok",
+    "pickDivisor:none-wrong",
+    "pickDivisor:ok",
+    "q6-1-angle-x:allseen",
+    "q6-1-angle-x:check1:0",
+    "q6-1-angle-x:check1:1",
+    "q6-1-angle-x:check2:0",
+    "q6-1-angle-x:check2:1",
+    "q6-1-angle-x:check2:2",
+    "q6-1-angle-x:check3:0",
+    "q6-1-angle-x:check3:1",
+    "q6-1-angle-x:check3:2",
+    "q6-1-angle-x:check4:0",
+    "q6-1-angle-x:check4:1",
+    "q6-1-angle-x:mastery",
+    "q6-1-angle-x:prac10:0",
+    "q6-1-angle-x:prac10:1",
+    "q6-1-angle-x:prac10:2",
+    "q6-1-angle-x:prac11:0",
+    "q6-1-angle-x:prac11:1",
+    "q6-1-angle-x:prac11:2",
+    "q6-1-angle-x:prac12:0",
+    "q6-1-angle-x:prac12:1",
+    "q6-1-angle-x:prac12:2",
+    "q6-1-angle-x:prac1:0",
+    "q6-1-angle-x:prac1:1",
+    "q6-1-angle-x:prac1:2",
+    "q6-1-angle-x:prac2:0",
+    "q6-1-angle-x:prac2:1",
+    "q6-1-angle-x:prac2:2",
+    "q6-1-angle-x:prac3:0",
+    "q6-1-angle-x:prac3:1",
+    "q6-1-angle-x:prac3:2",
+    "q6-1-angle-x:prac4:0",
+    "q6-1-angle-x:prac4:1",
+    "q6-1-angle-x:prac4:2",
+    "q6-1-angle-x:prac5:0",
+    "q6-1-angle-x:prac5:1",
+    "q6-1-angle-x:prac5:2",
+    "q6-1-angle-x:prac6:0",
+    "q6-1-angle-x:prac6:1",
+    "q6-1-angle-x:prac6:2",
+    "q6-1-angle-x:prac7:0",
+    "q6-1-angle-x:prac7:1",
+    "q6-1-angle-x:prac7:2",
+    "q6-1-angle-x:prac8:0",
+    "q6-1-angle-x:prac8:1",
+    "q6-1-angle-x:prac8:2",
+    "q6-1-angle-x:prac9:0",
+    "q6-1-angle-x:prac9:1",
+    "q6-1-angle-x:prac9:2",
+    "q6-1-angle-x:revisit",
+    "sci-q5-bangen:check1:0",
+    "sci-q5-bangen:check1:1",
+    "sci-q5-bangen:check2:0",
+    "sci-q5-bangen:check2:1",
+    "sci-q5-bangen:check3:0",
+    "sci-q5-bangen:check3:1",
+    "sci-q5-bangen:mastery",
+    "sci-q5-bangen:prac1:0",
+    "sci-q5-bangen:prac1:1",
+    "sci-q5-bangen:prac2:0",
+    "sci-q5-bangen:prac2:1",
+    "sci-q5-bangen:prac3:0",
+    "sci-q5-bangen:prac3:1",
+    "sci-q5-bangen:prac4:0",
+    "sci-q5-bangen:prac4:1",
+    "zh-q27-typo:check1:0",
+    "zh-q27-typo:check1:1",
+    "zh-q27-typo:check2:0",
+    "zh-q27-typo:check2:1",
+    "zh-q27-typo:check3:0",
+    "zh-q27-typo:check3:1",
+    "zh-q27-typo:check4:0",
+    "zh-q27-typo:check4:1",
+    "zh-q27-typo:check5:0",
+    "zh-q27-typo:check5:1",
+    "zh-q27-typo:check6:0",
+    "zh-q27-typo:check6:1",
+    "zh-q27-typo:mastery",
+    "zh-q27-typo:prac1:0",
+    "zh-q27-typo:prac1:1",
+    "zh-q27-typo:prac1:2",
+    "zh-q27-typo:prac2:0",
+    "zh-q27-typo:prac2:1",
+    "zh-q27-typo:prac2:2",
+    "zh-q27-typo:prac3:0",
+    "zh-q27-typo:prac3:1",
+    "zh-q27-typo:prac3:2",
+    "zh-q27-typo:prac4:0",
+    "zh-q27-typo:prac4:1",
+    "zh-q27-typo:prac4:2",
+    "zh-q27-typo:prac5:0",
+    "zh-q27-typo:prac5:1",
+    "zh-q27-typo:prac5:2",
+    "zh-q27-typo:prac6:0",
+    "zh-q27-typo:prac6:1",
+    "zh-q27-typo:prac6:2",
+    "zh-q27-typo:prac7:0",
+    "zh-q27-typo:prac7:1",
+    "zh-q27-typo:prac7:2",
+    "zh-q27-typo:prac8:0",
+    "zh-q27-typo:prac8:1",
+    "zh-q27-typo:prac8:2",
+    "zh-q34-typo:check1:0",
+    "zh-q34-typo:check1:1",
+    "zh-q34-typo:check2:0",
+    "zh-q34-typo:check2:1",
+    "zh-q34-typo:check3:0",
+    "zh-q34-typo:check3:1",
+    "zh-q34-typo:check4:0",
+    "zh-q34-typo:check4:1",
+    "zh-q34-typo:check5:0",
+    "zh-q34-typo:check5:1"
+   ],
+   "violations": [],
+   "selftests": {
+    "B10-judged": {
+     "ok": true,
+     "detail": ""
+    },
+    "B01a": {
+     "ok": true,
+     "detail": [
+      {
+       "kind": "word",
+       "unit": "top",
+       "word": "板根",
+       "text": "先弄清楚板根（）。\n開始學\n我已",
+       "case": "self",
+       "at": "開篇"
+      },
+      {
+       "kind": "word",
+       "unit": "video",
+       "word": "板根",
+       "text": "先弄清楚板根（）。\n開始學\n我已",
+       "case": "self",
+       "at": "開篇"
+      }
+     ]
+    },
+    "B01b": {
+     "ok": true,
+     "detail": [
+      {
+       "kind": "word",
+       "unit": "top",
+       "word": "板根",
+       "text": "先弄清楚板根（ ）。\n開始學\n我",
+       "case": "self",
+       "at": "開篇"
+      },
+      {
+       "kind": "word",
+       "unit": "video",
+       "word": "板根",
+       "text": "先弄清楚板根（ ）。\n開始學\n我",
+       "case": "self",
+       "at": "開篇"
+      }
+     ]
+    },
+    "B02a": {
+     "ok": true,
+     "detail": [
+      {
+       "kind": "word",
+       "unit": "lesson",
+       "word": "蒸散",
+       "text": "部分突出地面，看得到\n再想想蒸散。\n這步看不懂",
+       "case": "self",
+       "at": "第1步選錯"
+      }
+     ]
+    },
+    "B02b": {
+     "ok": true,
+     "detail": [
+      {
+       "kind": "word",
+       "unit": "practice",
+       "word": "蒸散",
+       "text": "\n又扁又寬，突出地面\n再想想蒸散。",
+       "case": "self",
+       "at": "練習選錯"
+      }
+     ]
+    },
+    "B03": {
+     "ok": true,
+     "detail": [
+      {
+       "kind": "word",
+       "unit": "top",
+       "word": "光合作用",
+       "text": "先認識光合作用。\n開始學\n我已經會",
+       "case": "self",
+       "at": "開篇"
+      },
+      {
+       "kind": "word",
+       "unit": "video",
+       "word": "光合作用",
+       "text": "先認識光合作用。\n開始學\n我已經會",
+       "case": "self",
+       "at": "開篇"
+      }
+     ]
+    },
+    "B04": {
+     "ok": true,
+     "detail": [
+      {
+       "kind": "word",
+       "unit": "lesson",
+       "word": "光合作用",
+       "text": "部分突出地面，看得到\n再想想光合作用。\n這步看不懂",
+       "case": "self",
+       "at": "第1步先答錯"
+      }
+     ]
+    },
+    "B05": {
+     "ok": true,
+     "detail": [
+      {
+       "kind": "word",
+       "unit": "lesson",
+       "word": "最小公倍數",
+       "text": "數字小多了！\n3 和 5 的最小公倍數是多少？\n檢查\n這步",
+       "case": "self",
+       "at": "第3步完成"
+      },
+      {
+       "kind": "word",
+       "unit": "lesson",
+       "word": "最小公倍數",
+       "text": "數字小多了！\n3 和 5 的最小公倍數是多少？\n檢查\n要找",
+       "case": "self",
+       "at": "最小公倍數填 0"
+      }
+     ]
+    },
+    "B06": {
+     "ok": true,
+     "detail": [
+      {
+       "kind": "word",
+       "unit": "practice",
+       "word": "蒸散",
+       "text": "扁又寬，突出地面\n對！這就是蒸散。\n第一次就選對！連",
+       "case": "self",
+       "at": "練習答對"
+      }
+     ]
+    },
+    "B07": {
+     "ok": true,
+     "detail": [
+      {
+       "kind": "length",
+       "unit": "top",
+       "chars": 100,
+       "text": "字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字",
+       "case": "self",
+       "at": "開篇"
+      }
+     ]
+    },
+    "B09": {
+     "ok": true,
+     "detail": {
+      "答對": [
+       {
+        "kind": "word",
+        "unit": "lesson",
+        "word": "光合作用",
+        "text": "子，28 比 27 大\n對！光合作用。\n這步看不懂\n2\n",
+        "case": "self",
+        "at": "第一次就答對"
+       }
+      ],
+      "答錯": [],
+      "再答對": [
+       {
+        "kind": "word",
+        "unit": "lesson",
+        "word": "光合作用",
+        "text": "子，28 比 27 大\n對！光合作用。\n這步看不懂\n2\n",
+        "case": "self",
+        "at": "再答對"
+       }
+      ]
+     }
+    },
+    "B12": {
+     "ok": true,
+     "detail": [
+      {
+       "kind": "word",
+       "unit": "lesson",
+       "word": "光合作用",
+       "text": "已經會了，直接練習\n1\n先看光合作用\n大部分的根都埋在土",
+       "case": "self",
+       "at": "開始學"
+      }
+     ]
+    },
+    "B13": {
+     "ok": true,
+     "detail": [
+      {
+       "kind": "word",
+       "unit": "lesson",
+       "word": "光合作用",
+       "text": "：突出地面、像三角形的翅膀\n光合作用\n板根長在哪裡？\n全",
+       "case": "self",
+       "at": "開始學"
+      }
+     ]
+    },
+    "B14": {
+     "ok": true,
+     "detail": [
+      {
+       "kind": "length",
+       "unit": "lesson",
+       "chars": 100,
+       "text": "字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字",
+       "case": "self",
+       "at": "開始學"
+      }
+     ]
+    },
+    "B15": {
+     "ok": true,
+     "detail": {
+      "span": [
+       {
+        "kind": "length",
+        "unit": "lesson",
+        "chars": 50,
+        "text": "甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙",
+        "case": "self",
+        "at": "開始學"
+       }
+      ],
+      "br": [],
+      "br-narrow": [],
+      "plain-narrow": [
+       {
+        "kind": "length",
+        "unit": "lesson",
+        "chars": 50,
+        "text": "丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙",
+        "case": "self",
+        "at": "開始學"
+       }
+      ],
+      "preline-newline": [],
+      "normal-newline": [
+       {
+        "kind": "length",
+        "unit": "lesson",
+        "chars": 50,
+        "text": "甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙",
+        "case": "self",
+        "at": "開始學"
+       }
+      ]
+     }
+    },
+    "B18": {
+     "ok": true,
+     "detail": [
+      {
+       "kind": "length",
+       "unit": "lesson",
+       "chars": 105,
+       "text": "很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很很",
+       "case": "self",
+       "at": "按「這步看不懂」（107 字回饋）"
+      }
+     ]
+    },
+    "B16": {
+     "ok": true,
+     "detail": {
+      "hidden": [
+       {
+        "kind": "word",
+        "unit": "lesson",
+        "word": "光合作用",
+        "text": "面。\n開始學\n1\n測試步驟\n光合作用很重要。\n我懂了，下",
+        "case": "self",
+        "at": "開始學"
+       }
+      ],
+      "closed": [
+       {
+        "kind": "word",
+        "unit": "lesson",
+        "word": "光合作用",
+        "text": "始學\n1\n測試步驟\n看解釋\n光合作用很重要。\n我懂了，下",
+        "case": "self",
+        "at": "開始學"
+       }
+      ],
+      "opened": []
+     }
+    },
+    "B19": {
+     "ok": true,
+     "detail": {
+      "len": {
+       "40": [
+        false,
+        false
+       ],
+       "41": [
+        true,
+        true
+       ],
+       "bold40": [
+        false,
+        false
+       ],
+       "bold41": [
+        true,
+        true
+       ],
+       "entity40": [
+        false,
+        false
+       ],
+       "entity41": [
+        true,
+        true
+       ],
+       "svg41": [
+        true,
+        true
+       ],
+       "svg40": [
+        false,
+        false
+       ]
+      },
+      "gloss": []
+     }
+    },
+    "unclassified": {
+     "ok": true,
+     "detail": [
+      {
+       "kind": "unclassified",
+       "text": "新加的說明文字",
+       "tag": "div",
+       "case": "self",
+       "at": "加一塊沒分類的字"
+      }
+     ]
+    },
+    "U01": {
+     "ok": true,
+     "detail": {
+      "0": [
+       "已送出，等電腦取回",
+       "已送出，等電腦取回"
+      ],
+      "null": [
+       "已送出，等電腦取回",
+       "已送出，等電腦取回"
+      ],
+      "undefined": [
+       "已送出，等電腦取回",
+       "已送出，等電腦取回"
+      ]
+     }
+    }
+   },
+   "errors": [],
+   "snapshots": 349
   }
  }
 }
