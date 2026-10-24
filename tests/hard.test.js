@@ -560,7 +560,7 @@ test("快篩：設 practiceNeed 的篇，封版猜法矩陣連對不到學會門
   const G = require("./guessmatrix.js");
   // 舊紀錄的 mastered 會一直保留（Codex 驗收方案 A 抓到）：練習題已用門檻 3 上線過的篇，事後加 practiceNeed 會讓舊的「學會了」假達標。
   // ⇒ 只准「練習題第一次上線就帶著 practiceNeed」的篇；加進這張清單前，先確認正式站那篇還沒有 practice。
-  const NEED_FROM_FIRST_PUBLISH = ["zh-q62-ji"];   // 2026-10-24 核對：正式站 zh-q62-ji 只有第一段解說，沒有 practice
+  const NEED_FROM_FIRST_PUBLISH = ["zh-q62-ji", "zh-q34-typo"];   // 2026-10-24 核對：正式站 zh-q62-ji、zh-q34-typo（13:12 讀回）都只有第一段解說，沒有 practice
   // 例外清單：練習題已用門檻 3 上線過、事後才加門檻的篇。孩子進度只在她的瀏覽器（同步碼同步），讀不到「是否已學會」——
   // 加門檻不會比不加差：已學會的照舊保留（加不加都一樣），還沒學會的改成要連對 practiceNeed 題。代價是舊的「學會了」可能是門檻 3 下拿到的，寫在這裡留證。
   const NEED_ADDED_AFTER_PUBLISH = ["zh-q44-chaozhi"];   // 2026-10-24 交辦 #4245：門檻 3 上線 12:53→加門檻約 13:2x，Codex 驗收 7c88b68 FAIL「照 1、1、2 按就學會」
