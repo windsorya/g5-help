@@ -813,7 +813,8 @@ def flow_hide(browser, label="Chromium"):
     btn.click(); btn.click()
     d = db_of(pg)
     check(f"{label} 隱藏H6 再按「確定隱藏？」：這篇從清單收起來、這一科改說都藏起來了",
-          card().count() == 0 and "藏起來" in pg.locator(G).inner_text(), pg.locator(G).inner_text())
+          # 這一科還有別篇（2026-10-24 起國語有正式篇 zh-q27-typo）就照常列別篇；只剩這篇時才改說都藏起來了
+          card().count() == 0 and ("藏起來" in pg.locator(G).inner_text()) == (pg.locator(G + " .hcard").count() == 0), pg.locator(G).inner_text())
     check(f"{label} 隱藏H7 存檔：hidden 記這篇＋時間；作答紀錄一筆沒少（教學看完、做完 2 題）",
           isinstance(d.get("hidden", {}).get("t-guoyu"), int) and d["entries"]["t-guoyu"]["solved"] == 2 and d["entries"]["t-guoyu"]["lessonDone"] is True and d["v"] == 1, d)
     check(f"{label} 隱藏H8 清單底下出現「顯示已隱藏的 1 篇」", pg.locator("#hidBox summary").inner_text() == "顯示已隱藏的 1 篇", pg.locator("#hidBox").count() and pg.locator("#hidBox summary").inner_text())

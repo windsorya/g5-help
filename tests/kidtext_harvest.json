@@ -1,12 +1,12 @@
 {
- "index_sha256": "ee55cb9c207b0fd8afec1e26d7b5016bda1853304b78b35e93378984865264ab",
+ "index_sha256": "c97db3811a19668c3fa81d01f1081987fc079e83b7fdf0d51e23e8b2b9319038",
  "kidgate_sha256": "91c518ad54e254da967b5b983bebe443bdee4a950557d3a7aca8d9865f68a936",
  "driver_sha256": "d3fa91f0a78f9bf65d7a7ae35b197d3ba19a27288ecb15c31122a8df05a109e9",
  "max": 40,
  "self_max": 40,
  "browsers": {
   "chromium": {
-   "index_sha256": "ee55cb9c207b0fd8afec1e26d7b5016bda1853304b78b35e93378984865264ab",
+   "index_sha256": "c97db3811a19668c3fa81d01f1081987fc079e83b7fdf0d51e23e8b2b9319038",
    "kidgate_sha256": "91c518ad54e254da967b5b983bebe443bdee4a950557d3a7aca8d9865f68a936",
    "driver_sha256": "d3fa91f0a78f9bf65d7a7ae35b197d3ba19a27288ecb15c31122a8df05a109e9",
    "max": 40,
@@ -73,7 +73,9 @@
     "sci-q5-bangen:resume1",
     "sci-q5-bangen:resume2",
     "sci-q5-bangen:resume3",
-    "sci-q5-bangen:video"
+    "sci-q5-bangen:video",
+    "zh-q27-typo:lesson",
+    "zh-q27-typo:video"
    ],
    "branches": [
     "app:alt",
@@ -243,7 +245,19 @@
     "sci-q5-bangen:prac3:0",
     "sci-q5-bangen:prac3:1",
     "sci-q5-bangen:prac4:0",
-    "sci-q5-bangen:prac4:1"
+    "sci-q5-bangen:prac4:1",
+    "zh-q27-typo:check1:0",
+    "zh-q27-typo:check1:1",
+    "zh-q27-typo:check2:0",
+    "zh-q27-typo:check2:1",
+    "zh-q27-typo:check3:0",
+    "zh-q27-typo:check3:1",
+    "zh-q27-typo:check4:0",
+    "zh-q27-typo:check4:1",
+    "zh-q27-typo:check5:0",
+    "zh-q27-typo:check5:1",
+    "zh-q27-typo:check6:0",
+    "zh-q27-typo:check6:1"
    ],
    "violations": [],
    "selftests": {
@@ -613,10 +627,10 @@
     }
    },
    "errors": [],
-   "snapshots": 282
+   "snapshots": 299
   },
   "webkit": {
-   "index_sha256": "ee55cb9c207b0fd8afec1e26d7b5016bda1853304b78b35e93378984865264ab",
+   "index_sha256": "c97db3811a19668c3fa81d01f1081987fc079e83b7fdf0d51e23e8b2b9319038",
    "kidgate_sha256": "91c518ad54e254da967b5b983bebe443bdee4a950557d3a7aca8d9865f68a936",
    "driver_sha256": "d3fa91f0a78f9bf65d7a7ae35b197d3ba19a27288ecb15c31122a8df05a109e9",
    "max": 40,
@@ -683,7 +697,9 @@
     "sci-q5-bangen:resume1",
     "sci-q5-bangen:resume2",
     "sci-q5-bangen:resume3",
-    "sci-q5-bangen:video"
+    "sci-q5-bangen:video",
+    "zh-q27-typo:lesson",
+    "zh-q27-typo:video"
    ],
    "branches": [
     "app:alt",
@@ -853,7 +869,19 @@
     "sci-q5-bangen:prac3:0",
     "sci-q5-bangen:prac3:1",
     "sci-q5-bangen:prac4:0",
-    "sci-q5-bangen:prac4:1"
+    "sci-q5-bangen:prac4:1",
+    "zh-q27-typo:check1:0",
+    "zh-q27-typo:check1:1",
+    "zh-q27-typo:check2:0",
+    "zh-q27-typo:check2:1",
+    "zh-q27-typo:check3:0",
+    "zh-q27-typo:check3:1",
+    "zh-q27-typo:check4:0",
+    "zh-q27-typo:check4:1",
+    "zh-q27-typo:check5:0",
+    "zh-q27-typo:check5:1",
+    "zh-q27-typo:check6:0",
+    "zh-q27-typo:check6:1"
    ],
    "violations": [],
    "selftests": {
@@ -1223,7 +1251,7 @@
     }
    },
    "errors": [],
-   "snapshots": 282
+   "snapshots": 299
   }
  }
 }
