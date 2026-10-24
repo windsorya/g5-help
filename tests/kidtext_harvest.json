@@ -1,12 +1,12 @@
 {
- "index_sha256": "5681abc3fa30c8a2e7f5de9528515cc3e46e5a9bfd7acabf2ec91f6aabf08c15",
+ "index_sha256": "c8b3dfe21d446c2b1ce1eb1ed021f72f3c2338e73c32efbd13effea1b0e03646",
  "kidgate_sha256": "91c518ad54e254da967b5b983bebe443bdee4a950557d3a7aca8d9865f68a936",
  "driver_sha256": "551ae3461ff449c46c75517ecb579e06365c71b80f3bd43907260e6cd6026a77",
  "max": 40,
  "self_max": 40,
  "browsers": {
   "webkit": {
-   "index_sha256": "5681abc3fa30c8a2e7f5de9528515cc3e46e5a9bfd7acabf2ec91f6aabf08c15",
+   "index_sha256": "c8b3dfe21d446c2b1ce1eb1ed021f72f3c2338e73c32efbd13effea1b0e03646",
    "kidgate_sha256": "91c518ad54e254da967b5b983bebe443bdee4a950557d3a7aca8d9865f68a936",
    "driver_sha256": "551ae3461ff449c46c75517ecb579e06365c71b80f3bd43907260e6cd6026a77",
    "max": 40,
@@ -125,7 +125,9 @@
     "zh-q62-ji:resume7",
     "zh-q62-ji:video",
     "zh-q76-boardgame:lesson",
-    "zh-q76-boardgame:video"
+    "zh-q76-boardgame:video",
+    "zh-q78-typo:lesson",
+    "zh-q78-typo:video"
    ],
    "branches": [
     "app:alt",
@@ -452,7 +454,19 @@
     "zh-q76-boardgame:check5:0",
     "zh-q76-boardgame:check5:1",
     "zh-q76-boardgame:check6:0",
-    "zh-q76-boardgame:check6:1"
+    "zh-q76-boardgame:check6:1",
+    "zh-q78-typo:check1:0",
+    "zh-q78-typo:check1:1",
+    "zh-q78-typo:check2:0",
+    "zh-q78-typo:check2:1",
+    "zh-q78-typo:check3:0",
+    "zh-q78-typo:check3:1",
+    "zh-q78-typo:check4:0",
+    "zh-q78-typo:check4:1",
+    "zh-q78-typo:check5:0",
+    "zh-q78-typo:check5:1",
+    "zh-q78-typo:check6:0",
+    "zh-q78-typo:check6:1"
    ],
    "violations": [],
    "selftests": {
@@ -822,10 +836,10 @@
     }
    },
    "errors": [],
-   "snapshots": 509
+   "snapshots": 526
   },
   "chromium": {
-   "index_sha256": "5681abc3fa30c8a2e7f5de9528515cc3e46e5a9bfd7acabf2ec91f6aabf08c15",
+   "index_sha256": "c8b3dfe21d446c2b1ce1eb1ed021f72f3c2338e73c32efbd13effea1b0e03646",
    "kidgate_sha256": "91c518ad54e254da967b5b983bebe443bdee4a950557d3a7aca8d9865f68a936",
    "driver_sha256": "551ae3461ff449c46c75517ecb579e06365c71b80f3bd43907260e6cd6026a77",
    "max": 40,
@@ -944,7 +958,9 @@
     "zh-q62-ji:resume7",
     "zh-q62-ji:video",
     "zh-q76-boardgame:lesson",
-    "zh-q76-boardgame:video"
+    "zh-q76-boardgame:video",
+    "zh-q78-typo:lesson",
+    "zh-q78-typo:video"
    ],
    "branches": [
     "app:alt",
@@ -1271,7 +1287,19 @@
     "zh-q76-boardgame:check5:0",
     "zh-q76-boardgame:check5:1",
     "zh-q76-boardgame:check6:0",
-    "zh-q76-boardgame:check6:1"
+    "zh-q76-boardgame:check6:1",
+    "zh-q78-typo:check1:0",
+    "zh-q78-typo:check1:1",
+    "zh-q78-typo:check2:0",
+    "zh-q78-typo:check2:1",
+    "zh-q78-typo:check3:0",
+    "zh-q78-typo:check3:1",
+    "zh-q78-typo:check4:0",
+    "zh-q78-typo:check4:1",
+    "zh-q78-typo:check5:0",
+    "zh-q78-typo:check5:1",
+    "zh-q78-typo:check6:0",
+    "zh-q78-typo:check6:1"
    ],
    "violations": [],
    "selftests": {
@@ -1641,7 +1669,7 @@
     }
    },
    "errors": [],
-   "snapshots": 509
+   "snapshots": 526
   }
  }
 }
