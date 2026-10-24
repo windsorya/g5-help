@@ -530,6 +530,31 @@ class PostShip(unittest.TestCase):
         self.assertFalse((self.repo/'.git/rebase-merge').exists() or (self.repo/'.git/rebase-apply').exists())
         self.assertFalse(self.receipt().exists() and json.loads(self.receipt().read_text()).get('status') == 'success')
 
+    def test_T37_hard_js_same_line_edits_not_unioned(self):
+        """Codex 審 0133d34 P1：兩邊改到 hard.js 同一段既有內容（不是各自新增一篇）不得串接，要還原並擋下。"""
+        self.remote_moved('src/hard.js', 'id: "fixture-upstream-edit"\n')
+        self.write('src/hard.js', 'id: "fixture-my-edit"\n'); self.write('index.html', 'id: "fixture-my-edit"\n'); self.commit()
+        head = self.git('rev-parse', 'HEAD')
+        self.run_post('verify', 1, '同一段既有內容')
+        self.assertEqual(self.git('rev-parse', 'HEAD'), head)
+        self.assertEqual((self.repo/'src/hard.js').read_text(), 'id: "fixture-my-edit"\n')
+        self.assertFalse((self.repo/'.git/rebase-merge').exists() or (self.repo/'.git/rebase-apply').exists())
+
+    def test_T38_rebase_failure_midway_is_aborted(self):
+        """Codex 審 0133d34 P2：rebase 中途出例外（逾時等）要還原，不留半套 rebase。"""
+        self.remote_moved('src/hard.js', 'id: "fixture"\nid: "other"\n')
+        self.write('src/hard.js', 'id: "fixture"\nid: "mine"\n'); self.write('index.html', 'id: "fixture"\nid: "mine"\n'); self.commit()
+        head = self.git('rev-parse', 'HEAD')
+        m = self.load_gate()
+        real = m.union_conflicts
+        def boom(text): raise subprocess.TimeoutExpired('git rebase --continue', 120)
+        m.union_conflicts = boom
+        up = self.git('rev-parse', 'origin/main') if False else subprocess.check_output([GIT, 'ls-remote', str(self.base/'remote.git'), 'main'], text=True).split()[0]
+        self.git('fetch', '-q', 'origin', 'main')
+        with self.assertRaises(subprocess.TimeoutExpired): m.auto_rebase(self.repo, up)
+        self.assertEqual(self.git('rev-parse', 'HEAD'), head)
+        self.assertFalse((self.repo/'.git/rebase-merge').exists() or (self.repo/'.git/rebase-apply').exists())
+
     def test_T24_old_runtime_artifacts_pruned(self):
         """快照每輪約 2.6 MB：超過一天的快照／log 目錄被清掉，一天內的（含背景 e2e 正在用的）保留。"""
         old = [self.repo/'.post-snapshots/old-run', self.repo/'.post-state/old-run']

@@ -335,21 +335,27 @@ def lane_confirm(root, until, what, lost):
 
 def union_conflicts(text):
     """把衝突標記換成「上游那段＋本棵那段」：src/hard.js 兩邊各在 LIST 尾端加一篇時，兩篇都留。合錯由接著跑的整套 verify 擋。"""
-    out, mode, up, mine = [], None, [], []
+    # 只合「兩邊都是純新增」的衝突：diff3 的原本那段（||||||| 到 =======）必須是空的；
+    # 兩邊改到同一段既有內容（例如同一篇的 answer）串接起來會變成兩個同名屬性、上游修改被蓋掉，verify 也抓不到（Codex 審 0133d34 P1）⇒ 不合。
+    out, mode, up, base, mine, saw_base = [], None, [], [], [], False
     for line in text.splitlines(keepends=True):
         if line.startswith('<<<<<<< '):
-            mode, up, mine = 'up', [], []
-        elif line.startswith('||||||| ') and mode:
-            mode = 'base'
-        elif line.startswith('=======') and mode:
+            mode, up, base, mine, saw_base = 'up', [], [], [], False
+        elif line.startswith('||||||| ') and mode == 'up':
+            mode, saw_base = 'base', True
+        elif line.startswith('=======') and mode in ('up', 'base'):
             mode = 'mine'
-        elif line.startswith('>>>>>>> ') and mode:
+        elif line.startswith('>>>>>>> ') and mode == 'mine':
+            if not saw_base or any(l.strip() for l in base):
+                raise Rejected('src/hard.js 兩邊改到同一段既有內容（不是各自新增一篇），未自動合併')
             out += up + mine; mode = None
         elif mode == 'up':
             up.append(line)
+        elif mode == 'base':
+            base.append(line)
         elif mode == 'mine':
             mine.append(line)
-        elif mode is None:
+        else:
             out.append(line)
     if mode is not None:
         raise Rejected('衝突標記不完整，未自動合併')
@@ -359,30 +365,34 @@ def union_conflicts(text):
 def auto_rebase(root, upstream):
     """merge queue 的作法（GitHub merge queue／bors）：輪到你時把你接到最新 main 上再測，不把你踢回隊尾（#4260 實測：連 3 次排完隊才被告知要 rebase，每次白等約 5 分）。
     只自動處理兩種衝突：建置產物（取 main 的，verify 會重建）、src/hard.js（兩邊都留）；其他衝突一律放棄 rebase、回到原狀擋下。"""
-    env = {**os.environ, 'GIT_EDITOR': 'true'}
+    env = {**os.environ, 'GIT_EDITOR': 'true', 'GIT_CONFIG_COUNT': '1', 'GIT_CONFIG_KEY_0': 'merge.conflictStyle', 'GIT_CONFIG_VALUE_0': 'diff3'}   # diff3：看得到原本那段
     run = lambda *a: subprocess.run(['git', *a], cwd=root, capture_output=True, text=True, timeout=120, env=env)
     if run('status', '--porcelain', '--untracked-files=no').stdout.strip():
         raise Rejected('origin/main 比 HEAD 新，而且有未提交的改動：先 commit，再 verify（會自動 rebase）')
     before = run('rev-parse', 'HEAD').stdout.strip()
-    p = run('rebase', upstream)
-    for _ in range(50):   # cap-why: 每輪處理一個本棵 commit；本流程一篇最多幾個 commit，50 只是防無窮迴圈
-        if p.returncode == 0:
-            print(f'origin/main 比 HEAD 新：已自動 rebase（{before[:7]} → {run("rev-parse", "HEAD").stdout.strip()[:7]}），接著驗證', flush=True)
-            return
-        conflicted = [f for f in run('diff', '--name-only', '--diff-filter=U').stdout.split('\n') if f]
-        if not conflicted or not set(conflicted) <= OUTPUTS | {'src/hard.js'}:
-            run('rebase', '--abort')
-            raise Rejected('origin/main 比 HEAD 新，自動 rebase 有無法自動處理的衝突（' + ', '.join(conflicted) + '）：請手動 git rebase origin/main 後再 verify')
-        for f in conflicted:
-            if f == 'src/hard.js':
-                path = Path(root) / f
-                path.write_text(union_conflicts(path.read_text()))
-            else:
-                run('checkout', '--ours', '--', f)   # rebase 中 ours＝上游 main
-            run('add', '--', f)
-        p = run('rebase', '--continue')
-    run('rebase', '--abort')
-    raise Rejected('自動 rebase 沒有收斂，已還原：請手動 rebase')
+    try:
+        p = run('rebase', upstream)
+        for _ in range(50):   # cap-why: 每輪處理一個本棵 commit；本流程一篇最多幾個 commit，50 只是防無窮迴圈
+            if p.returncode == 0:
+                print(f'origin/main 比 HEAD 新：已自動 rebase（{before[:7]} → {run("rev-parse", "HEAD").stdout.strip()[:7]}），接著驗證', flush=True)
+                return
+            conflicted = [f for f in run('diff', '--name-only', '--diff-filter=U').stdout.split('\n') if f]
+            if not conflicted or not set(conflicted) <= OUTPUTS | {'src/hard.js'}:
+                raise Rejected('origin/main 比 HEAD 新，自動 rebase 有無法自動處理的衝突（' + ', '.join(conflicted) + '）：請手動 git rebase origin/main 後再 verify')
+            for f in conflicted:
+                if f == 'src/hard.js':
+                    path = Path(root) / f
+                    path.write_text(union_conflicts(path.read_text()))
+                else:
+                    run('checkout', '--ours', '--', f)   # rebase 中 ours＝上游 main
+                run('add', '--', f)
+            p = run('rebase', '--continue')
+        raise Rejected('自動 rebase 沒有收斂，已還原：請手動 rebase')
+    except BaseException:
+        # 任何失敗（含逾時、合併被拒）都還原到 rebase 前，不留半套 rebase（Codex 審 0133d34 P2）
+        with contextlib.suppress(Exception):
+            subprocess.run(['git', 'rebase', '--abort'], cwd=root, capture_output=True, timeout=120, env=env)
+        raise
 
 
 def base_current(root, auto=False):
