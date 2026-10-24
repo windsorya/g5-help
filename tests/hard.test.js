@@ -573,9 +573,11 @@ test("快篩：設 practiceNeed 的篇，封版猜法矩陣連對不到學會門
   const G = require("./guessmatrix.js");
   // 舊紀錄的 mastered 會一直保留（Codex 驗收方案 A 抓到）：事後加 practiceNeed 時，舊的「學會了」不能被說成達到新門檻。
   // 交辦 #4245 起由 src/hard.js isMastered 處理（學會時存 masteredNeed；缺欄位照拿到時的門檻算），所以事後加門檻的篇也可以設。
-  // H.NEED_FROM_FIRST_PUBLISH＝「練習題第一次上線就帶門檻」的篇，舊紀錄照 practiceNeed 算；加進去前要確認正式站那篇還沒有 practice。
+  // H.NEED_FROM_FIRST_PUBLISH＝{篇: 練習題首發時的門檻}，缺 masteredNeed 的舊紀錄照這個固定值算（不是現在的 practiceNeed）；加進去前要確認正式站那篇還沒有 practice。
   // 清單只在 src/hard.js 維護一份（多視窗同時加篇時，測試裡另寫一份會一直衝突）；這裡只擋拼錯與漏設門檻。
-  H.NEED_FROM_FIRST_PUBLISH.forEach(id => assert.ok(H.get(id) && H.get(id).practiceNeed, id + " 在首發帶門檻清單，但找不到這篇或它沒設 practiceNeed"));
+  Object.keys(H.NEED_FROM_FIRST_PUBLISH).forEach(id => { const n = H.NEED_FROM_FIRST_PUBLISH[id];
+    assert.ok(H.get(id) && H.get(id).practiceNeed, id + " 在首發帶門檻清單，但找不到這篇或它沒設 practiceNeed");
+    assert.ok(Number.isInteger(n) && n >= 3 && n <= H.get(id).practiceNeed, id + " 首發門檻要是 3～現在門檻的整數（只能往上調，不能往下）"); });
   H.LIST.filter(e => e.practiceNeed).forEach(e => {
     assert.ok(Number.isInteger(e.practiceNeed) && e.practiceNeed >= 3 && e.practiceNeed <= e.practice.length, e.id + " practiceNeed 要是 3～練習題數的整數");
     assert.equal(G.strategies(e.practice).length, 3992 + 19 * e.practice.length, "矩陣條數變了＝封版被改");
@@ -614,6 +616,9 @@ test("學會門檻：舊紀錄不被說成達到新門檻，新紀錄存下門�
   assert.equal(H.isMastered(FR, st({ mastered: true })), true, "T13 門檻 3 的舊紀錄維持");
   assert.equal(H.isMastered({ id: "x", kind: "steps", practice: [{}, {}] }, st({ mastered: true })), true, "T13 2 題短篇維持");
   assert.equal(H.isMastered(Q62, st({ mastered: true })), true, "T13 首次上線就帶門檻 8 的篇，舊紀錄是連對 8 拿到的");
+  // Codex 驗收 eeff8f4 P2：首發門檻固定，日後調高 practiceNeed，舊紀錄不能被說成達到新門檻
+  const Q34 = H.get("zh-q34-typo"), keep = Q34.practiceNeed; Q34.practiceNeed = keep + 1;
+  try { assert.equal(H.isMastered(Q34, st({ mastered: true, solved: 5, clean: 5 })), false, "T15 首發後調高門檻"); assert.equal(H.isMastered(Q34, st({ mastered: true, masteredNeed: keep + 1 })), true); } finally { Q34.practiceNeed = keep; }
   assert.equal(H.isMastered(null, st({ mastered: true })), true, "自己加的題（清單外）照舊");
   // 舊存檔沒有新欄位：讀進來不會多出欄位
   const OLD = JSON.stringify({ v: 1, entries: { "zh-q44-chaozhi": st({ mastered: true, streak: 3 }) } });
