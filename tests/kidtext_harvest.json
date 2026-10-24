@@ -1,12 +1,12 @@
 {
- "index_sha256": "c97db3811a19668c3fa81d01f1081987fc079e83b7fdf0d51e23e8b2b9319038",
+ "index_sha256": "eeef26f77e9369eb28ef654129536972c954574adf961561e277ad8360662a9c",
  "kidgate_sha256": "91c518ad54e254da967b5b983bebe443bdee4a950557d3a7aca8d9865f68a936",
  "driver_sha256": "d3fa91f0a78f9bf65d7a7ae35b197d3ba19a27288ecb15c31122a8df05a109e9",
  "max": 40,
  "self_max": 40,
  "browsers": {
   "chromium": {
-   "index_sha256": "c97db3811a19668c3fa81d01f1081987fc079e83b7fdf0d51e23e8b2b9319038",
+   "index_sha256": "eeef26f77e9369eb28ef654129536972c954574adf961561e277ad8360662a9c",
    "kidgate_sha256": "91c518ad54e254da967b5b983bebe443bdee4a950557d3a7aca8d9865f68a936",
    "driver_sha256": "d3fa91f0a78f9bf65d7a7ae35b197d3ba19a27288ecb15c31122a8df05a109e9",
    "max": 40,
@@ -74,7 +74,17 @@
     "sci-q5-bangen:resume2",
     "sci-q5-bangen:resume3",
     "sci-q5-bangen:video",
+    "zh-q27-typo:direct",
     "zh-q27-typo:lesson",
+    "zh-q27-typo:mastery",
+    "zh-q27-typo:resume0",
+    "zh-q27-typo:resume1",
+    "zh-q27-typo:resume2",
+    "zh-q27-typo:resume3",
+    "zh-q27-typo:resume4",
+    "zh-q27-typo:resume5",
+    "zh-q27-typo:resume6",
+    "zh-q27-typo:resume7",
     "zh-q27-typo:video"
    ],
    "branches": [
@@ -257,7 +267,32 @@
     "zh-q27-typo:check5:0",
     "zh-q27-typo:check5:1",
     "zh-q27-typo:check6:0",
-    "zh-q27-typo:check6:1"
+    "zh-q27-typo:check6:1",
+    "zh-q27-typo:mastery",
+    "zh-q27-typo:prac1:0",
+    "zh-q27-typo:prac1:1",
+    "zh-q27-typo:prac1:2",
+    "zh-q27-typo:prac2:0",
+    "zh-q27-typo:prac2:1",
+    "zh-q27-typo:prac2:2",
+    "zh-q27-typo:prac3:0",
+    "zh-q27-typo:prac3:1",
+    "zh-q27-typo:prac3:2",
+    "zh-q27-typo:prac4:0",
+    "zh-q27-typo:prac4:1",
+    "zh-q27-typo:prac4:2",
+    "zh-q27-typo:prac5:0",
+    "zh-q27-typo:prac5:1",
+    "zh-q27-typo:prac5:2",
+    "zh-q27-typo:prac6:0",
+    "zh-q27-typo:prac6:1",
+    "zh-q27-typo:prac6:2",
+    "zh-q27-typo:prac7:0",
+    "zh-q27-typo:prac7:1",
+    "zh-q27-typo:prac7:2",
+    "zh-q27-typo:prac8:0",
+    "zh-q27-typo:prac8:1",
+    "zh-q27-typo:prac8:2"
    ],
    "violations": [],
    "selftests": {
@@ -627,10 +662,10 @@
     }
    },
    "errors": [],
-   "snapshots": 299
+   "snapshots": 334
   },
   "webkit": {
-   "index_sha256": "c97db3811a19668c3fa81d01f1081987fc079e83b7fdf0d51e23e8b2b9319038",
+   "index_sha256": "eeef26f77e9369eb28ef654129536972c954574adf961561e277ad8360662a9c",
    "kidgate_sha256": "91c518ad54e254da967b5b983bebe443bdee4a950557d3a7aca8d9865f68a936",
    "driver_sha256": "d3fa91f0a78f9bf65d7a7ae35b197d3ba19a27288ecb15c31122a8df05a109e9",
    "max": 40,
@@ -698,7 +733,17 @@
     "sci-q5-bangen:resume2",
     "sci-q5-bangen:resume3",
     "sci-q5-bangen:video",
+    "zh-q27-typo:direct",
     "zh-q27-typo:lesson",
+    "zh-q27-typo:mastery",
+    "zh-q27-typo:resume0",
+    "zh-q27-typo:resume1",
+    "zh-q27-typo:resume2",
+    "zh-q27-typo:resume3",
+    "zh-q27-typo:resume4",
+    "zh-q27-typo:resume5",
+    "zh-q27-typo:resume6",
+    "zh-q27-typo:resume7",
     "zh-q27-typo:video"
    ],
    "branches": [
@@ -881,7 +926,32 @@
     "zh-q27-typo:check5:0",
     "zh-q27-typo:check5:1",
     "zh-q27-typo:check6:0",
-    "zh-q27-typo:check6:1"
+    "zh-q27-typo:check6:1",
+    "zh-q27-typo:mastery",
+    "zh-q27-typo:prac1:0",
+    "zh-q27-typo:prac1:1",
+    "zh-q27-typo:prac1:2",
+    "zh-q27-typo:prac2:0",
+    "zh-q27-typo:prac2:1",
+    "zh-q27-typo:prac2:2",
+    "zh-q27-typo:prac3:0",
+    "zh-q27-typo:prac3:1",
+    "zh-q27-typo:prac3:2",
+    "zh-q27-typo:prac4:0",
+    "zh-q27-typo:prac4:1",
+    "zh-q27-typo:prac4:2",
+    "zh-q27-typo:prac5:0",
+    "zh-q27-typo:prac5:1",
+    "zh-q27-typo:prac5:2",
+    "zh-q27-typo:prac6:0",
+    "zh-q27-typo:prac6:1",
+    "zh-q27-typo:prac6:2",
+    "zh-q27-typo:prac7:0",
+    "zh-q27-typo:prac7:1",
+    "zh-q27-typo:prac7:2",
+    "zh-q27-typo:prac8:0",
+    "zh-q27-typo:prac8:1",
+    "zh-q27-typo:prac8:2"
    ],
    "violations": [],
    "selftests": {
@@ -1251,7 +1321,7 @@
     }
    },
    "errors": [],
-   "snapshots": 299
+   "snapshots": 334
   }
  }
 }
