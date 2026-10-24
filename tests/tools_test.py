@@ -103,26 +103,75 @@ class PhotoTiles(unittest.TestCase):   # 交辦 #4293：看照片不再猜座標
         _, (x0, _, x1, _), _ = cells[1]
         self.assertLess(x0, 100); self.assertGreater(x1, 200)   # 中間那欄左右都多切一點，字不會剛好被切在邊上
 
+    def run_pt(self, *args):
+        try:
+            return self.pt.main([str(a) for a in args])
+        except SystemExit as e:
+            return e.code
+
     def test_outputs_and_errors(self):
         out = self.d / "t"
-        self.assertEqual(self.pt.main([str(self.photo), str(out)]), 0)
+        self.assertEqual(self.run_pt(self.photo, out), 0)
         self.assertEqual(sorted(p.name for p in out.iterdir())[0:2], ["overview.png", "r1c1.png"])
         self.assertEqual(len(list(out.glob("r*c*.png"))), 9)
-        self.assertEqual(self.pt.main([str(self.photo), str(out), "--box", "r2c2", "--zoom", "4"]), 0)
-        self.assertTrue((out / "r2c2_x4.png").is_file())
-        for bad in (["nope.jpg", str(out)], [str(self.photo), str(out), "--grid", "0x3"],
-                    [str(self.photo), str(out), "--box", "r9c9"], [str(self.photo), str(out), "--zoom", "0"],
-                    [str(self.photo), str(out), "--zoom", "0.001"]):
-            with self.subTest(bad=bad), self.assertRaises(SystemExit):
-                self.pt.main(bad)
+        empty = self.d / "e"; empty.mkdir()
+        self.assertEqual(self.run_pt(self.photo, empty, "--box", "r2c3", "--zoom", "4"), 0)   # 已存在但空的目錄可以
+        self.assertEqual([p.name for p in empty.iterdir()], ["r2c3_x4.png"])
+        for bad in (["nope.jpg", self.d / "n1"], [self.photo, self.d / "n2", "--grid", "0x3"], [self.photo, self.d / "n3", "--grid", "ax3"],
+                    [self.photo, self.d / "n4", "--box", "r9c9"], [self.photo, self.d / "n5", "--zoom", "0"],
+                    [self.photo, self.d / "n6", "--zoom", "0.001"], [self.photo, self.d / "n7", "--grid", "3x400"]):
+            with self.subTest(bad=bad):
+                self.assertNotEqual(self.run_pt(*bad), 0)
+                self.assertFalse(bad[1].exists() if isinstance(bad[1], Path) else False)   # 參數錯在建目錄前就擋
 
+    def test_rerun_into_previous_output_is_refused_and_untouched(self):
+        out = self.d / "t"; self.assertEqual(self.run_pt(self.photo, out), 0)
+        before = {p.name: p.read_bytes() for p in out.iterdir()}
+        for args in ([], ["--box", "r1c1"]):
+            with self.subTest(args=args):
+                self.assertNotEqual(self.run_pt(self.photo, out, *args), 0)
+                self.assertEqual({p.name: p.read_bytes() for p in out.iterdir()}, before)
 
-    def test_never_overwrites_source_photo(self):   # Codex 審 3a5da2a：照片在輸出目錄裡且同名
+    def test_never_overwrites_source_photo(self):   # Codex 審 3a5da2a／e1e16ec：同名、大小寫別名、symlink、hardlink、捷徑目錄
+        import os
         from PIL import Image
-        src = self.d / "r1c1.png"; Image.new("RGB", (300, 400), "white").save(src)
-        with self.assertRaises(SystemExit):
-            self.pt.main([str(src), str(self.d)])
-        self.assertEqual(Image.open(src).size, (300, 400))
+        for i, name in enumerate(("r1c1.png", "R1C1.PNG")):   # 目錄名用編號：Mac 檔案系統不分大小寫
+            with self.subTest(name=name):
+                d = self.d / f"same{i}"; d.mkdir(); src = d / name
+                Image.new("RGB", (300, 400), "white").save(src); raw = src.read_bytes()
+                self.assertNotEqual(self.run_pt(src, d), 0); self.assertEqual(src.read_bytes(), raw)
+        for kind in ("symlink", "hardlink", "hidden", "subdir", "broken"):
+            with self.subTest(kind=kind):
+                d = self.d / ("k_" + kind); d.mkdir(); raw = self.photo.read_bytes()
+                if kind == "symlink": (d / "r1c1.png").symlink_to(self.photo)
+                elif kind == "hardlink": os.link(self.photo, d / "r1c1.png")
+                elif kind == "hidden": (d / ".DS_Store").write_text("x")
+                elif kind == "subdir": (d / "sub").mkdir()
+                else: (d / "dead").symlink_to(self.d / "missing")
+                self.assertNotEqual(self.run_pt(self.photo, d), 0); self.assertEqual(self.photo.read_bytes(), raw)
+        link = self.d / "linkdir"; link.symlink_to(self.d)
+        self.assertNotEqual(self.run_pt(self.photo, link), 0)
+
+    def test_exclusive_create_even_if_file_appears_late(self):   # 檢查完到寫入之間冒出同名檔：xb 失敗、既有內容不動
+        out = self.d / "late"; out.mkdir(); real = self.pt.save_new
+        def sneaky(img, path):
+            if path.name == "r1c2.png": path.write_bytes(b"keep")
+            return real(img, path)
+        self.pt.save_new = sneaky
+        try:
+            self.assertEqual(self.run_pt(self.photo, out), 1)
+        finally:
+            self.pt.save_new = real
+        self.assertEqual((out / "r1c2.png").read_bytes(), b"keep")
+
+    def test_tiny_photo_zoom_half(self):
+        from PIL import Image
+        tiny = self.d / "tiny.png"; Image.new("RGB", (3, 3), "white").save(tiny)
+        out = self.d / "tiny_out"
+        self.assertEqual(self.run_pt(tiny, out, "--zoom", "0.5"), 0)
+        self.assertEqual(len(list(out.glob("r*c*.png"))), 9)
+        for p in out.glob("r*c*.png"):
+            self.assertGreaterEqual(min(Image.open(p).size), 1)
 
 
 class CodexSend(unittest.TestCase):   # 交辦 #4293：prompt 一定在 -i 前、檔首有圍籬、在暫存目錄也能跑
