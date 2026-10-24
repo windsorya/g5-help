@@ -453,6 +453,35 @@ class PostShip(unittest.TestCase):
         self.assertIn('接手', self.release(p))
         self.assertEqual(self.events('push'), [])
 
+    def load_gate(self):
+        import importlib.util
+        self.git('init','-q') if not (self.repo/'.git').exists() else None
+        spec = importlib.util.spec_from_file_location('post_gate_under_test', self.repo/'tools/post_gate.py')
+        m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+        return m
+
+    def test_T32_lane_lost_then_returned_still_fails(self):
+        """Codex 審 d48c755 P2：心跳看到別棵接手、對方又交還、本棵結束時再拿回——仍算中途失去車道。"""
+        m = self.load_gate(); m.LANE_BEAT = 0.05
+        root = self.repo.resolve(); m.lane_take(root)
+        with m.lane_heartbeat(root) as lost:
+            self.take_lane_during_hold()
+            deadline = time.monotonic()+5
+            while not lost.is_set() and time.monotonic() < deadline: time.sleep(.02)
+            self.lane_file().unlink()   # 對方交還
+        self.assertTrue(lost.is_set())
+        with self.assertRaises(m.Rejected): m.lane_confirm(root, time.time()+60, 'verify ', lost)
+
+    def test_T33_confirm_io_error_rewrites_receipt_failed(self):
+        """Codex 審 d48c755 P2：verify 後確認車道丟 OSError，收據不得留 success。"""
+        m = self.load_gate(); m.ROOT = self.repo.resolve()
+        m.lane_take = lambda root: None; m.base_current = lambda root: None; m.prune = lambda root: None
+        m.verify = lambda root, receipt: m.atomic_receipt(receipt, {'status': 'success'})
+        def boom(*a): raise OSError('fixture io error')
+        m.lane_confirm = boom
+        self.assertEqual(m.main(['verify']), 1)
+        self.assertEqual(json.loads(self.receipt().read_text())['status'], 'failed')
+
     def test_T24_old_runtime_artifacts_pruned(self):
         """快照每輪約 2.6 MB：超過一天的快照／log 目錄被清掉，一天內的（含背景 e2e 正在用的）保留。"""
         old = [self.repo/'.post-snapshots/old-run', self.repo/'.post-state/old-run']

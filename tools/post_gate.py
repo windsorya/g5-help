@@ -303,24 +303,28 @@ LANE_BEAT = 60
 
 @contextlib.contextmanager
 def lane_heartbeat(root):
-    """執行中每分鐘續租；續租時發現已被別棵接手就停（結束前由 lane_confirm 判定失敗）。"""
-    stop = threading.Event()
+    """執行中每分鐘續租；續租時發現已被別棵接手就記下 lost 並停。
+    lost 一旦設下就不會清掉：對方之後交還、本棵再拿回，也不算持續持有（Codex 審 d48c755 P2）。"""
+    stop, lost = threading.Event(), threading.Event()
     def beat():
         while not stop.wait(LANE_BEAT):
             with contextlib.suppress(Exception):
                 if lane_update(root, time.time() + LANE_TTL, True) is not None:
-                    return
+                    lost.set(); return
     t = threading.Thread(target=beat, daemon=True); t.start()
     try:
-        yield
+        yield lost
     finally:
         stop.set(); t.join(5)
 
 
-def lane_confirm(root, until, what):
-    """關鍵時刻（verify 寫完成功收據後、ship 推之前）確認車道仍在自己手上並延到 until；被接手就擋（Codex 審 c6b36da P2）。"""
+def lane_confirm(root, until, what, lost):
+    """關鍵時刻（verify 寫完成功收據後、ship 推之前）確認車道從頭到尾都在自己手上並延到 until；中途被接手過就擋（Codex 審 c6b36da、d48c755 P2）。"""
+    if lost.is_set():
+        raise Rejected(f'{what}期間上線車道曾被別棵接手（租期過了）：請等它推完，rebase 後重新 verify')
     holder = lane_update(root, until, True)
     if holder is not None:
+        lost.set()
         raise Rejected(f'{what}期間上線車道已被 {holder["root"]} 接手（租期過了）：請等它推完，rebase 後重新 verify')
 
 
@@ -626,13 +630,13 @@ def main(argv=None):
             if args[0] == 'verify':
                 lane_take(ROOT)
                 try:
-                    with lane_heartbeat(ROOT):
+                    with lane_heartbeat(ROOT) as lost:
                         base_current(ROOT)
                         verify(ROOT, receipt)
                     try:
-                        lane_confirm(ROOT, time.time() + LANE_SHIP_GRACE, 'verify ')   # 留給自己的 ship
-                    except Rejected as exc:
-                        atomic_receipt(receipt, {'status': 'failed', 'reason': str(exc), 'finished': time.time()})
+                        lane_confirm(ROOT, time.time() + LANE_SHIP_GRACE, 'verify ', lost)   # 留給自己的 ship
+                    except BaseException as exc:   # 任何確認失敗（含讀寫錯誤）都不得留下成功收據（Codex 審 d48c755 P2）
+                        atomic_receipt(receipt, {'status': 'failed', 'reason': '確認上線車道失敗：' + str(exc), 'finished': time.time()})
                         raise
                 except BaseException:
                     lane_release(ROOT)
@@ -642,9 +646,9 @@ def main(argv=None):
                 if holder is not None:
                     raise Rejected(f'上線車道由 {holder["root"]} 使用中：等它推完，rebase 後重新 verify')
                 try:
-                    with lane_heartbeat(ROOT):
+                    with lane_heartbeat(ROOT) as lost:
                         ship(ROOT, receipt, args[1], args[2] if len(args) == 3 else None,
-                             before_push=lambda: lane_confirm(ROOT, time.time() + LANE_TTL, 'ship '))
+                             before_push=lambda: lane_confirm(ROOT, time.time() + LANE_TTL, 'ship ', lost))
                 finally:
                     lane_release(ROOT)
     except (Rejected, OSError, ValueError, subprocess.SubprocessError, KeyboardInterrupt) as exc:

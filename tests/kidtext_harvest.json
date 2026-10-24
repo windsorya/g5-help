@@ -5,7 +5,7 @@
  "max": 40,
  "self_max": 40,
  "browsers": {
-  "chromium": {
+  "webkit": {
    "index_sha256": "6d228c3a0573d30a5732ccb033a9dc4097cf3c2c508d729199e633f74b381721",
    "kidgate_sha256": "91c518ad54e254da967b5b983bebe443bdee4a950557d3a7aca8d9865f68a936",
    "driver_sha256": "551ae3461ff449c46c75517ecb579e06365c71b80f3bd43907260e6cd6026a77",
@@ -810,7 +810,7 @@
    "errors": [],
    "snapshots": 492
   },
-  "webkit": {
+  "chromium": {
    "index_sha256": "6d228c3a0573d30a5732ccb033a9dc4097cf3c2c508d729199e633f74b381721",
    "kidgate_sha256": "91c518ad54e254da967b5b983bebe443bdee4a950557d3a7aca8d9865f68a936",
    "driver_sha256": "551ae3461ff449c46c75517ecb579e06365c71b80f3bd43907260e6cd6026a77",
