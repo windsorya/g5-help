@@ -723,17 +723,20 @@ def main(argv=None):
     started = time.monotonic()
     try:
         with lock(ROOT) as receipt:
+            # verify：先嘗試撤銷舊成功收據 → 清理舊快照 → 首次撤銷失敗就再撤銷一次（成功才往下）。Codex 設計者 2026-10-24（審 9cb880f／8779f3b／f050d2e 連三輪後）：
+            #   ①清理、排隊、base 檢查失敗都不得留下可 ship 的舊 success；②磁碟滿時撤銷寫不進去也要讓 prune 有機會騰出空間；
+            #   ③atomic_receipt 失敗會先試刪舊收據、再拋 Rejected（不是 OSError），所以接 Rejected。
+            revoke = lambda: atomic_receipt(receipt, {'status': 'running', 'run_id': 'queue-' + uuid.uuid4().hex, 'started': time.time()})
+            retry_revoke = False
             if args[0] == 'verify':
-                # 新的一次 verify 一開始（連清理舊快照都還沒做）就撤銷舊的成功收據：清理、排隊、base 檢查失敗也不得留下可 ship 的舊 success
-                # （Codex 窮舉審 c6b36da、9cb880f；原規格 T16）
-                revoke = lambda: atomic_receipt(receipt, {'status': 'running', 'run_id': 'queue-' + uuid.uuid4().hex, 'started': time.time()})
                 try:
                     revoke()
-                except OSError:
-                    prune(ROOT)   # 磁碟滿（ENOSPC）時先清舊快照騰出空間再撤銷一次；仍失敗就停（Codex 窮舉審 8779f3b）
-                    revoke()
+                except Rejected:
+                    retry_revoke = True
             prune(ROOT)
             if args[0] == 'verify':
+                if retry_revoke:
+                    revoke()   # 只重試一次；仍失敗就停，不進車道
                 lane_take(ROOT)
                 try:
                     with lane_heartbeat(ROOT) as lost:

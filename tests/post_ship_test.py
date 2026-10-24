@@ -546,19 +546,52 @@ class PostShip(unittest.TestCase):
         self.assertEqual(m.main(['verify']), 1)
         self.assertNotEqual(json.loads(self.receipt().read_text()).get('status'), 'success')
 
-    def test_T43_disk_full_revoke_prunes_then_retries(self):
-        """Codex 窮舉審 8779f3b：撤銷收據遇到 ENOSPC 時要先清舊快照騰空間再撤銷一次，不能因為撤銷排在前面就永遠清不到。"""
+    def gate_with_io_faults(self, replace_failures, prune_error=None):
+        """在真實 atomic_receipt 內的 os.replace 注入 ENOSPC（前 replace_failures 次）；prune 記次數、可指定丟錯；拿到車道前讀回收據後停下。"""
         m = self.load_gate(); m.ROOT = self.repo.resolve()
-        calls = []; real_atomic = m.atomic_receipt
-        def atomic(path, data):
-            calls.append('write')
-            if len([c for c in calls if c == 'write']) == 1: raise OSError(28, 'fixture ENOSPC')
-            return real_atomic(path, data)
-        m.atomic_receipt = atomic
-        m.prune = lambda root: calls.append('prune')
-        m.lane_take = lambda root: (_ for _ in ()).throw(m.Rejected('fixture stop after revoke'))
-        self.assertEqual(m.main(['verify']), 1)
-        self.assertEqual(calls[:3], ['write', 'prune', 'write'], calls)
+        seen = {'replace': 0, 'prune': 0, 'at_lane': 'not reached'}
+        real_replace = m.os.replace
+        def replace(a, b):
+            seen['replace'] += 1
+            if seen['replace'] <= replace_failures: raise OSError(28, 'fixture ENOSPC')
+            return real_replace(a, b)
+        m.os.replace = replace
+        def prune(root):
+            seen['prune'] += 1
+            if prune_error: raise prune_error
+        m.prune = prune
+        def lane_take(root):
+            r = self.receipt()
+            seen['at_lane'] = json.loads(r.read_text()).get('status') if r.exists() else 'missing'
+            raise m.Rejected('fixture stop at lane')
+        m.lane_take = lane_take
+        try:
+            rc = m.main(['verify'])
+        finally:
+            m.os.replace = real_replace
+        status = json.loads(self.receipt().read_text()).get('status') if self.receipt().exists() else 'missing'
+        return rc, seen, status
+
+    def test_T43_disk_full_first_revoke_then_prune_then_retry(self):
+        """Codex 設計者矩陣：首次撤銷 ENOSPC → prune 一次 → 再撤銷成功，進車道前收據已是 running（舊 success 失效）。"""
+        self.verified()
+        rc, seen, status = self.gate_with_io_faults(1)
+        self.assertEqual((seen['prune'], seen['at_lane']), (1, 'running'), seen)
+        self.assertEqual(rc, 1); self.assertNotEqual(status, 'success')
+
+    def test_T44_disk_full_both_revokes_stops_before_lane(self):
+        """兩次撤銷都 ENOSPC：prune 跑過一次、不進車道、舊 success 不得留下。"""
+        self.verified()
+        rc, seen, status = self.gate_with_io_faults(99)
+        self.assertEqual((rc, seen['prune'], seen['at_lane']), (1, 1, 'not reached'), seen)
+        self.assertNotEqual(status, 'success')
+
+    def test_T45_disk_full_revoke_and_prune_fails_stops(self):
+        """首次撤銷 ENOSPC、prune 也失敗：不重試、不進車道、舊 success 不得留下。"""
+        self.verified()
+        rc, seen, status = self.gate_with_io_faults(1, prune_error=OSError(5, 'fixture EIO'))
+        self.assertEqual((rc, seen['prune'], seen['at_lane'], seen['replace']), (1, 1, 'not reached', 1), seen)
+        self.assertNotEqual(status, 'success')
 
     def test_T41_merge_base_error_is_not_treated_as_up_to_date(self):
         """Codex 窮舉審 c6b36da：merge-base 執行錯誤（rc=128）不得當成 base 已是最新。"""
