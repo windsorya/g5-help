@@ -185,15 +185,25 @@ test("快篩：影片標題與說明裡的難詞要在同一段附白話（影�
 // 每個難詞第一次出現要附白話；判準同主閘 KG.glossed。答錯才出現的 why 不算第一次（主閘也是依實際畫面順序）。主閘仍是真瀏覽器採字。
 // 2026-10-24 交辦 #4260：zh-q34-typo 確認題題幹 44 字，只有瀏覽器採字量得到，又白跑一輪 verify。這裡用主閘同一套 sentences／countChars 先量。
 test("快篩：教學區與練習每句不超過句長上限（含步驟標題、確認題題幹、選項、選錯說明）", () => {
-  const lim = H.readingAt(new Date()).maxSentence, problems = [];
-  const plain = (x) => String(x || "").replace(/<br\s*\/?>/g, "\n").replace(/<[^>]+>/g, "").replace(/&[a-z]+;/g, "");
+  // 對齊主閘（Codex 審 85491f1 FAIL 七項）：上限用 KG.MAX 固定值；innerHTML 欄位（標題、說明、題幹、answer、write）原始碼換行照 white-space:normal 併成一行，
+  // <br> 與區塊標籤才斷行、其餘標籤拿掉；esc／textContent 欄位（選項、why、ok）是純文字，不當 HTML 清；選對時看不到 why[a]，不量。
+  const lim = KG.MAX, problems = [];
+  const html = (x) => String(x == null ? "" : x).replace(/\s*\n\s*/g, " ").replace(/<br\s*\/?>|<\/?(p|div|li|ul|ol|h\d|section)\b[^>]*>/gi, "\n").replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " ").replace(/&[a-z]+;/g, "");
+  const text = (x) => String(x == null ? "" : x).replace(/\s*\n\s*/g, " ");
+  const why = (q) => (q.why || []).filter((w, k) => k !== q.a);
   H.LIST.filter((e) => e.kind === "steps").forEach((e) => {
-    const texts = [e.lead];
-    (e.steps || []).forEach((s) => { texts.push(s.title, s.say); if (s.check) texts.push(s.check.q, s.check.ok, ...(s.check.opts || []), ...(s.check.why || [])); });
-    (H.practiceAll ? H.practiceAll(e) : (e.practice || [])).forEach((q) => texts.push(q.q, ...(q.opts || []).map(String), ...(q.why || [])));
-    texts.forEach((t) => KG.sentences(plain(t)).forEach((s) => { if (KG.countChars(s) > lim) problems.push(e.id + " " + KG.countChars(s) + " 字（上限 " + lim + "）：" + s); }));
+    const h = [e.lead, e.answer, e.write], t = [];
+    (e.steps || []).forEach((s) => { h.push(s.title, s.say); if (s.check) { h.push(s.check.q); t.push(s.check.ok, ...(s.check.opts || []), ...why(s.check)); } });
+    (H.practiceAll ? H.practiceAll(e) : (e.practice || [])).forEach((q) => { h.push(q.q); t.push(q.ok, ...(q.opts || []), ...why(q)); });
+    h.map(html).concat(t.map(text)).forEach((x) => KG.sentences(x).forEach((s) => { if (KG.countChars(s) > lim) problems.push(e.id + " " + KG.countChars(s) + " 字（上限 " + lim + "）：" + s); }));
   });
   assert.deepEqual(problems, []);
+  // 自檢：Codex 的七個反例
+  const one = (pair) => KG.sentences(pair[0](pair[1])).some((s) => KG.countChars(s) > lim);
+  assert.equal(one([html, "<p>" + "甲".repeat(25) + "</p><p>" + "乙".repeat(25) + "</p>"]), false, "兩個 <p> 各 25 字不合併");
+  assert.equal(one([html, "甲".repeat(25) + "\n" + "乙".repeat(25)]), true, "原始碼換行照畫面併成 50 字");
+  assert.equal(one([text, "甲".repeat(38) + "<乙>"]), true, "純文字的 <乙> 照字面算 41 字");
+  assert.deepEqual(why({a: 0, why: ["甲".repeat(41), "短"]}), ["短"], "選對時看不到的 why[a] 不量");
 });
 
 test("快篩：教學區照畫面順序，難詞第一次出現就要附白話（含步驟標題、確認題）", () => {
