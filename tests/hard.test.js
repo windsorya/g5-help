@@ -183,34 +183,63 @@ test("快篩：影片標題與說明裡的難詞要在同一段附白話（影�
 // 舊快篩只看影片區、node 用詞測試讀的是採字結果 ⇒ 要等兩個瀏覽器採字 5 分鐘才紅，整套 verify 重跑（家長送出→上線 27.3 分的最大一段）。
 // 這裡照教學區畫面順序（開場白 → 每一步：標題、說明、確認題與選項、選對回饋 → 答案 → 寫法）接成一串，
 // 每個難詞第一次出現要附白話；判準同主閘 KG.glossed。答錯才出現的 why 不算第一次（主閘也是依實際畫面順序）。主閘仍是真瀏覽器採字。
-// 2026-10-24 交辦 #4260：zh-q34-typo 確認題題幹 44 字，只有瀏覽器採字量得到，又白跑一輪 verify。這裡用主閘同一套 sentences／countChars 先量。
-test("快篩：教學區與練習每句不超過句長上限（含步驟標題、確認題題幹、選項、選錯說明）", () => {
-  // 對齊主閘（Codex 審 85491f1 FAIL 七項）：上限用 KG.MAX 固定值；innerHTML 欄位（標題、說明、題幹、answer、write）原始碼換行照 white-space:normal 併成一行，
-  // <br> 與區塊標籤才斷行、其餘標籤拿掉；esc／textContent 欄位（選項、why、ok）是純文字，不當 HTML 清；選對時看不到 why[a]，不量。
-  const lim = KG.MAX, problems = [];
-  // 第 2 輪（Codex 審 babaaa7）：回饋 .fb 是 white-space:pre-line，why／ok 的換行照斷；HTML 實體解碼後再計字（不是刪掉）
-  const ENT = {amp: "&", lt: "<", gt: ">", quot: "\"", apos: "'", nbsp: " "};
-  const decode = (s) => s.replace(/&#x([0-9a-f]+);/gi, (m, h) => String.fromCodePoint(parseInt(h, 16))).replace(/&#(\d+);/g, (m, d) => String.fromCodePoint(+d)).replace(/&([a-z]+);/gi, (m, n) => (n.toLowerCase() in ENT ? ENT[n.toLowerCase()] : m));
-  const html = (x) => decode(String(x == null ? "" : x).replace(/\s*\n\s*/g, " ").replace(/<br\s*\/?>|<\/?(p|div|li|ul|ol|h\d|section)\b[^>]*>/gi, "\n").replace(/<[^>]+>/g, ""));
-  const chip = (x) => String(x == null ? "" : x).replace(/\s*\n\s*/g, " ");   // 選項按鈕：esc 後 white-space:normal
-  const fbText = (x) => String(x == null ? "" : x);                          // 回饋：textContent＋pre-line，換行保留
-  const why = (q) => (q.why || []).filter((w, k) => k !== q.a);
+// 2026-10-24 交辦 #4260：句長快篩。正則模擬瀏覽器渲染連 3 輪 Codex FAIL（85491f1、babaaa7、9f4f17c）→ 依升級階梯採設計者方案 B：
+// 只量 textContent／esc 寫入的純文字欄位（開場白、選項、ok、可選錯的 why），innerHTML 欄位（標題、說明、題幹、answer、write、圖）一律 DEFER 交主閘。
+// 代價（明確接受）：HTML 欄位的長句（例如 zh-q34-typo 確認題題幹 44 字）仍要等瀏覽器採字才擋。上限用主閘的固定值 KG.MAX。
+const SCREEN_HTML = new Set(["title", "say", "question", "answer", "write", "fig"]);
+function screenField(kind, value, ctx) {
+  if (SCREEN_HTML.has(kind)) return "DEFER";
+  if (kind === "why" && ctx && (ctx.index === ctx.a || ctx.index >= ctx.optionCount)) return "OMIT";   // 選對看不到 why[a]；沒有對應按鈕的 why 也不會出現
+  let s = String(value == null ? "" : value);
+  if (kind === "lead" || kind === "option") s = s.replace(/\s*\n\s*/g, " ");   // white-space:normal：換行只是空白
+  // ok／why 寫進 .fb（white-space:pre-line）：換行保留成斷句
+  return KG.sentences(s).some((x) => KG.countChars(x) > KG.MAX) ? "FAIL" : "PASS";
+}
+test("快篩：純文字欄位每句不超過句長上限（開場白、選項、ok、可選錯的 why；HTML 欄位交主閘）", () => {
+  const problems = [];
+  const put = (id, where, kind, v, ctx) => { if (screenField(kind, v, ctx) === "FAIL") problems.push(id + " " + where + " 超過 " + KG.MAX + " 字：" + String(v)); };
+  const ask = (id, where, q) => {
+    (q.opts || []).forEach((o, k) => put(id, where + "選項" + (k + 1), "option", o));
+    if (q.ok) put(id, where + "ok", "ok", q.ok);
+    (q.why || []).forEach((w, k) => put(id, where + "why" + (k + 1), "why", w, {a: q.a, index: k, optionCount: (q.opts || []).length}));
+  };
   H.LIST.filter((e) => e.kind === "steps").forEach((e) => {
-    const h = [e.lead, e.answer, e.write], c = [], f = [];
-    (e.steps || []).forEach((s) => { h.push(s.title, s.say); if (s.check) { h.push(s.check.q); c.push(...(s.check.opts || [])); f.push(s.check.ok, ...why(s.check)); } });
-    (H.practiceAll ? H.practiceAll(e) : (e.practice || [])).forEach((q) => { h.push(q.q); c.push(...(q.opts || [])); f.push(q.ok, ...why(q)); });
-    h.map(html).concat(c.map(chip), f.map(fbText)).forEach((x) => KG.sentences(x).forEach((s) => { if (KG.countChars(s) > lim) problems.push(e.id + " " + KG.countChars(s) + " 字（上限 " + lim + "）：" + s); }));
+    put(e.id, "開場白", "lead", e.lead);
+    (e.steps || []).forEach((s, i) => { if (s.check) ask(e.id, "第" + (i + 1) + "步確認題", s.check); });
+    (H.practiceAll ? H.practiceAll(e) : (e.practice || [])).forEach((q, i) => ask(e.id, "練習第" + (i + 1) + "題", q));
   });
   assert.deepEqual(problems, []);
-  // 自檢：Codex 的七個反例
-  const one = (pair) => KG.sentences(pair[0](pair[1])).some((s) => KG.countChars(s) > lim);
-  assert.equal(one([html, "<p>" + "甲".repeat(25) + "</p><p>" + "乙".repeat(25) + "</p>"]), false, "兩個 <p> 各 25 字不合併");
-  assert.equal(one([html, "甲".repeat(25) + "\n" + "乙".repeat(25)]), true, "原始碼換行照畫面併成 50 字");
-  assert.equal(one([chip, "甲".repeat(38) + "<乙>"]), true, "純文字的 <乙> 照字面算 41 字");
-  assert.equal(one([fbText, "甲".repeat(25) + "\n" + "乙".repeat(25)]), false, "回饋 pre-line：換行後是兩句");
-  assert.equal(one([html, "&#30002;".repeat(6)]), false, "實體解碼成六個甲");
-  assert.equal(one([html, "甲".repeat(40) + "&amp;"]), true, "&amp; 解碼後 41 字");
-  assert.deepEqual(why({a: 0, why: ["甲".repeat(41), "短"]}), ["短"], "選對時看不到的 why[a] 不量");
+});
+test("快篩自檢：句長快篩的封版驗收矩陣（Codex 設計者方案 B）", () => {
+  const A = "甲".repeat(25), B = "乙".repeat(25), x = (n) => "甲".repeat(n);
+  const cases = [
+    ["lead", x(40), "PASS"], ["lead", x(41), "FAIL"], ["lead", A + "\n" + B, "FAIL"], ["lead", x(38) + "<乙>", "FAIL"],
+    ["lead", x(36) + "&amp;", "FAIL"], ["lead", A + "。" + B, "PASS"], ["lead", "𠮷".repeat(40), "PASS"],
+    ["option", x(38) + "<乙>", "FAIL"], ["option", A + "\n" + B, "FAIL"],
+    ["ok", A + "\n" + B, "PASS"], ["why", A + "\n" + B, "PASS", {a: 0, index: 1, optionCount: 2}],
+    ["why", x(41), "FAIL", {a: 0, index: 1, optionCount: 2}], ["why", x(41), "OMIT", {a: 0, index: 0, optionCount: 2}],
+    ["why", x(41), "OMIT", {a: 0, index: 2, optionCount: 2}], ["ok", A + " " + B, "FAIL"], ["ok", x(38) + "<乙>", "FAIL"],
+    ...["p", "div", "blockquote"].map((t) => ["say", "<" + t + ">" + A + "</" + t + "><" + t + ">" + B + "</" + t + ">", "DEFER"]),
+    ["say", "<span>" + A + "</span><span>" + B + "</span>", "DEFER"], ["say", A + "<br>" + B, "DEFER"], ["say", A + "\n" + B, "DEFER"],
+    ["say", '<div style="white-space:pre-line">' + A + "\n" + B + "</div>", "DEFER"], ["say", "&#30002;".repeat(6), "DEFER"],
+    ["say", x(40) + "&amp;", "DEFER"], ["say", "&copy;".repeat(8), "DEFER"], ["say", x(36) + "&#x26;#65;", "DEFER"],
+    ["say", x(36) + "&#38;amp;", "DEFER"], ["say", x(36) + "&amp;amp;", "DEFER"], ["say", A + "&#10;" + B, "DEFER"],
+    ["say", "&#1114112;", "DEFER"], ["say", "&#x110000;", "DEFER"],
+    ...["title", "say", "question", "answer", "write", "fig"].map((k) => [k, x(41), "DEFER"]),
+  ];
+  cases.forEach(([k, v, want, ctx], i) => assert.equal(screenField(k, v, ctx), want, "案例 " + i + "：" + k));
+  // 走訪層：只改一個欄位成 41 字，要點名該欄位；題幹交主閘不點名
+  const run = (patch) => { const e = JSON.parse(JSON.stringify(H.get("zh-q34-typo"))); patch(e); const p = []; const put = (w, k, v, c) => { if (screenField(k, v, c) === "FAIL") p.push(w); };
+    put("lead", "lead", e.lead); e.steps.forEach((s, i) => { if (!s.check) return; (s.check.opts || []).forEach((o) => put("s" + i + "opt", "option", o)); put("s" + i + "ok", "ok", s.check.ok);
+      (s.check.why || []).forEach((w, k) => put("s" + i + "why" + k, "why", w, {a: s.check.a, index: k, optionCount: s.check.opts.length})); put("s" + i + "q", "question", s.check.q); });
+    e.practice.forEach((q, i) => { q.opts.forEach((o) => put("p" + i + "opt", "option", o)); put("p" + i + "why", "why", q.why[(q.a + 1) % 3], {a: q.a, index: (q.a + 1) % 3, optionCount: 3}); put("p" + i + "q", "question", q.q); }); return p; };
+  assert.deepEqual(run((e) => { e.steps[2].check.opts[1] = x(41); }), ["s2opt"]);
+  assert.deepEqual(run((e) => { e.steps[2].check.ok = x(41); }), ["s2ok"]);
+  assert.deepEqual(run((e) => { e.steps[2].check.why[e.steps[2].check.a === 0 ? 1 : 0] = x(41); }), ["s2why" + (e => e)(H.get("zh-q34-typo").steps[2].check.a === 0 ? 1 : 0)]);
+  assert.deepEqual(run((e) => { e.steps[2].check.why[e.steps[2].check.a] = x(41); }), [], "why[a] 不量");
+  assert.deepEqual(run((e) => { e.steps[2].check.q = x(41); e.practice[0].q = x(41); }), [], "題幹交主閘");
+  assert.deepEqual(run((e) => { e.practice[3].opts[0] = x(41); }), ["p3opt"]);
+  assert.equal(KG.MAX, 40, "上限是主閘的固定值，不跟日期走");
 });
 
 test("快篩：教學區照畫面順序，難詞第一次出現就要附白話（含步驟標題、確認題）", () => {
