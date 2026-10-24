@@ -723,10 +723,12 @@ def main(argv=None):
     started = time.monotonic()
     try:
         with lock(ROOT) as receipt:
+            if args[0] == 'verify':
+                # 新的一次 verify 一開始（連清理舊快照都還沒做）就撤銷舊的成功收據：清理、排隊、base 檢查失敗也不得留下可 ship 的舊 success
+                # （Codex 窮舉審 c6b36da、9cb880f；原規格 T16）
+                atomic_receipt(receipt, {'status': 'running', 'run_id': 'queue-' + uuid.uuid4().hex, 'started': time.time()})
             prune(ROOT)
             if args[0] == 'verify':
-                # 新的一次 verify 一開始就撤銷舊的成功收據：排隊中斷、base 檢查失敗也不得留下可 ship 的舊 success（Codex 窮舉審 c6b36da；原規格 T16）
-                atomic_receipt(receipt, {'status': 'running', 'run_id': 'queue-' + uuid.uuid4().hex, 'started': time.time()})
                 lane_take(ROOT)
                 try:
                     with lane_heartbeat(ROOT) as lost:

@@ -537,6 +537,15 @@ class PostShip(unittest.TestCase):
         self.run_post('verify', 1, '無法自動處理的衝突')
         self.assertNotEqual(json.loads(self.receipt().read_text()).get('status'), 'success')
 
+    def test_T42_prune_failure_still_revokes_old_success(self):
+        """Codex 窮舉審 9cb880f：清理舊快照失敗（EIO）時，舊成功收據也要先被撤銷。"""
+        self.verified()
+        m = self.load_gate(); m.ROOT = self.repo.resolve()
+        def boom(root): raise OSError(5, 'fixture EIO')
+        m.prune = boom
+        self.assertEqual(m.main(['verify']), 1)
+        self.assertNotEqual(json.loads(self.receipt().read_text()).get('status'), 'success')
+
     def test_T41_merge_base_error_is_not_treated_as_up_to_date(self):
         """Codex 窮舉審 c6b36da：merge-base 執行錯誤（rc=128）不得當成 base 已是最新。"""
         m = self.load_gate()
