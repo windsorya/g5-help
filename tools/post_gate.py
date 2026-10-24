@@ -346,7 +346,7 @@ def union_conflicts(text):
         elif line.startswith('=======') and mode in ('up', 'base'):
             mode = 'mine'
         elif line.startswith('>>>>>>> ') and mode == 'mine':
-            if not saw_base or any(l.strip() for l in base):
+            if not saw_base or base:   # 原本那段連空白行都不能有（空白行被兩邊各換成內容也是改既有內容，Codex 審 3399007）
                 raise Rejected('src/hard.js 兩邊改到同一段既有內容（不是各自新增一篇），未自動合併')
             out += up + mine; mode = None
         elif mode == 'up':

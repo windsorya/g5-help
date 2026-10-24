@@ -555,6 +555,14 @@ class PostShip(unittest.TestCase):
         self.assertEqual(self.git('rev-parse', 'HEAD'), head)
         self.assertFalse((self.repo/'.git/rebase-merge').exists() or (self.repo/'.git/rebase-apply').exists())
 
+    def test_T39_blank_base_line_replaced_both_sides_not_unioned(self):
+        """Codex 審 3399007 P2：兩邊把同一行空白各換成內容＝改既有內容，不得當成純新增串接。"""
+        m = self.load_gate()
+        text = '<<<<<<< up\nwords: {a: "up"},\n||||||| base\n\n=======\nwords: {b: "mine"},\n>>>>>>> mine\n'
+        with self.assertRaises(m.Rejected): m.union_conflicts(text)
+        ok = '<<<<<<< up\nA\n||||||| base\n=======\nB\n>>>>>>> mine\n'
+        self.assertEqual(m.union_conflicts(ok), 'A\nB\n')
+
     def test_T24_old_runtime_artifacts_pruned(self):
         """快照每輪約 2.6 MB：超過一天的快照／log 目錄被清掉，一天內的（含背景 e2e 正在用的）保留。"""
         old = [self.repo/'.post-snapshots/old-run', self.repo/'.post-state/old-run']
