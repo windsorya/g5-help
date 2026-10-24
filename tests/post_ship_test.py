@@ -546,6 +546,20 @@ class PostShip(unittest.TestCase):
         self.assertEqual(m.main(['verify']), 1)
         self.assertNotEqual(json.loads(self.receipt().read_text()).get('status'), 'success')
 
+    def test_T43_disk_full_revoke_prunes_then_retries(self):
+        """Codex 窮舉審 8779f3b：撤銷收據遇到 ENOSPC 時要先清舊快照騰空間再撤銷一次，不能因為撤銷排在前面就永遠清不到。"""
+        m = self.load_gate(); m.ROOT = self.repo.resolve()
+        calls = []; real_atomic = m.atomic_receipt
+        def atomic(path, data):
+            calls.append('write')
+            if len([c for c in calls if c == 'write']) == 1: raise OSError(28, 'fixture ENOSPC')
+            return real_atomic(path, data)
+        m.atomic_receipt = atomic
+        m.prune = lambda root: calls.append('prune')
+        m.lane_take = lambda root: (_ for _ in ()).throw(m.Rejected('fixture stop after revoke'))
+        self.assertEqual(m.main(['verify']), 1)
+        self.assertEqual(calls[:3], ['write', 'prune', 'write'], calls)
+
     def test_T41_merge_base_error_is_not_treated_as_up_to_date(self):
         """Codex 窮舉審 c6b36da：merge-base 執行錯誤（rc=128）不得當成 base 已是最新。"""
         m = self.load_gate()

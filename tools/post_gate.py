@@ -726,7 +726,12 @@ def main(argv=None):
             if args[0] == 'verify':
                 # 新的一次 verify 一開始（連清理舊快照都還沒做）就撤銷舊的成功收據：清理、排隊、base 檢查失敗也不得留下可 ship 的舊 success
                 # （Codex 窮舉審 c6b36da、9cb880f；原規格 T16）
-                atomic_receipt(receipt, {'status': 'running', 'run_id': 'queue-' + uuid.uuid4().hex, 'started': time.time()})
+                revoke = lambda: atomic_receipt(receipt, {'status': 'running', 'run_id': 'queue-' + uuid.uuid4().hex, 'started': time.time()})
+                try:
+                    revoke()
+                except OSError:
+                    prune(ROOT)   # 磁碟滿（ENOSPC）時先清舊快照騰出空間再撤銷一次；仍失敗就停（Codex 窮舉審 8779f3b）
+                    revoke()
             prune(ROOT)
             if args[0] == 'verify':
                 lane_take(ROOT)
