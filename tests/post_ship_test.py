@@ -39,8 +39,8 @@ if name == 'git':
         if cfg.get('late_head'):
             subprocess.check_call([os.environ['FIX_GIT'], 'update-ref', 'HEAD', cfg['late_head']])
         record('push'); sys.exit(0)
-    # fetch／merge-base：上線車道的 base 檢查（fixture 沒有 remote ⇒ fetch 失敗、只警告）
-    if not args or args[0] not in ['ls-files','ls-tree','show','rev-parse','cat-file','diff','status','fetch','merge-base']: deny()
+    # fetch／merge-base／rebase／checkout／add：上線車道的 base 檢查與 verify 開頭自動 rebase（fixture 沒有 remote ⇒ fetch 失敗、只警告）
+    if not args or args[0] not in ['ls-files','ls-tree','show','rev-parse','cat-file','diff','status','fetch','merge-base','rebase','checkout','add']: deny()
     sys.exit(subprocess.call([os.environ['FIX_GIT'], *args]))
 elif name == 'node':
     if args == ['--version']: print('v22.0.0-fixture'); sys.exit(0)
@@ -475,7 +475,7 @@ class PostShip(unittest.TestCase):
     def test_T33_confirm_io_error_rewrites_receipt_failed(self):
         """Codex 審 d48c755 P2：verify 後確認車道丟 OSError，收據不得留 success。"""
         m = self.load_gate(); m.ROOT = self.repo.resolve()
-        m.lane_take = lambda root: None; m.base_current = lambda root: None; m.prune = lambda root: None
+        m.lane_take = lambda root: None; m.base_current = lambda root, **kw: None; m.prune = lambda root: None
         m.verify = lambda root, receipt: m.atomic_receipt(receipt, {'status': 'success'})
         def boom(*a): raise OSError('fixture io error')
         m.lane_confirm = boom
@@ -485,19 +485,45 @@ class PostShip(unittest.TestCase):
     def test_T34_ship_refuses_when_origin_main_moved(self):
         """車道只是效率工具（範圍收斂後的定位）；main 的正確性靠推前 base 檢查：verify 之後 origin/main 被別棵推進，ship 不推、不回寫進度。"""
         self.verified()
+        self.remote_moved('src/hard.js', 'id: "fixture"\n// other window\n')
+        self.configure(allow_delivery=True, live_sha=self.git('rev-parse','HEAD'))
+        self.run_post('ship', 1, 'origin/main 比 HEAD 新'); self.no_delivery()
+
+    def remote_moved(self, rel, text):
+        """建一個 origin，別的 clone 改 rel 後推上 main（模擬別的視窗先上線）。"""
         remote = self.base/'remote.git'
-        subprocess.run([GIT, 'init', '-q', '--bare', str(remote)], check=True)
+        subprocess.run([GIT, 'init', '-q', '--bare', '--initial-branch=main', str(remote)], check=True)   # 不靠 init.defaultBranch（Codex 審 81d4bfc）
         self.git('remote', 'add', 'origin', str(remote))
         self.git('push', '-q', 'origin', 'HEAD:main')
         other = self.base/'other-clone'
-        subprocess.run([GIT, 'clone', '-q', str(remote), str(other)], check=True, env={**self.env, 'PATH': os.environ['PATH']})
+        subprocess.run([GIT, 'clone', '-q', '--branch', 'main', str(remote), str(other)], check=True, env={**self.env, 'PATH': os.environ['PATH']})
         for k, v in (('user.email', 'o@example.invalid'), ('user.name', 'o')):
             subprocess.run([GIT, '-C', str(other), 'config', k, v], check=True)
-        (other/'src/hard.js').write_text('id: "fixture"\n// other window\n')
-        subprocess.run([GIT, '-C', str(other), 'commit', '-qam', 'other'], check=True)
+        (other/rel).write_text(text)
+        if rel.startswith('src/') and rel.endswith('.js'):
+            (other/'index.html').write_text(''.join(x.read_text() for x in sorted((other/'src').glob('*.js'))))
+        subprocess.run([GIT, '-C', str(other), 'commit', '-qam', 'other window'], check=True)
         subprocess.run([GIT, '-C', str(other), 'push', '-q', 'origin', 'HEAD:main'], check=True)
-        self.configure(allow_delivery=True, live_sha=self.git('rev-parse','HEAD'))
-        self.run_post('ship', 1, 'origin/main 比 HEAD 新'); self.no_delivery()
+        return subprocess.check_output([GIT, '-C', str(other), 'rev-parse', 'HEAD'], text=True).strip()
+
+    def test_T35_verify_auto_rebases_when_only_hard_js_and_outputs_conflict(self):
+        """#4260 實測：排完隊才發現 base 舊、要手動 rebase 再排。verify 開頭自動 rebase：hard.js 兩篇都留、index.html 取 main 的再重建。"""
+        up = self.remote_moved('src/hard.js', 'id: "fixture"\nid: "other"\n')
+        self.write('src/hard.js', 'id: "fixture"\nid: "mine"\n'); self.write('index.html', 'id: "fixture"\nid: "mine"\n'); self.commit()
+        p = self.run_post('verify', 0, '已自動 rebase')
+        self.assertEqual(subprocess.run([GIT, 'merge-base', '--is-ancestor', up, 'HEAD'], cwd=self.repo).returncode, 0)
+        self.assertEqual((self.repo/'src/hard.js').read_text(), 'id: "fixture"\nid: "other"\nid: "mine"\n')
+        self.assertEqual((self.repo/'index.html').read_text(), 'id: "fixture"\nid: "other"\nid: "mine"\n', '建置產物要依合併後的來源重建')
+
+    def test_T36_verify_aborts_rebase_on_other_conflicts(self):
+        """非 hard.js／建置產物的衝突不自動合：還原到原 commit、擋下、不寫成功收據。"""
+        self.remote_moved('src/app.html', 'other\n')
+        self.write('src/app.html', 'mine\n'); self.commit()
+        head = self.git('rev-parse', 'HEAD')
+        self.run_post('verify', 1, '無法自動處理的衝突')
+        self.assertEqual(self.git('rev-parse', 'HEAD'), head)
+        self.assertFalse((self.repo/'.git/rebase-merge').exists() or (self.repo/'.git/rebase-apply').exists())
+        self.assertFalse(self.receipt().exists() and json.loads(self.receipt().read_text()).get('status') == 'success')
 
     def test_T24_old_runtime_artifacts_pruned(self):
         """快照每輪約 2.6 MB：超過一天的快照／log 目錄被清掉，一天內的（含背景 e2e 正在用的）保留。"""

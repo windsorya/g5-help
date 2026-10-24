@@ -333,14 +333,70 @@ def lane_confirm(root, until, what, lost):
         raise Rejected(f'{what}期間上線車道已被 {holder["root"]} 接手（租期過了）：請等它推完，rebase 後重新 verify')
 
 
-def base_current(root):
-    """排到車道後先看 origin/main 有沒有比 HEAD 新：舊了就 1 秒內擋下，不跑完 6 分鐘才在 ship 撞到。連不上只警告。"""
+def union_conflicts(text):
+    """把衝突標記換成「上游那段＋本棵那段」：src/hard.js 兩邊各在 LIST 尾端加一篇時，兩篇都留。合錯由接著跑的整套 verify 擋。"""
+    out, mode, up, mine = [], None, [], []
+    for line in text.splitlines(keepends=True):
+        if line.startswith('<<<<<<< '):
+            mode, up, mine = 'up', [], []
+        elif line.startswith('||||||| ') and mode:
+            mode = 'base'
+        elif line.startswith('=======') and mode:
+            mode = 'mine'
+        elif line.startswith('>>>>>>> ') and mode:
+            out += up + mine; mode = None
+        elif mode == 'up':
+            up.append(line)
+        elif mode == 'mine':
+            mine.append(line)
+        elif mode is None:
+            out.append(line)
+    if mode is not None:
+        raise Rejected('衝突標記不完整，未自動合併')
+    return ''.join(out)
+
+
+def auto_rebase(root, upstream):
+    """merge queue 的作法（GitHub merge queue／bors）：輪到你時把你接到最新 main 上再測，不把你踢回隊尾（#4260 實測：連 3 次排完隊才被告知要 rebase，每次白等約 5 分）。
+    只自動處理兩種衝突：建置產物（取 main 的，verify 會重建）、src/hard.js（兩邊都留）；其他衝突一律放棄 rebase、回到原狀擋下。"""
+    env = {**os.environ, 'GIT_EDITOR': 'true'}
+    run = lambda *a: subprocess.run(['git', *a], cwd=root, capture_output=True, text=True, timeout=120, env=env)
+    if run('status', '--porcelain', '--untracked-files=no').stdout.strip():
+        raise Rejected('origin/main 比 HEAD 新，而且有未提交的改動：先 commit，再 verify（會自動 rebase）')
+    before = run('rev-parse', 'HEAD').stdout.strip()
+    p = run('rebase', upstream)
+    for _ in range(50):   # cap-why: 每輪處理一個本棵 commit；本流程一篇最多幾個 commit，50 只是防無窮迴圈
+        if p.returncode == 0:
+            print(f'origin/main 比 HEAD 新：已自動 rebase（{before[:7]} → {run("rev-parse", "HEAD").stdout.strip()[:7]}），接著驗證', flush=True)
+            return
+        conflicted = [f for f in run('diff', '--name-only', '--diff-filter=U').stdout.split('\n') if f]
+        if not conflicted or not set(conflicted) <= OUTPUTS | {'src/hard.js'}:
+            run('rebase', '--abort')
+            raise Rejected('origin/main 比 HEAD 新，自動 rebase 有無法自動處理的衝突（' + ', '.join(conflicted) + '）：請手動 git rebase origin/main 後再 verify')
+        for f in conflicted:
+            if f == 'src/hard.js':
+                path = Path(root) / f
+                path.write_text(union_conflicts(path.read_text()))
+            else:
+                run('checkout', '--ours', '--', f)   # rebase 中 ours＝上游 main
+            run('add', '--', f)
+        p = run('rebase', '--continue')
+    run('rebase', '--abort')
+    raise Rejected('自動 rebase 沒有收斂，已還原：請手動 rebase')
+
+
+def base_current(root, auto=False):
+    """排到車道後先看 origin/main 有沒有比 HEAD 新：verify 開頭（auto）自動 rebase；ship 推前則舊了就擋。連不上只警告。"""
     p = subprocess.run(['git', 'fetch', '-q', 'origin', 'main'], cwd=root, capture_output=True, timeout=60)
     if p.returncode:
         print('警告：抓不到 origin/main，略過「base 是否最新」檢查', flush=True)
         return
-    p = subprocess.run(['git', 'merge-base', '--is-ancestor', 'FETCH_HEAD', 'HEAD'], cwd=root, capture_output=True, timeout=30)
+    upstream = subprocess.run(['git', 'rev-parse', 'FETCH_HEAD'], cwd=root, capture_output=True, text=True, timeout=30).stdout.strip()
+    p = subprocess.run(['git', 'merge-base', '--is-ancestor', upstream, 'HEAD'], cwd=root, capture_output=True, timeout=30)
     if p.returncode == 1:
+        if auto:
+            auto_rebase(root, upstream)
+            return
         raise Rejected('origin/main 比 HEAD 新：先 git rebase origin/main（src/hard.js 尾端衝突時兩篇都留、index.html 與採字檔取 main 的，verify 會重建），再 verify')
 
 
@@ -636,7 +692,7 @@ def main(argv=None):
                 lane_take(ROOT)
                 try:
                     with lane_heartbeat(ROOT) as lost:
-                        base_current(ROOT)
+                        base_current(ROOT, auto=True)
                         verify(ROOT, receipt)
                     try:
                         lane_confirm(ROOT, time.time() + LANE_SHIP_GRACE, 'verify ', lost)   # 留給自己的 ship
