@@ -528,6 +528,30 @@ class PostShip(unittest.TestCase):
         self.assertEqual((self.repo/'src/hard.js').read_text(), 'id: "fixture"\nid: "other"\nid: "mine"\n')
         self.assertEqual((self.repo/'index.html').read_text(), 'id: "fixture"\nid: "other"\nid: "mine"\n', '建置產物要依合併後的來源重建')
 
+    def test_T40_verify_failing_before_gates_still_revokes_old_success(self):
+        """Codex 窮舉審 c6b36da：新 verify 在排隊／base 檢查就失敗，舊的成功收據也要作廢（原規格：最新失敗使舊成功失效）。"""
+        self.verified()
+        self.assertEqual(json.loads(self.receipt().read_text())['status'], 'success')
+        self.remote_moved('src/app.html', 'other\n')
+        self.write('src/app.html', 'mine\n'); self.commit()
+        self.run_post('verify', 1, '無法自動處理的衝突')
+        self.assertNotEqual(json.loads(self.receipt().read_text()).get('status'), 'success')
+
+    def test_T41_merge_base_error_is_not_treated_as_up_to_date(self):
+        """Codex 窮舉審 c6b36da：merge-base 執行錯誤（rc=128）不得當成 base 已是最新。"""
+        m = self.load_gate()
+        real = m.subprocess.run
+        def fake(cmd, *a, **kw):
+            if cmd[:2] == ['git', 'fetch']: return m.subprocess.CompletedProcess(cmd, 0, '', '')
+            if cmd[:2] == ['git', 'rev-parse']: return m.subprocess.CompletedProcess(cmd, 0, 'deadbeef\n', '')
+            if cmd[:2] == ['git', 'merge-base']: return m.subprocess.CompletedProcess(cmd, 128, b'', b'fatal')
+            return real(cmd, *a, **kw)
+        m.subprocess.run = fake
+        try:
+            with self.assertRaises(m.Rejected): m.base_current(self.repo)
+        finally:
+            m.subprocess.run = real
+
     def test_T36_verify_aborts_rebase_on_other_conflicts(self):
         """非 hard.js／建置產物的衝突不自動合：還原到原 commit、擋下、不寫成功收據。"""
         self.remote_moved('src/app.html', 'other\n')

@@ -403,6 +403,8 @@ def base_current(root, auto=False):
         return
     upstream = subprocess.run(['git', 'rev-parse', 'FETCH_HEAD'], cwd=root, capture_output=True, text=True, timeout=30).stdout.strip()
     p = subprocess.run(['git', 'merge-base', '--is-ancestor', upstream, 'HEAD'], cwd=root, capture_output=True, timeout=30)
+    if p.returncode not in (0, 1):   # 128 等執行錯誤不得當成「base 已是最新」（Codex 窮舉審 c6b36da）
+        raise Rejected(f'無法判斷 origin/main 與 HEAD 的關係（git merge-base rc={p.returncode}），未繼續')
     if p.returncode == 1:
         if auto:
             auto_rebase(root, upstream)
@@ -723,6 +725,8 @@ def main(argv=None):
         with lock(ROOT) as receipt:
             prune(ROOT)
             if args[0] == 'verify':
+                # 新的一次 verify 一開始就撤銷舊的成功收據：排隊中斷、base 檢查失敗也不得留下可 ship 的舊 success（Codex 窮舉審 c6b36da；原規格 T16）
+                atomic_receipt(receipt, {'status': 'running', 'run_id': 'queue-' + uuid.uuid4().hex, 'started': time.time()})
                 lane_take(ROOT)
                 try:
                     with lane_heartbeat(ROOT) as lost:
