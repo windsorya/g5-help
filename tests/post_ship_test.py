@@ -482,6 +482,23 @@ class PostShip(unittest.TestCase):
         self.assertEqual(m.main(['verify']), 1)
         self.assertEqual(json.loads(self.receipt().read_text())['status'], 'failed')
 
+    def test_T34_ship_refuses_when_origin_main_moved(self):
+        """車道只是效率工具（範圍收斂後的定位）；main 的正確性靠推前 base 檢查：verify 之後 origin/main 被別棵推進，ship 不推、不回寫進度。"""
+        self.verified()
+        remote = self.base/'remote.git'
+        subprocess.run([GIT, 'init', '-q', '--bare', str(remote)], check=True)
+        self.git('remote', 'add', 'origin', str(remote))
+        self.git('push', '-q', 'origin', 'HEAD:main')
+        other = self.base/'other-clone'
+        subprocess.run([GIT, 'clone', '-q', str(remote), str(other)], check=True, env={**self.env, 'PATH': os.environ['PATH']})
+        for k, v in (('user.email', 'o@example.invalid'), ('user.name', 'o')):
+            subprocess.run([GIT, '-C', str(other), 'config', k, v], check=True)
+        (other/'src/hard.js').write_text('id: "fixture"\n// other window\n')
+        subprocess.run([GIT, '-C', str(other), 'commit', '-qam', 'other'], check=True)
+        subprocess.run([GIT, '-C', str(other), 'push', '-q', 'origin', 'HEAD:main'], check=True)
+        self.configure(allow_delivery=True, live_sha=self.git('rev-parse','HEAD'))
+        self.run_post('ship', 1, 'origin/main 比 HEAD 新'); self.no_delivery()
+
     def test_T24_old_runtime_artifacts_pruned(self):
         """快照每輪約 2.6 MB：超過一天的快照／log 目錄被清掉，一天內的（含背景 e2e 正在用的）保留。"""
         old = [self.repo/'.post-snapshots/old-run', self.repo/'.post-state/old-run']

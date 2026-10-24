@@ -235,6 +235,11 @@ def lock(root):
 # （zh-q52-siyi：rebase 後整套重跑 6 分鐘；同時三組瀏覽器搶 CPU，每輪採字由約 1 分拖到 5–6 分）。
 # 車道存在所有工作樹共用的 git common dir：verify 開始先排隊拿車道，成功後保留給自己的 ship，ship 結束（成或敗）交還。
 # 當掉的視窗靠到期自動讓出。
+# 定位（2026-10-24 範圍收斂，升級階梯：Codex 審 c6b36da／d48c755／28fbc21 連三輪 FAIL、設計者出租約 token＋狀態機方案 A，成本高）：
+#   車道＝**排隊與提早偵測的效率工具，不是安全閘**；lane_heartbeat／lane_confirm 盡力偵測「中途被接手」，擋得到就早點擋。
+#   main 的正確性（推上去的一定是驗過的那個組合）不靠車道，靠兩道確定的檢查：
+#   ①ship 推前 base_current：origin/main 比受測 commit 新就不推；②git push 固定 SHA、不 force，非快轉一律被遠端拒絕 ⇒「推不上去」、不回寫進度。
+#   車道失誤的最壞結果＝白跑一輪 verify，不是錯誤上線。要升級成硬保證時照設計者方案 A（devlog 2026-10-24 第52題復盤）。
 # cap-why: verify 在負載 25–43 下實測 314–359 秒（2026-10-24），排隊者最多等一輪 verify＋ship ⇒ 車道 15 分到期
 LANE_TTL = 15 * 60
 # cap-why: verify 成功到 ship 中間只有 add／commit（實測 1 分內）；10 分鐘還沒 ship 就讓給排隊的人
@@ -648,7 +653,7 @@ def main(argv=None):
                 try:
                     with lane_heartbeat(ROOT) as lost:
                         ship(ROOT, receipt, args[1], args[2] if len(args) == 3 else None,
-                             before_push=lambda: lane_confirm(ROOT, time.time() + LANE_TTL, 'ship ', lost))
+                             before_push=lambda: (lane_confirm(ROOT, time.time() + LANE_TTL, 'ship ', lost), base_current(ROOT)))
                 finally:
                     lane_release(ROOT)
     except (Rejected, OSError, ValueError, subprocess.SubprocessError, KeyboardInterrupt) as exc:
