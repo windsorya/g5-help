@@ -1,7 +1,7 @@
 #!/bin/zsh
 # 送 Codex 唯讀審（核字形、內容審、練習審共用）。
 #   zsh tools/codex_send.sh <brief.md> <輸出.txt> [照片 ...]
-# 輸出.txt 是完整紀錄（最後一行 rc=N）；<輸出>.answer.txt 只留 Codex 最後的回答。
+# 輸出.txt 是完整紀錄（最後一行 rc=N）；<輸出>.answer.txt 只留 Codex 最後的回答（codex exec -o）。
 # 2026-10-24 交辦 #4293：#4269 一篇就踩了三個起跑錯，各浪費一輪——
 #   ① -i 放在 prompt 前面會把 prompt 吃掉（rc=1「No prompt provided」，#4247 也踩過）
 #   ② 讀取範圍圍籬不是固定格式，被外送圍籬閘門擋下
@@ -35,9 +35,9 @@ fi
 imgs=(); for img in "$@"; do imgs+=(-i ${img:A}); done
 cd $dir || exit 2
 # prompt 一定在 -i 之前；stdin 接 /dev/null，免得 codex 等 stdin
-codex exec --skip-git-repo-check --sandbox read-only "$(cat $final)" "${imgs[@]}" < /dev/null > $out 2>&1
+answer=${out:r}.answer.txt; rm -f $answer
+# 回答用官方 -o／--output-last-message 取，不從紀錄裡猜（回答本身有「codex」「tokens used」行也不會截斷；Codex 審 3a5da2a P2）
+codex exec --skip-git-repo-check --sandbox read-only -o $answer "$(cat $final)" "${imgs[@]}" < /dev/null > $out 2>&1
 rc=$?
 print "rc=$rc" >> $out
-# 只留最後一段回答：最後一個單獨的「codex」行之後、到「tokens used」為止
-awk '/^codex$/{buf=""; on=1; next} /^tokens used/{on=0} on{buf=buf $0 "\n"} END{printf "%s", buf}' $out | grep -v '^hook: ' > ${out:r}.answer.txt
 exit $rc

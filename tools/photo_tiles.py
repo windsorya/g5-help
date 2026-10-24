@@ -35,9 +35,9 @@ def main(argv=None):
     a = ap.parse_args(argv)
     try:
         rows, cols = (int(x) for x in a.grid.lower().split("x"))
-        assert rows > 0 and cols > 0 and a.zoom > 0
+        assert rows > 0 and cols > 0 and 0.5 <= a.zoom <= 8
     except (ValueError, AssertionError):
-        ap.error("--grid 要寫成 3x3 這種正整數格式，--zoom 要大於 0")
+        ap.error("--grid 要寫成 3x3 這種正整數格式，--zoom 要在 0.5～8 之間")   # 太小會裁成 0 像素崩潰（Codex 審 3a5da2a P3）
     if not Path(a.photo).is_file():
         ap.error(f"找不到照片：{a.photo}")
     img = ImageOps.exif_transpose(Image.open(a.photo)).convert("RGB")   # 手機照片常帶旋轉標記
@@ -46,6 +46,9 @@ def main(argv=None):
     all_cells = list(cells(w, h, rows, cols))
     if a.box and a.box not in {n for n, _, _ in all_cells}:
         ap.error(f"沒有 {a.box} 這一格；可用 r1c1～r{rows}c{cols}")
+    names = [f"{n}_x{a.zoom:g}.png" if a.box else f"{n}.png" for n, _, _ in all_cells if not a.box or n == a.box] + ([] if a.box else ["overview.png"])
+    if Path(a.photo).resolve() in {(out / n).resolve() for n in names}:
+        ap.error("輸出會蓋掉原照片：換一個輸出目錄")   # Codex 審 3a5da2a P2：照片放在輸出目錄且同名時會被覆寫
     written = []
     for name, box, _ in all_cells:
         if a.box and name != a.box:

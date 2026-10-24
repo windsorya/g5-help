@@ -111,9 +111,18 @@ class PhotoTiles(unittest.TestCase):   # 交辦 #4293：看照片不再猜座標
         self.assertEqual(self.pt.main([str(self.photo), str(out), "--box", "r2c2", "--zoom", "4"]), 0)
         self.assertTrue((out / "r2c2_x4.png").is_file())
         for bad in (["nope.jpg", str(out)], [str(self.photo), str(out), "--grid", "0x3"],
-                    [str(self.photo), str(out), "--box", "r9c9"], [str(self.photo), str(out), "--zoom", "0"]):
+                    [str(self.photo), str(out), "--box", "r9c9"], [str(self.photo), str(out), "--zoom", "0"],
+                    [str(self.photo), str(out), "--zoom", "0.001"]):
             with self.subTest(bad=bad), self.assertRaises(SystemExit):
                 self.pt.main(bad)
+
+
+    def test_never_overwrites_source_photo(self):   # Codex 審 3a5da2a：照片在輸出目錄裡且同名
+        from PIL import Image
+        src = self.d / "r1c1.png"; Image.new("RGB", (300, 400), "white").save(src)
+        with self.assertRaises(SystemExit):
+            self.pt.main([str(src), str(self.d)])
+        self.assertEqual(Image.open(src).size, (300, 400))
 
 
 class CodexSend(unittest.TestCase):   # 交辦 #4293：prompt 一定在 -i 前、檔首有圍籬、在暫存目錄也能跑
@@ -122,7 +131,8 @@ class CodexSend(unittest.TestCase):   # 交辦 #4293：prompt 一定在 -i 前�
         self.os, self.sp = os, subprocess
         self.d = Path(tempfile.mkdtemp()); self.bin = self.d / "bin"; self.bin.mkdir()
         fake = self.bin / "codex"
-        fake.write_text("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$FAKE_ARGS\"\nprintf 'header\\ncodex\\n答案第一行\\nhook: Stop\\ntokens used\\n9\\n'\nexit \"${FAKE_RC:-0}\"\n")
+        # 假 codex：記下參數；-o 後面那個檔寫入回答（回答裡故意含「codex」「tokens used」獨立行，舊的紀錄擷取法會截斷）
+        fake.write_text("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$FAKE_ARGS\"\nwhile [ $# -gt 0 ]; do if [ \"$1\" = -o ]; then printf '答案第一行\\ncodex\\ntokens used\\n最後一行\\n' > \"$2\"; fi; shift; done\nprintf 'header\\ncodex\\n雜訊\\ntokens used\\n9\\n'\nexit \"${FAKE_RC:-0}\"\n")
         fake.chmod(0o755)
         self.brief = self.d / "brief.md"; self.brief.write_text("請核字\n")
         self.photo = self.d / "p.jpg"; self.photo.write_bytes(b"x")
@@ -142,7 +152,8 @@ class CodexSend(unittest.TestCase):   # 交辦 #4293：prompt 一定在 -i 前�
         self.assertIn("請核字", "\n".join(args[prompt_at:args.index("-i")]))
         self.assertEqual(args[args.index("-i") + 1], str(self.photo.resolve()))
         self.assertTrue(out.read_text().rstrip().endswith("rc=0"))
-        self.assertEqual((self.d / "out.answer.txt").read_text(), "答案第一行\n")
+        self.assertEqual((self.d / "out.answer.txt").read_text(), "答案第一行\ncodex\ntokens used\n最後一行\n")
+        self.assertEqual(Path(args[args.index("-o") + 1]).resolve(), (self.d / "out.answer.txt").resolve())
 
     def test_existing_fence_not_doubled_and_failures(self):
         self.brief.write_text("## 🔒 讀取範圍硬邊界（自訂）\n內容\n")
@@ -157,7 +168,7 @@ class CodexSend(unittest.TestCase):   # 交辦 #4293：prompt 一定在 -i 前�
         self.brief.write_text("請確認讀取範圍硬邊界是否足夠。\n")
         self.assertEqual(self.run_send(str(self.brief), str(self.d / "o.txt")).returncode, 0)
         args = (self.d / "args.txt").read_text().split("\n")
-        self.assertTrue(args[args.index("read-only") + 1].startswith("## 🔒 讀取範圍硬邊界"), args[:6])
+        self.assertTrue(args[args.index("-o") + 2].startswith("## 🔒 讀取範圍硬邊界"), args[:7])
 
     def test_relative_output_path(self):   # Codex 審 d18b20f：相對輸出路徑不能因 cd 錯位
         sub = self.d / "docs"; sub.mkdir(); (sub / "b.md").write_text("x\n")
