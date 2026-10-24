@@ -547,7 +547,7 @@ function readFrac(box, key){
   return {n:pn.empty || pn.bad ? NaN : pn.v, d:pd.empty || pd.bad ? NaN : pd.v, empty:!!(pn.empty || pd.empty), bad:!!(pn.bad || pd.bad)};
 }
 function lock(box){ each(box.querySelectorAll("input,button[data-check],button[data-hint]"), function(x){ x.disabled = true; }); }
-function need(){ return E.kind === "steps" ? Math.min(3, (E.practice || []).length) : 3; }   // 學會＝連續答對幾題（練習題少於 3 題就全對）
+function need(){ return E.kind === "steps" ? Math.min(E.practiceNeed || 3, (E.practice || []).length) : 3; }   // 學會＝連續答對幾題（練習題少於 3 題就全對）；篇可設 practiceNeed（tests/guessmatrix.js，交辦 #4248）
 function dots(){ var h = ""; for (var i = 0; i < need(); i++) h += '<i class="' + (i < Math.min(st.streak, need()) ? "on" : "") + '"></i>'; return '<span class="dots" aria-label="連續自己做對 ' + st.streak + ' 題">' + h + '</span>'; }
 function openPractice(){ var P = $("#practice"); P.hidden = false; renderPractice(); reveal(P); }
 // 填了字但不是整數、或還有格子沒填：講清楚，不算答錯

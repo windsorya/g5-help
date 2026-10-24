@@ -554,3 +554,18 @@ test("S10 題目鍵：帶分數、小數點不會和別的數字撞鍵（Opus �
   assert.notEqual(H.practiceId(q("1.5 和 2 哪個大？")), H.practiceId(q("15 和 2 哪個大？")));
   assert.equal(H.practiceId(q("1  1/2 和 2/3 哪個大？")), H.practiceId(q("1 1/2和 2/3哪個大？")), "數字間空白幾格、文字旁空白都不影響");
 });
+
+// 交辦 #4248：設了 practiceNeed 的篇（學會＝連對幾題），練習要過封版猜法矩陣（tests/guessmatrix.js），最長連對 < practiceNeed
+test("快篩：設 practiceNeed 的篇，封版猜法矩陣連對不到學會門檻", () => {
+  const G = require("./guessmatrix.js");
+  // 舊紀錄的 mastered 會一直保留（Codex 驗收方案 A 抓到）：練習題已用門檻 3 上線過的篇，事後加 practiceNeed 會讓舊的「學會了」假達標。
+  // ⇒ 只准「練習題第一次上線就帶著 practiceNeed」的篇；加進這張清單前，先確認正式站那篇還沒有 practice。
+  const NEED_FROM_FIRST_PUBLISH = ["zh-q62-ji"];   // 2026-10-24 核對：正式站 zh-q62-ji 只有第一段解說，沒有 practice
+  H.LIST.filter(e => e.practiceNeed).forEach(e => {
+    assert.ok(NEED_FROM_FIRST_PUBLISH.includes(e.id), e.id + " 設了 practiceNeed，但不在「練習題第一次上線就帶門檻」清單：舊的學會紀錄會假達標");
+    assert.ok(Number.isInteger(e.practiceNeed) && e.practiceNeed >= 3 && e.practiceNeed <= e.practice.length, e.id + " practiceNeed 要是 3～練習題數的整數");
+    assert.equal(G.strategies(e.practice).length, 3992 + 19 * e.practice.length, "矩陣條數變了＝封版被改");
+    const w = G.worst(e.practice);
+    assert.ok(w.streak < e.practiceNeed, e.id + "：猜法「" + w.name + "」能連對 " + w.streak + " 題，達到學會門檻 " + e.practiceNeed);
+  });
+});

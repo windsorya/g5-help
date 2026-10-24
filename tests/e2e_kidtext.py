@@ -198,7 +198,7 @@ def steps_cases(B, eid):
     r.snap("答案")
     B.absorb(r.close(), [f"{eid}:lesson"])
     n = len(e.get("practice") or [])
-    need = min(3, n)
+    need = min(e.get("practiceNeed") or 3, n)   # 同 src/app.html need()：篇可設 practiceNeed（交辦 #4248）
     # 直接練習（全新紀錄、沒看教學）。沒有練習題的篇（先上解說、練習題第二階段補，#2528）頁面不放這顆按鈕（app.html drawTopBtns）
     if n:
         r = Run(B, B.device, f"{eid}:direct")
