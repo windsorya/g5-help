@@ -39,7 +39,8 @@ if name == 'git':
         if cfg.get('late_head'):
             subprocess.check_call([os.environ['FIX_GIT'], 'update-ref', 'HEAD', cfg['late_head']])
         record('push'); sys.exit(0)
-    if not args or args[0] not in ['ls-files','ls-tree','show','rev-parse','cat-file','diff','status']: deny()
+    # fetch／merge-base：上線車道的 base 檢查（fixture 沒有 remote ⇒ fetch 失敗、只警告）
+    if not args or args[0] not in ['ls-files','ls-tree','show','rev-parse','cat-file','diff','status','fetch','merge-base']: deny()
     sys.exit(subprocess.call([os.environ['FIX_GIT'], *args]))
 elif name == 'node':
     if args == ['--version']: print('v22.0.0-fixture'); sys.exit(0)
@@ -399,6 +400,31 @@ class PostShip(unittest.TestCase):
         """CC 的 shell 帶 GIT_EDITOR／GIT_PAGER：不影響受測內容，不得拒跑；GIT_DIR 這類換內容來源的仍要拒。"""
         self.run_post('verify',1,'GIT_INDEX_FILE',extra_env={'GIT_INDEX_FILE':str(self.base/'other.index')})
         self.run_post('verify',0,extra_env={'GIT_EDITOR':'true','GIT_PAGER':'cat'})
+
+    def lane_file(self):
+        return self.repo/'.git/post-lane.json'
+
+    def test_T25_lane_held_by_other_worktree_blocks_ship(self):
+        """上線車道（#4247 復盤）：別的工作樹還在驗證／上線，本棵不得推（推了對方的 verify 就作廢）；交還後照常推，推完交還車道。"""
+        self.verified()
+        other = self.base/'other-worktree'; other.mkdir()
+        self.lane_file().write_text(json.dumps({'root': str(other), 'until': time.time()+600, 'pid': 1}))
+        self.configure(allow_delivery=True, live_sha=self.git('rev-parse','HEAD'))
+        self.run_post('ship',1,'上線車道由'); self.no_delivery()
+        self.lane_file().unlink()
+        self.shipped()
+        self.assertFalse(self.lane_file().exists(), 'ship 結束要交還車道')
+
+    def test_T26_lane_expired_or_gone_is_ignored_and_verify_keeps_lane(self):
+        """到期或持有者資料夾已不在＝當掉的視窗，自動讓出；verify 成功後車道保留給自己的 ship，失敗就交還。"""
+        self.lane_file().write_text(json.dumps({'root': str(self.base/'gone'), 'until': time.time()+600, 'pid': 1}))
+        self.run_post('verify',0)
+        held = json.loads(self.lane_file().read_text())
+        self.assertEqual(held['root'], str(self.repo.resolve()));self.assertGreater(held['until'], time.time())
+        self.lane_file().write_text(json.dumps({'root': str(self.base), 'until': time.time()-1, 'pid': 1}))
+        self.configure(standard=1)
+        self.run_post('verify',1)
+        self.assertFalse(self.lane_file().exists(), 'verify 失敗要交還車道')
 
     def test_T24_old_runtime_artifacts_pruned(self):
         """快照每輪約 2.6 MB：超過一天的快照／log 目錄被清掉，一天內的（含背景 e2e 正在用的）保留。"""

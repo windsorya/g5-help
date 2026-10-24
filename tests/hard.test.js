@@ -179,6 +179,38 @@ test("快篩：影片標題與說明裡的難詞要在同一段附白話（影�
   assert.deepEqual(problems, []);
 });
 
+// 2026-10-24 交辦 #4247 復盤：zh-q52-siyi 第 2 步標題「司儀是做什麼的」比下一行說明裡的「司儀（白話）」先出現，
+// 舊快篩只看影片區、node 用詞測試讀的是採字結果 ⇒ 要等兩個瀏覽器採字 5 分鐘才紅，整套 verify 重跑（家長送出→上線 27.3 分的最大一段）。
+// 這裡照教學區畫面順序（開場白 → 每一步：標題、說明、確認題與選項、選對回饋 → 答案 → 寫法）接成一串，
+// 每個難詞第一次出現要附白話；判準同主閘 KG.glossed。答錯才出現的 why 不算第一次（主閘也是依實際畫面順序）。主閘仍是真瀏覽器採字。
+test("快篩：教學區照畫面順序，難詞第一次出現就要附白話（含步驟標題、確認題）", () => {
+  const problems = [];
+  H.LIST.filter((e) => e.kind === "steps").forEach((e) => {
+    const parts = [e.lead];
+    e.steps.forEach((st) => { parts.push(st.title, st.say); if (st.check) parts.push(st.check.q, ...(st.check.opts || []), st.check.ok); });
+    parts.push(e.answer, e.write);
+    const seq = parts.map((x) => String(x || "").replace(/<[^>]*>/g, "\n")).join("\n");
+    Object.keys(H.HARD_WORDS).concat(Object.keys(e.words || {})).forEach((w) => {
+      const at = seq.indexOf(w);
+      if (at >= 0 && !KG.glossed(seq, w, at)) problems.push(e.id + " 教學區第一次出現的「" + w + "」沒附白話（標題、確認題也算）：" + seq.slice(Math.max(0, at - 12), at + 20).replace(/\n/g, " ／ "));
+    });
+  });
+  // 練習題：每一題、每個選錯的畫面各自是一段（主閘 resume 案例「第 k 題選錯 i」），題目＋選項＋那個選項的 why 裡第一次出現的難詞要附白話
+  // （#4247 第二段：why 寫「要寫伺機」沒附白話，採字 4 分才紅）
+  H.LIST.filter((e) => e.kind === "steps").forEach((e) => H.practiceAll(e).forEach((q, k) => (q.opts || []).forEach((o, i) => {
+    const seq = [q.q].concat(q.opts, i === q.a ? [] : [(q.why || [])[i]]).map((x) => String(x || "").replace(/<[^>]*>/g, "\n")).join("\n");
+    // 只查本篇 words：全站 HARD_WORDS 在練習段主閘另有處理（板根那篇照採字結果是綠的），快篩不比主閘嚴
+    Object.keys(e.words || {}).forEach((w) => {
+      const at = seq.indexOf(w);
+      if (at >= 0 && !KG.glossed(seq, w, at)) problems.push(e.id + " 練習第 " + (k + 1) + " 題" + (i === q.a ? "" : "選錯 " + (i + 1)) + "：第一次出現的「" + w + "」沒附白話：" + seq.slice(Math.max(0, at - 12), at + 20).replace(/\n/g, " ／ "));
+    });
+  })));
+  assert.deepEqual(problems, []);
+  // 自檢：本次事故的形狀（標題先出現、下一行才附白話）要紅
+  const seqBad = "司的意思\n司儀是做什麼的\n司儀（照順序說下一項做什麼的人）會拿麥克風。";
+  assert.equal(KG.glossed(seqBad, "司儀", seqBad.indexOf("司儀")), false, "標題先出現、說明才附白話要判違規");
+});
+
 test("快篩：數學題的答案與每一題比大小，用 frac.js 再算一次", () => {
   const two = (s) => { const m = String(s).match(/(\d+)\/(\d+)\D+?(\d+)\/(\d+)/); return m ? [{ n: +m[1], d: +m[2] }, { n: +m[3], d: +m[4] }] : null; };
   const judge = (q, where) => {

@@ -230,6 +230,83 @@ def lock(root):
         yield state / 'latest.json'
 
 
+# 上線車道（2026-10-24 交辦 #4247 復盤）：三個視窗各在自己的工作樹做難題，誰先推 main，其他人已跑完的 verify 就作廢
+# （zh-q52-siyi：rebase 後整套重跑 6 分鐘；同時三組瀏覽器搶 CPU，每輪採字由約 1 分拖到 5–6 分）。
+# 車道存在所有工作樹共用的 git common dir：verify 開始先排隊拿車道，成功後保留給自己的 ship，ship 結束（成或敗）交還。
+# 當掉的視窗靠到期自動讓出。
+# cap-why: verify 在負載 25–43 下實測 314–359 秒（2026-10-24），排隊者最多等一輪 verify＋ship ⇒ 車道 15 分到期
+LANE_TTL = 15 * 60
+# cap-why: verify 成功到 ship 中間只有 add／commit（實測 1 分內）；10 分鐘還沒 ship 就讓給排隊的人
+LANE_SHIP_GRACE = 10 * 60
+
+
+def lane_paths(root):
+    p = subprocess.run(['git', 'rev-parse', '--git-common-dir'], cwd=root, capture_output=True, text=True, timeout=30)
+    if p.returncode:
+        raise Rejected('讀不到 git common dir，無法排上線車道')
+    common = (Path(root) / p.stdout.strip()).resolve()
+    return common / 'post-lane.lock', common / 'post-lane.json'
+
+
+def lane_holder(state_file):
+    try:
+        cur = json.loads(state_file.read_text())
+    except (OSError, ValueError):
+        return None
+    if not isinstance(cur, dict) or cur.get('until', 0) < time.time() or not Path(str(cur.get('root', ''))).is_dir():
+        return None
+    return cur
+
+
+def lane_update(root, until, take):
+    """take=True：沒人持有（或是自己）就寫入並回 None，否則回持有者；take=False：自己持有才改到期時間／交還（until=0）。"""
+    lock_file, state_file = lane_paths(root)
+    root = Path(root).resolve()   # /var 與 /private/var 這類別名要當成同一棵
+    with lock_file.open('a') as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        cur = lane_holder(state_file)
+        mine = cur is not None and cur.get('root') == str(root)
+        if cur is not None and not mine:
+            return cur
+        if take or mine:
+            if until:
+                tmp = state_file.with_name(state_file.name + '.tmp-' + uuid.uuid4().hex)
+                tmp.write_text(json.dumps({'root': str(root), 'until': until, 'pid': os.getpid()}))
+                os.replace(tmp, state_file)
+            else:
+                state_file.unlink(missing_ok=True)
+        return None
+
+
+def lane_take(root):
+    last = 0
+    while True:
+        holder = lane_update(root, time.time() + LANE_TTL, True)
+        if holder is None:
+            return
+        if time.time() - last >= 60:
+            left = max(0, int(holder['until'] - time.time()))
+            print(f'上線車道由 {holder["root"]} 使用中（最晚 {left // 60} 分 {left % 60} 秒後讓出）；排隊等它推完', flush=True)
+            last = time.time()
+        time.sleep(10)
+
+
+def lane_release(root):
+    with contextlib.suppress(Exception):
+        lane_update(root, 0, False)
+
+
+def base_current(root):
+    """排到車道後先看 origin/main 有沒有比 HEAD 新：舊了就 1 秒內擋下，不跑完 6 分鐘才在 ship 撞到。連不上只警告。"""
+    p = subprocess.run(['git', 'fetch', '-q', 'origin', 'main'], cwd=root, capture_output=True, timeout=60)
+    if p.returncode:
+        print('警告：抓不到 origin/main，略過「base 是否最新」檢查', flush=True)
+        return
+    p = subprocess.run(['git', 'merge-base', '--is-ancestor', 'FETCH_HEAD', 'HEAD'], cwd=root, capture_output=True, timeout=30)
+    if p.returncode == 1:
+        raise Rejected('origin/main 比 HEAD 新：先 git rebase origin/main（src/hard.js 尾端衝突時兩篇都留、index.html 與採字檔取 main 的，verify 會重建），再 verify')
+
+
 # 只管「改變 git 讀哪份內容」的變數；編輯器／分頁器／推送傳輸不影響受測內容。
 # 2026-10-22 真入口首跑：Claude Code 的 shell 一律帶 GIT_EDITOR，原寫法讓 CC 每次 verify 都被拒（離線替身測試的 env 是乾淨的，抓不到）。
 GIT_ENV_OK = {'GIT_CONFIG_NOSYSTEM', 'GIT_CONFIG_GLOBAL', 'GIT_EDITOR', 'GIT_SEQUENCE_EDITOR', 'GIT_PAGER',
@@ -517,9 +594,22 @@ def main(argv=None):
         with lock(ROOT) as receipt:
             prune(ROOT)
             if args[0] == 'verify':
-                verify(ROOT, receipt)
+                lane_take(ROOT)
+                try:
+                    base_current(ROOT)
+                    verify(ROOT, receipt)
+                except BaseException:
+                    lane_release(ROOT)
+                    raise
+                lane_update(ROOT, time.time() + LANE_SHIP_GRACE, False)   # 留給自己的 ship
             else:
-                ship(ROOT, receipt, args[1], args[2] if len(args) == 3 else None)
+                holder = lane_update(ROOT, time.time() + LANE_SHIP_GRACE, True)
+                if holder is not None:
+                    raise Rejected(f'上線車道由 {holder["root"]} 使用中：等它推完，rebase 後重新 verify')
+                try:
+                    ship(ROOT, receipt, args[1], args[2] if len(args) == 3 else None)
+                finally:
+                    lane_release(ROOT)
     except (Rejected, OSError, ValueError, subprocess.SubprocessError, KeyboardInterrupt) as exc:
         print(f'停止：{exc}；未完成發布', flush=True)
         return 1
