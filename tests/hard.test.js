@@ -188,21 +188,28 @@ test("快篩：教學區與練習每句不超過句長上限（含步驟標題�
   // 對齊主閘（Codex 審 85491f1 FAIL 七項）：上限用 KG.MAX 固定值；innerHTML 欄位（標題、說明、題幹、answer、write）原始碼換行照 white-space:normal 併成一行，
   // <br> 與區塊標籤才斷行、其餘標籤拿掉；esc／textContent 欄位（選項、why、ok）是純文字，不當 HTML 清；選對時看不到 why[a]，不量。
   const lim = KG.MAX, problems = [];
-  const html = (x) => String(x == null ? "" : x).replace(/\s*\n\s*/g, " ").replace(/<br\s*\/?>|<\/?(p|div|li|ul|ol|h\d|section)\b[^>]*>/gi, "\n").replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " ").replace(/&[a-z]+;/g, "");
-  const text = (x) => String(x == null ? "" : x).replace(/\s*\n\s*/g, " ");
+  // 第 2 輪（Codex 審 babaaa7）：回饋 .fb 是 white-space:pre-line，why／ok 的換行照斷；HTML 實體解碼後再計字（不是刪掉）
+  const ENT = {amp: "&", lt: "<", gt: ">", quot: "\"", apos: "'", nbsp: " "};
+  const decode = (s) => s.replace(/&#x([0-9a-f]+);/gi, (m, h) => String.fromCodePoint(parseInt(h, 16))).replace(/&#(\d+);/g, (m, d) => String.fromCodePoint(+d)).replace(/&([a-z]+);/gi, (m, n) => (n.toLowerCase() in ENT ? ENT[n.toLowerCase()] : m));
+  const html = (x) => decode(String(x == null ? "" : x).replace(/\s*\n\s*/g, " ").replace(/<br\s*\/?>|<\/?(p|div|li|ul|ol|h\d|section)\b[^>]*>/gi, "\n").replace(/<[^>]+>/g, ""));
+  const chip = (x) => String(x == null ? "" : x).replace(/\s*\n\s*/g, " ");   // 選項按鈕：esc 後 white-space:normal
+  const fbText = (x) => String(x == null ? "" : x);                          // 回饋：textContent＋pre-line，換行保留
   const why = (q) => (q.why || []).filter((w, k) => k !== q.a);
   H.LIST.filter((e) => e.kind === "steps").forEach((e) => {
-    const h = [e.lead, e.answer, e.write], t = [];
-    (e.steps || []).forEach((s) => { h.push(s.title, s.say); if (s.check) { h.push(s.check.q); t.push(s.check.ok, ...(s.check.opts || []), ...why(s.check)); } });
-    (H.practiceAll ? H.practiceAll(e) : (e.practice || [])).forEach((q) => { h.push(q.q); t.push(q.ok, ...(q.opts || []), ...why(q)); });
-    h.map(html).concat(t.map(text)).forEach((x) => KG.sentences(x).forEach((s) => { if (KG.countChars(s) > lim) problems.push(e.id + " " + KG.countChars(s) + " 字（上限 " + lim + "）：" + s); }));
+    const h = [e.lead, e.answer, e.write], c = [], f = [];
+    (e.steps || []).forEach((s) => { h.push(s.title, s.say); if (s.check) { h.push(s.check.q); c.push(...(s.check.opts || [])); f.push(s.check.ok, ...why(s.check)); } });
+    (H.practiceAll ? H.practiceAll(e) : (e.practice || [])).forEach((q) => { h.push(q.q); c.push(...(q.opts || [])); f.push(q.ok, ...why(q)); });
+    h.map(html).concat(c.map(chip), f.map(fbText)).forEach((x) => KG.sentences(x).forEach((s) => { if (KG.countChars(s) > lim) problems.push(e.id + " " + KG.countChars(s) + " 字（上限 " + lim + "）：" + s); }));
   });
   assert.deepEqual(problems, []);
   // 自檢：Codex 的七個反例
   const one = (pair) => KG.sentences(pair[0](pair[1])).some((s) => KG.countChars(s) > lim);
   assert.equal(one([html, "<p>" + "甲".repeat(25) + "</p><p>" + "乙".repeat(25) + "</p>"]), false, "兩個 <p> 各 25 字不合併");
   assert.equal(one([html, "甲".repeat(25) + "\n" + "乙".repeat(25)]), true, "原始碼換行照畫面併成 50 字");
-  assert.equal(one([text, "甲".repeat(38) + "<乙>"]), true, "純文字的 <乙> 照字面算 41 字");
+  assert.equal(one([chip, "甲".repeat(38) + "<乙>"]), true, "純文字的 <乙> 照字面算 41 字");
+  assert.equal(one([fbText, "甲".repeat(25) + "\n" + "乙".repeat(25)]), false, "回饋 pre-line：換行後是兩句");
+  assert.equal(one([html, "&#30002;".repeat(6)]), false, "實體解碼成六個甲");
+  assert.equal(one([html, "甲".repeat(40) + "&amp;"]), true, "&amp; 解碼後 41 字");
   assert.deepEqual(why({a: 0, why: ["甲".repeat(41), "短"]}), ["短"], "選對時看不到的 why[a] 不量");
 });
 
