@@ -87,5 +87,72 @@ class VideoCheck(unittest.TestCase):
         self.assertEqual((rc, seen), (0, ["EEEEEEEEEEE"]))
 
 
+class PhotoTiles(unittest.TestCase):   # 交辦 #4293：看照片不再猜座標
+    def setUp(self):
+        from PIL import Image
+        import photo_tiles
+        self.pt = photo_tiles
+        self.d = Path(tempfile.mkdtemp()); self.photo = self.d / "p.jpg"
+        Image.new("RGB", (300, 400), "white").save(self.photo)
+
+    def test_grid_covers_whole_photo_with_overlap(self):
+        cells = list(self.pt.cells(300, 400, 3, 3))
+        self.assertEqual(len(cells), 9)
+        self.assertEqual(min(b[0] for _, b, _ in cells), 0); self.assertEqual(max(b[2] for _, b, _ in cells), 300)
+        self.assertEqual(min(b[1] for _, b, _ in cells), 0); self.assertEqual(max(b[3] for _, b, _ in cells), 400)
+        _, (x0, _, x1, _), _ = cells[1]
+        self.assertLess(x0, 100); self.assertGreater(x1, 200)   # 中間那欄左右都多切一點，字不會剛好被切在邊上
+
+    def test_outputs_and_errors(self):
+        out = self.d / "t"
+        self.assertEqual(self.pt.main([str(self.photo), str(out)]), 0)
+        self.assertEqual(sorted(p.name for p in out.iterdir())[0:2], ["overview.png", "r1c1.png"])
+        self.assertEqual(len(list(out.glob("r*c*.png"))), 9)
+        self.assertEqual(self.pt.main([str(self.photo), str(out), "--box", "r2c2", "--zoom", "4"]), 0)
+        self.assertTrue((out / "r2c2_x4.png").is_file())
+        for bad in (["nope.jpg", str(out)], [str(self.photo), str(out), "--grid", "0x3"],
+                    [str(self.photo), str(out), "--box", "r9c9"], [str(self.photo), str(out), "--zoom", "0"]):
+            with self.subTest(bad=bad), self.assertRaises(SystemExit):
+                self.pt.main(bad)
+
+
+class CodexSend(unittest.TestCase):   # 交辦 #4293：prompt 一定在 -i 前、檔首有圍籬、在暫存目錄也能跑
+    def setUp(self):
+        import os, subprocess
+        self.os, self.sp = os, subprocess
+        self.d = Path(tempfile.mkdtemp()); self.bin = self.d / "bin"; self.bin.mkdir()
+        fake = self.bin / "codex"
+        fake.write_text("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$FAKE_ARGS\"\nprintf 'header\\ncodex\\n答案第一行\\nhook: Stop\\ntokens used\\n9\\n'\nexit \"${FAKE_RC:-0}\"\n")
+        fake.chmod(0o755)
+        self.brief = self.d / "brief.md"; self.brief.write_text("請核字\n")
+        self.photo = self.d / "p.jpg"; self.photo.write_bytes(b"x")
+
+    def run_send(self, *args, rc=0):
+        env = dict(self.os.environ, PATH=str(self.bin) + ":" + self.os.environ["PATH"], FAKE_ARGS=str(self.d / "args.txt"), FAKE_RC=str(rc))
+        return self.sp.run(["zsh", str(ROOT / "tools/codex_send.sh"), *args], env=env, capture_output=True, text=True, timeout=30)
+
+    def test_order_fence_and_answer(self):
+        out = self.d / "out.txt"
+        p = self.run_send(str(self.brief), str(out), str(self.photo))
+        self.assertEqual(p.returncode, 0, p.stderr)
+        args = (self.d / "args.txt").read_text().split("\n")
+        self.assertIn("--skip-git-repo-check", args)
+        prompt_at = next(i for i, a in enumerate(args) if a.startswith("## 🔒 讀取範圍硬邊界"))
+        self.assertLess(prompt_at, args.index("-i"))                 # 舊錯：-i 在前會吃掉 prompt
+        self.assertIn("請核字", "\n".join(args[prompt_at:args.index("-i")]))
+        self.assertEqual(args[args.index("-i") + 1], str(self.photo.resolve()))
+        self.assertTrue(out.read_text().rstrip().endswith("rc=0"))
+        self.assertEqual((self.d / "out.answer.txt").read_text(), "答案第一行\n")
+
+    def test_existing_fence_not_doubled_and_failures(self):
+        self.brief.write_text("## 🔒 讀取範圍硬邊界（自訂）\n內容\n")
+        self.assertEqual(self.run_send(str(self.brief), str(self.d / "o.txt")).returncode, 0)
+        self.assertEqual((self.d / "args.txt").read_text().count("讀取範圍硬邊界"), 1)
+        self.assertEqual(self.run_send(str(self.brief), str(self.d / "o.txt"), rc=3).returncode, 3)   # codex 失敗要照實回
+        self.assertEqual(self.run_send(str(self.brief)).returncode, 2)
+        self.assertEqual(self.run_send(str(self.d / "none.md"), str(self.d / "o.txt")).returncode, 2)
+        self.assertEqual(self.run_send(str(self.brief), str(self.d / "o.txt"), str(self.d / "no.jpg")).returncode, 2)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -95,6 +95,14 @@ if cfg.get('flake') == gate:   # 系統忙時 Playwright 逾時（交辦 #4260�
     mark = Path(os.environ['FIX_CALLS']).with_suffix('.flaked')
     if cfg.get('flake_always') or not mark.exists():
         mark.touch(); print('FAIL fixture' if cfg.get('flake_fail') else 'PASS fixture')
+        if cfg.get('crash'):   # 瀏覽器中途被關（交辦 #4293，照 2026-10-24 真實 kid.log 的行型）
+            print('FAIL webkit 跑到一半中斷：Browser.new_context: Target page, context or browser has been closed')
+            print('webkit：快照 506 次、案例 130、分支 336、違規 %d、自檢 0/0、JS 錯誤 1' % cfg.get('crash_violations', 0))
+            print('PROBLEM webkit：跑到一半中斷：Browser.new_context: Target page, context or browser has been closed')
+            print('PROBLEM webkit：沒有走到案例 p38-6-2:lesson'); print('PROBLEM webkit：沒有走到分支 app:nums-empty')
+            print('PROBLEM webkit：自檢 B14 沒有通過')
+            if cfg.get('crash_extra'): print(cfg['crash_extra'])
+            sys.exit(1)
         print('playwright._impl._errors.TimeoutError: Locator.click: Timeout 30000ms exceeded.'); sys.exit(1)
 sys.exit(cfg.get(gate, 0))
 '''
@@ -593,6 +601,25 @@ class PostShip(unittest.TestCase):
         self.configure(flake='kid', flake_always=True)
         self.run_post('verify', 1, '單獨重跑一次'); self.assertEqual(len(self.events('kid')), 2)
         self.run_post('ship', 1); self.no_delivery()
+
+    def test_T30_browser_crash_retried_once(self):
+        self.configure(flake='kid', crash=True)
+        self.run_post('verify', 0, '單獨重跑一次'); self.assertEqual(len(self.events('kid')), 2)
+        r = json.loads(self.receipt().read_text()); self.assertEqual(r['gates']['kid']['retried'], 1)
+
+    def crash_not_retried(self, **extra):
+        self.configure(flake='kid', crash=True, **extra)
+        self.run_post('verify', 1); self.assertEqual(len(self.events('kid')), 1)
+        self.run_post('ship', 1); self.no_delivery()
+
+    def test_T31_browser_crash_with_violation_not_retried(self):
+        self.crash_not_retried(crash_violations=1)
+
+    def test_T32_browser_crash_with_other_verdict_not_retried(self):
+        self.crash_not_retried(crash_extra='PROBLEM chromium：zh-q76 有一句超過句長上限')
+
+    def test_T33_browser_crash_with_fail_verdict_not_retried(self):
+        self.crash_not_retried(flake_fail=True)
 
     def test_T22_storage_and_source_rejection(self):
         self.run_post('verify',1,'G5_UPLOAD_SRC',extra_env={'G5_UPLOAD_SRC':'src/upload.js'})

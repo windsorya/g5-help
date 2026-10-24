@@ -462,11 +462,21 @@ def run_gate(name, command, cwd, logs):
     return {'rc': rc, 'completed': True, 'started': started, 'finished': time.time()}
 
 
+CRASH = 'Target page, context or browser has been closed'
+# 瀏覽器中途被關掉（負載高時 WebKit 行程被砍）只會帶出這幾種連帶行：沒走到的案例／分支、沒跑到的自檢。
+CRASH_ONLY = re.compile(r'^(?:FAIL|PROBLEM) \S+?[ ：](?:跑到一半中斷：.*' + re.escape(CRASH) + r'|沒有走到(?:案例|分支) .*|自檢 \S+ 沒有通過)$')
+
+
 def load_flake(log):
-    """Playwright timed out and no test verdict failed: a busy machine, not a content bug."""
+    """Playwright timed out, or a browser crashed, and no test verdict failed: a busy machine, not a content bug."""
     text = log.read_text(errors='replace')
-    return ('playwright._impl._errors.TimeoutError' in text
-            and not re.search(r'^(?:FAIL|PROBLEM) ', text, re.M))
+    verdicts = re.findall(r'^(?:FAIL|PROBLEM) .*$', text, re.M)
+    if 'playwright._impl._errors.TimeoutError' in text and not verdicts:
+        return True
+    # 2026-10-24 交辦 #4293：負載 23 下 WebKit 中途被關（chromium 全過、違規 0），整套 verify 重跑 7.9 分。
+    # 只有「有崩潰訊息、每一行判定都是崩潰的連帶結果、任何瀏覽器都沒有違規」才算；重跑仍要全過。
+    return (CRASH in text and bool(verdicts) and all(CRASH_ONLY.match(v) for v in verdicts)
+            and not re.search(r'違規 [1-9]', text))
 
 
 def need_gate(name, result, prefix='驗證失敗'):
@@ -585,7 +595,7 @@ def verify(root, receipt):
         for name in ('kid', 'e2e', 'standard'):
             if gates[name]['rc'] and load_flake(logs / (name + '.log')):
                 first = gates[name]; os.replace(logs / (name + '.log'), logs / (name + '.try1.log'))
-                print(f'{name}：只有 Playwright 逾時、沒有判定失敗（系統忙時的偶發），單獨重跑一次', flush=True)
+                print(f'{name}：只有 Playwright 逾時或瀏覽器中途被關、沒有判定失敗（系統忙時的偶發），單獨重跑一次', flush=True)
                 gates[name] = {**run_gate(name, commands[name], snap, logs), 'retried': first['rc']}
         for name in ('kid', 'e2e', 'standard'):
             need_gate(name, gates[name])
