@@ -452,6 +452,13 @@ def run_gate(name, command, cwd, logs):
     return {'rc': rc, 'completed': True, 'started': started, 'finished': time.time()}
 
 
+def load_flake(log):
+    """Playwright timed out and no test verdict failed: a busy machine, not a content bug."""
+    text = log.read_text(errors='replace')
+    return ('playwright._impl._errors.TimeoutError' in text
+            and not re.search(r'^(?:FAIL|PROBLEM) ', text, re.M))
+
+
 def need_gate(name, result, prefix='驗證失敗'):
     if result['rc'] != 0:
         raise Rejected(f'{prefix}：{name} rc={result["rc"]}')
@@ -563,6 +570,13 @@ def verify(root, receipt):
             jobs = {name: pool.submit(run_gate, name, commands[name], snap, logs) for name in ('kid', 'e2e', 'standard')}
             for name, job in jobs.items():
                 gates[name] = job.result()
+        # 2026-10-24 交辦 #4260：三個視窗同時跑瀏覽器（負載 130），e2e 的點擊因「元素不穩定」30 秒逾時，內容沒錯卻整套重跑 5 分鐘。
+        # 只有「Playwright 逾時、且沒有任何 FAIL／PROBLEM 判定」的那一道，等其他道跑完後單獨重跑一次；重跑仍要全過，第一次的 log 留著、收據記 retried。
+        for name in ('kid', 'e2e', 'standard'):
+            if gates[name]['rc'] and load_flake(logs / (name + '.log')):
+                first = gates[name]; os.replace(logs / (name + '.log'), logs / (name + '.try1.log'))
+                print(f'{name}：只有 Playwright 逾時、沒有判定失敗（系統忙時的偶發），單獨重跑一次', flush=True)
+                gates[name] = {**run_gate(name, commands[name], snap, logs), 'retried': first['rc']}
         for name in ('kid', 'e2e', 'standard'):
             need_gate(name, gates[name])
         gates['node'] = run_gate('node', commands['node'], snap, logs); need_gate('node', gates['node'])

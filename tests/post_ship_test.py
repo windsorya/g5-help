@@ -91,6 +91,11 @@ if gate == 'kid' and not cfg.get('kid'):
     browsers = {'chromium':result, 'webkit':result}
     if cfg.get('missing_browser'): del browsers['webkit']
     (root/'tests/kidtext_harvest.json').write_text(json.dumps(dict(**stamp, self_max=40, browsers=browsers)))
+if cfg.get('flake') == gate:   # 系統忙時 Playwright 逾時（交辦 #4260）
+    mark = Path(os.environ['FIX_CALLS']).with_suffix('.flaked')
+    if cfg.get('flake_always') or not mark.exists():
+        mark.touch(); print('FAIL fixture' if cfg.get('flake_fail') else 'PASS fixture')
+        print('playwright._impl._errors.TimeoutError: Locator.click: Timeout 30000ms exceeded.'); sys.exit(1)
 sys.exit(cfg.get(gate, 0))
 '''
 
@@ -537,6 +542,24 @@ class PostShip(unittest.TestCase):
         for d in old: self.assertFalse(d.exists(), d)
         for d in new: self.assertTrue(d.exists(), d)
         self.assertTrue(self.receipt().is_file())
+
+    def test_T27_load_flake_retried_once(self):
+        self.configure(flake='e2e')
+        self.run_post('verify', 0, '單獨重跑一次')
+        self.assertEqual(len(self.events('e2e')), 2)
+        r = json.loads(self.receipt().read_text())
+        self.assertEqual(r['gates']['e2e']['retried'], 1); self.assertEqual(r['gates']['e2e']['rc'], 0)
+        self.commit(); self.shipped()
+
+    def test_T28_timeout_with_verdict_failure_not_retried(self):
+        self.configure(flake='e2e', flake_fail=True)
+        self.run_post('verify', 1); self.assertEqual(len(self.events('e2e')), 1)
+        self.run_post('ship', 1); self.no_delivery()
+
+    def test_T29_persistent_timeout_retried_only_once(self):
+        self.configure(flake='kid', flake_always=True)
+        self.run_post('verify', 1, '單獨重跑一次'); self.assertEqual(len(self.events('kid')), 2)
+        self.run_post('ship', 1); self.no_delivery()
 
     def test_T22_storage_and_source_rejection(self):
         self.run_post('verify',1,'G5_UPLOAD_SRC',extra_env={'G5_UPLOAD_SRC':'src/upload.js'})
