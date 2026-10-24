@@ -387,6 +387,8 @@ details p{margin:0 0 10px}
     if (seedOk(s.seed)) d.seed = s.seed;
     d.r = (typeof s.r === "number" && Number.isSafeInteger(s.r) && s.r >= 0) ? s.r : 0;   // 這一篇的版本號：每存一次 +1
     d.lessonDone = s.lessonDone === true; d.mastered = s.mastered === true;
+    // 學會時的門檻（src/hard.js isMastered，交辦 #4245）：只有學會且是合法整數才寫出——沒有這欄的舊存檔讀進來再寫出去一字不差
+    if (d.mastered && nat(s.masteredNeed) && s.masteredNeed >= 1) d.masteredNeed = s.masteredNeed;
     if (Array.isArray(s.log)) d.log = s.log.slice(-100);
     // 正在做的那一題：看過提示、答錯過幾次（Codex 2026-10-12 第 1 輪必修 1、2：重開練習不能洗掉、不能重複計分）
     if (s.cur && nat(s.cur.idx) && nat(s.cur.hints) && nat(s.cur.wrongs)) d.cur = {idx: s.cur.idx, hints: s.cur.hints, wrongs: s.cur.wrongs};
@@ -1362,13 +1364,22 @@ details p{margin:0 0 10px}
     // 每連續 3 題必碰到一題看過的，就永遠學不會）。學會＝連續 3 題沒看過答案的題都一次選對；答錯照樣歸零。
     if (counts) { st.clean++; st.streak++; } else if (!clean) st.streak = 0;
     st.idx++; st.cur = null;
-    if (st.streak >= need) st.mastered = true;
+    if (st.streak >= need) { st.mastered = true; if (!(needOk(st.masteredNeed) && st.masteredNeed >= need)) st.masteredNeed = need; }
     var l = { t: now, q: idx, clean: clean, wrongs: wrongs }, k = tracksPeek(e) ? practiceId(practiceAt(e, idx)) : null;
     if (k) l.k = k;
     st.log.push(l); st.log = st.log.slice(-100);
     return { clean: clean, seen: seen, counts: counts };
   }
-  var api = { LIST: LIST, get: get, SUBJECTS: SUBJECTS, KINDS: ["frac-compare", "steps"], gradeAt: gradeAt, readingAt: readingAt, READING: READING, HARD_WORDS: HARD_WORDS, practiceAt: practiceAt, practiceAll: practiceAll, practiceId: practiceId, PEEK_MAX: PEEK_MAX, shownBefore: shownBefore, notePeek: notePeek, scoreChoice: scoreChoice, allSeen: allSeen };
+  // 學會門檻與「目前算不算學會」（交辦 #4245，Codex 設計者方案 A）：mastered 只記結論、沒記當時門檻，
+  // zh-q44-chaozhi 練習題用門檻 3 上線後才加 practiceNeed 8，舊的「學會了」被畫面說成「已達連續 8 題」（Codex 驗收 63c355f FAIL）。
+  // ⇒ 學會時把門檻存成 masteredNeed；畫面、首頁、同步摘要只用 isMastered。缺 masteredNeed 的舊紀錄照「拿到時的門檻」算：
+  //   練習題第一次上線就帶 practiceNeed 的篇（NEED_FROM_FIRST_PUBLISH）＝practiceNeed；其他篇＝舊門檻 3（練習題不到 3 題＝題數）。
+  var NEED_FROM_FIRST_PUBLISH = ["zh-q62-ji", "zh-q34-typo", "zh-q76-boardgame"];   // 加進來前先確認正式站那篇還沒有 practice。2026-10-24 核對：zh-q62-ji 練習題 12292a0 首次上線就帶門檻 8；zh-q34-typo（13:12 讀回只有第一段）；zh-q76-boardgame 第一段 f256136 上線時沒有 practice（#4269）
+  function needOf(e) { return e && e.kind === "steps" ? Math.min(e.practiceNeed || 3, (e.practice || []).length) : 3; }
+  function needOk(n) { return typeof n === "number" && Number.isSafeInteger(n) && n >= 1 && n <= 1000; }
+  function legacyNeed(e) { return e && NEED_FROM_FIRST_PUBLISH.indexOf(e.id) >= 0 ? needOf(e) : Math.min(3, e && e.kind === "steps" ? (e.practice || []).length : 3); }
+  function isMastered(e, st) { return !!st && st.mastered === true && (needOk(st.masteredNeed) ? st.masteredNeed : legacyNeed(e)) >= needOf(e); }
+  var api = { LIST: LIST, get: get, SUBJECTS: SUBJECTS, NEED_FROM_FIRST_PUBLISH: NEED_FROM_FIRST_PUBLISH, needOf: needOf, isMastered: isMastered, KINDS: ["frac-compare", "steps"], gradeAt: gradeAt, readingAt: readingAt, READING: READING, HARD_WORDS: HARD_WORDS, practiceAt: practiceAt, practiceAll: practiceAll, practiceId: practiceId, PEEK_MAX: PEEK_MAX, shownBefore: shownBefore, notePeek: notePeek, scoreChoice: scoreChoice, allSeen: allSeen };
   if (typeof module !== "undefined" && module.exports) module.exports = api; else root.G5Hard = api;
 })(typeof window !== "undefined" ? window : this);
 
@@ -1745,7 +1756,7 @@ function readFrac(box, key){
   return {n:pn.empty || pn.bad ? NaN : pn.v, d:pd.empty || pd.bad ? NaN : pd.v, empty:!!(pn.empty || pd.empty), bad:!!(pn.bad || pd.bad)};
 }
 function lock(box){ each(box.querySelectorAll("input,button[data-check],button[data-hint]"), function(x){ x.disabled = true; }); }
-function need(){ return E.kind === "steps" ? Math.min(E.practiceNeed || 3, (E.practice || []).length) : 3; }   // 學會＝連續答對幾題（練習題少於 3 題就全對）；篇可設 practiceNeed（tests/guessmatrix.js，交辦 #4248）
+function need(){ return H.needOf(E); }   // 學會＝連續答對幾題（練習題少於 3 題就全對）；篇可設 practiceNeed（tests/guessmatrix.js，交辦 #4248）。算不算學會一律用 H.isMastered（#4245）
 function dots(){ var h = ""; for (var i = 0; i < need(); i++) h += '<i class="' + (i < Math.min(st.streak, need()) ? "on" : "") + '"></i>'; return '<span class="dots" aria-label="連續自己做對 ' + st.streak + ' 題">' + h + '</span>'; }
 function openPractice(){ var P = $("#practice"); P.hidden = false; renderPractice(); reveal(P); }
 // 填了字但不是整數、或還有格子沒填：講清楚，不算答錯
@@ -1860,12 +1871,14 @@ function drawTopBtns(){
   $("#goPractice").onclick = guard(openPractice);
   if (E.kind === "steps" && !(E.practice || []).length) $("#goPractice").remove();
   var M = $("#mastery");
-  M.hidden = !st.mastered;
-  if (st.mastered) M.innerHTML = '<div class="win"><b class="t">這種題你已經會了</b><span>連續 ' + need() + ' 題自己做對。想多練可以繼續做。</span></div>';
+  var ok = H.isMastered(E, st), older = st.mastered === true && !ok;   // older＝用比較低的舊門檻拿到的「學會」（#4245）
+  M.hidden = !ok && !older;
+  if (ok) M.innerHTML = '<div class="win"><b class="t">這種題你已經會了</b><span>連續 ' + need() + ' 題自己做對。想多練可以繼續做。</span></div>';
+  else if (older) M.innerHTML = '<div class="note">以前的練習紀錄還在。現在要連續 ' + need() + ' 題第一次就選對，才算學會，再練練看。</div>';
 }
 function drawRec(){
   if (!E || !st) return;
-  $("#rec").textContent = st.solved ? "這台裝置上的練習紀錄：做完 " + st.solved + " 題，其中 " + st.clean + " 題沒看提示、一次就對；目前連續 " + st.streak + " 題。" + (st.mastered ? "已達「連續 " + need() + " 題自己做對」。" : "") : "這台裝置上還沒有練習紀錄。";
+  $("#rec").textContent = st.solved ? "這台裝置上的練習紀錄：做完 " + st.solved + " 題，其中 " + st.clean + " 題沒看提示、一次就對；目前連續 " + st.streak + " 題。" + (H.isMastered(E, st) ? "已達「連續 " + need() + " 題自己做對」。" : st.mastered ? "以前的紀錄保留，再練到連續 " + need() + " 題確認。" : "") : "這台裝置上還沒有練習紀錄。";
 }
 function drawVids(){
   var VIDS = E.videos || [];
@@ -1907,7 +1920,7 @@ function choicePractice(){
   var cur = st.cur;
   P.innerHTML = '<div class="row" style="justify-content:space-between"><h2 style="font-size:24px">練習第 ' + (st.idx + 1) + ' 題</h2><span class="small muted">連續自己做對' + dots() + '</span></div>' +
     '<div class="small muted">連續 ' + need() + ' 題第一次就選對，就算學會。</div>' +
-    (!st.mastered && H.allSeen(E, st) ? '<div class="note" id="allSeen">這篇的每一題你都看過答案了，再做也不會算進連續答對。請爸爸媽媽幫你加新的題目。</div>' : '') +
+    (!H.isMastered(E, st) && H.allSeen(E, st) ? '<div class="note" id="allSeen">這篇的每一題你都看過答案了，再做也不會算進連續答對。請爸爸媽媽幫你加新的題目。</div>' : '') +
     '<div class="qtext">' + q.q + '</div><div class="chips">' +
     q.opts.map(function(o, k){ return '<button type="button" class="chip" data-k="' + k + '">' + esc(o) + '</button>'; }).join("") + '</div><div class="fb" hidden></div><div id="pend" style="display:grid;gap:12px" hidden></div>';
   var out = $(".fb", P), bs = P.querySelectorAll(".chip");
@@ -1917,12 +1930,12 @@ function choicePractice(){
     var k = +bt.dataset.k;
     if (k !== q.a) { cur.wrongs++; H.notePeek(E, st, st.idx, Date.now()); save(); bt.classList.remove("shake"); void bt.offsetWidth; bt.classList.add("shake", "tried"); fb(out, false, (q.why && q.why[k]) || "再想想看。"); return; }
     each(bs, function(x){ x.disabled = true; }); bt.classList.add("picked"); fb(out, true, q.ok || "對了！");
-    var was = st.mastered;
+    var was = H.isMastered(E, st);
     // 有換數字題（practiceAlt）的篇：這題以前答錯過＝看過答案，這次答對不算進連續答對（交辦 #2274）。
     // 「看過答案」直接存在 st.peek、題目身分用內容（src/hard.js scoreChoice／shownBefore；Codex 審 556db59：從只留 100 筆的 log 依位置推會失效，交辦 #2282）。
     var r = H.scoreChoice(E, st, cur.wrongs, need(), Date.now()), clean = r.clean, counts = r.counts;
     var saved = save(), PE = $("#pend", P); PE.hidden = false;
-    PE.innerHTML = (st.mastered && !was ? '<div class="win"><b class="t">這種題你會了！</b><span>連續 ' + need() + ' 題自己做對。回到' + esc(E.source) + '，把它寫完吧。</span></div>' :
+    PE.innerHTML = (H.isMastered(E, st) && !was ? '<div class="win"><b class="t">這種題你會了！</b><span>連續 ' + need() + ' 題自己做對。回到' + esc(E.source) + '，把它寫完吧。</span></div>' :
       '<div class="fb ok">' + (counts ? "第一次就選對！連續 " + st.streak + " 題。" : clean ? "答對了！這題之前看過答案，這次不算進連續答對。" : "做完了！這題有改過答案，下一題試試一次選對。") + '</div>') +
       (saved ? "" : '<p class="small muted">這台裝置存不了紀錄（可能是私密瀏覽），重新整理後會從頭開始，題目照常可以做。</p>') +
       '<div class="row"><button class="btn" type="button" id="nextQ">下一題</button><button class="btn ghost" type="button" id="toLesson">再看一次教學</button></div>';
@@ -1933,7 +1946,7 @@ function choicePractice(){
 }
 
 // ---------- 首頁（依科目列出每一篇）與切換 ----------
-function statusOf(id){ var s = DB.entries[id]; return !s ? "還沒看" : s.mastered ? "學會了" : s.solved ? "練習中" : s.lessonDone ? "教學看完了" : "還沒看"; }
+function statusOf(id){ var s = DB.entries[id]; return !s ? "還沒看" : H.isMastered(H.get(id), s) ? "學會了" : s.solved ? "練習中" : s.lessonDone ? "教學看完了" : "還沒看"; }
 // 家長功能（2026-10-13 律師：「為何我測試用的題目，我沒法清除？有無清除或重置按鈕？」）：
 //   首頁每篇「隱藏這篇」（可恢復，不刪內容與紀錄）、家長設定「清除全部作答紀錄」。都是兩段式：第一次按只出現「確定…？」與「取消」，
 //   5 秒沒再按自動取消；不用 confirm()。改的都是記憶體 DB，再走同一個 save()（唯讀分頁、還沒讀成功的分頁不出按鈕）。
@@ -2088,7 +2101,7 @@ window.G5HelpPage = {state:function(id){ return JSON.parse(JSON.stringify(DB.ent
   window.G5Sync.init({
     endpoint: "https://script.google.com/macros/s/AKfycbxwo08VVT5tSRf-DsQEoo1hMlCm1YytGTzj89BPtJ6YWjPieuKyAPbnWXjUKagBdL6l/exec",
     keys: ["g5help.v1"], container: "#g5sync",
-    summarize: {"g5help.v1": function(j){ try { var x = JSON.parse(j), n = 0, m = 0; Object.keys(x.entries || {}).forEach(function(k){ n += x.entries[k].solved || 0; if (x.entries[k].mastered) m++; }); return "練習做完 " + n + " 題、學會 " + m + " 篇"; } catch (e) { return "（讀不懂的紀錄）"; } }},
+    summarize: {"g5help.v1": function(j){ try { var x = JSON.parse(j), n = 0, m = 0; Object.keys(x.entries || {}).forEach(function(k){ n += x.entries[k].solved || 0; if (window.G5Hard.isMastered(window.G5Hard.get(k), x.entries[k])) m++; }); return "練習做完 " + n + " 題、學會 " + m + " 篇"; } catch (e) { return "（讀不懂的紀錄）"; } }},
     // 雲端版本只能經由本頁套用（首頁、沒有未存進度時），不 reload（#1303 第 5 輪必修 2）
     canReplace: function(key){ return window.G5HelpCanReplace(key); },
     accept: function(key, data){ return window.G5HelpApplyRemote(key, data); }

@@ -892,12 +892,21 @@
     // 每連續 3 題必碰到一題看過的，就永遠學不會）。學會＝連續 3 題沒看過答案的題都一次選對；答錯照樣歸零。
     if (counts) { st.clean++; st.streak++; } else if (!clean) st.streak = 0;
     st.idx++; st.cur = null;
-    if (st.streak >= need) st.mastered = true;
+    if (st.streak >= need) { st.mastered = true; if (!(needOk(st.masteredNeed) && st.masteredNeed >= need)) st.masteredNeed = need; }
     var l = { t: now, q: idx, clean: clean, wrongs: wrongs }, k = tracksPeek(e) ? practiceId(practiceAt(e, idx)) : null;
     if (k) l.k = k;
     st.log.push(l); st.log = st.log.slice(-100);
     return { clean: clean, seen: seen, counts: counts };
   }
-  var api = { LIST: LIST, get: get, SUBJECTS: SUBJECTS, KINDS: ["frac-compare", "steps"], gradeAt: gradeAt, readingAt: readingAt, READING: READING, HARD_WORDS: HARD_WORDS, practiceAt: practiceAt, practiceAll: practiceAll, practiceId: practiceId, PEEK_MAX: PEEK_MAX, shownBefore: shownBefore, notePeek: notePeek, scoreChoice: scoreChoice, allSeen: allSeen };
+  // 學會門檻與「目前算不算學會」（交辦 #4245，Codex 設計者方案 A）：mastered 只記結論、沒記當時門檻，
+  // zh-q44-chaozhi 練習題用門檻 3 上線後才加 practiceNeed 8，舊的「學會了」被畫面說成「已達連續 8 題」（Codex 驗收 63c355f FAIL）。
+  // ⇒ 學會時把門檻存成 masteredNeed；畫面、首頁、同步摘要只用 isMastered。缺 masteredNeed 的舊紀錄照「拿到時的門檻」算：
+  //   練習題第一次上線就帶 practiceNeed 的篇（NEED_FROM_FIRST_PUBLISH）＝practiceNeed；其他篇＝舊門檻 3（練習題不到 3 題＝題數）。
+  var NEED_FROM_FIRST_PUBLISH = ["zh-q62-ji", "zh-q34-typo", "zh-q76-boardgame"];   // 加進來前先確認正式站那篇還沒有 practice。2026-10-24 核對：zh-q62-ji 練習題 12292a0 首次上線就帶門檻 8；zh-q34-typo（13:12 讀回只有第一段）；zh-q76-boardgame 第一段 f256136 上線時沒有 practice（#4269）
+  function needOf(e) { return e && e.kind === "steps" ? Math.min(e.practiceNeed || 3, (e.practice || []).length) : 3; }
+  function needOk(n) { return typeof n === "number" && Number.isSafeInteger(n) && n >= 1 && n <= 1000; }
+  function legacyNeed(e) { return e && NEED_FROM_FIRST_PUBLISH.indexOf(e.id) >= 0 ? needOf(e) : Math.min(3, e && e.kind === "steps" ? (e.practice || []).length : 3); }
+  function isMastered(e, st) { return !!st && st.mastered === true && (needOk(st.masteredNeed) ? st.masteredNeed : legacyNeed(e)) >= needOf(e); }
+  var api = { LIST: LIST, get: get, SUBJECTS: SUBJECTS, NEED_FROM_FIRST_PUBLISH: NEED_FROM_FIRST_PUBLISH, needOf: needOf, isMastered: isMastered, KINDS: ["frac-compare", "steps"], gradeAt: gradeAt, readingAt: readingAt, READING: READING, HARD_WORDS: HARD_WORDS, practiceAt: practiceAt, practiceAll: practiceAll, practiceId: practiceId, PEEK_MAX: PEEK_MAX, shownBefore: shownBefore, notePeek: notePeek, scoreChoice: scoreChoice, allSeen: allSeen };
   if (typeof module !== "undefined" && module.exports) module.exports = api; else root.G5Hard = api;
 })(typeof window !== "undefined" ? window : this);

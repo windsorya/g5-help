@@ -27,6 +27,8 @@
     if (seedOk(s.seed)) d.seed = s.seed;
     d.r = (typeof s.r === "number" && Number.isSafeInteger(s.r) && s.r >= 0) ? s.r : 0;   // 這一篇的版本號：每存一次 +1
     d.lessonDone = s.lessonDone === true; d.mastered = s.mastered === true;
+    // 學會時的門檻（src/hard.js isMastered，交辦 #4245）：只有學會且是合法整數才寫出——沒有這欄的舊存檔讀進來再寫出去一字不差
+    if (d.mastered && nat(s.masteredNeed) && s.masteredNeed >= 1) d.masteredNeed = s.masteredNeed;
     if (Array.isArray(s.log)) d.log = s.log.slice(-100);
     // 正在做的那一題：看過提示、答錯過幾次（Codex 2026-10-12 第 1 輪必修 1、2：重開練習不能洗掉、不能重複計分）
     if (s.cur && nat(s.cur.idx) && nat(s.cur.hints) && nat(s.cur.wrongs)) d.cur = {idx: s.cur.idx, hints: s.cur.hints, wrongs: s.cur.wrongs};

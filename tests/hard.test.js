@@ -571,17 +571,59 @@ test("S10 題目鍵：帶分數、小數點不會和別的數字撞鍵（Opus �
 // 交辦 #4248：設了 practiceNeed 的篇（學會＝連對幾題），練習要過封版猜法矩陣（tests/guessmatrix.js），最長連對 < practiceNeed
 test("快篩：設 practiceNeed 的篇，封版猜法矩陣連對不到學會門檻", () => {
   const G = require("./guessmatrix.js");
-  // 舊紀錄的 mastered 會一直保留（Codex 驗收方案 A 抓到）：練習題已用門檻 3 上線過的篇，事後加 practiceNeed 會讓舊的「學會了」假達標。
-  // ⇒ 只准「練習題第一次上線就帶著 practiceNeed」的篇；加進這張清單前，先確認正式站那篇還沒有 practice。
-  const NEED_FROM_FIRST_PUBLISH = ["zh-q62-ji", "zh-q34-typo", "zh-q76-boardgame"];   // 2026-10-24 核對：正式站 zh-q62-ji、zh-q34-typo（13:12 讀回）都只有第一段解說，沒有 practice；zh-q76-boardgame 第一段 f256136 上線時沒有 practice（交辦 #4269）
-  // 例外清單：練習題已用門檻 3 上線過、事後才加門檻的篇。孩子進度只在她的瀏覽器（同步碼同步），讀不到「是否已學會」——
-  // 加門檻不會比不加差：已學會的照舊保留（加不加都一樣），還沒學會的改成要連對 practiceNeed 題。代價是舊的「學會了」可能是門檻 3 下拿到的，寫在這裡留證。
-  const NEED_ADDED_AFTER_PUBLISH = ["zh-q44-chaozhi"];   // 2026-10-24 交辦 #4245：門檻 3 上線 12:53→加門檻約 13:2x，Codex 驗收 7c88b68 FAIL「照 1、1、2 按就學會」
+  // 舊紀錄的 mastered 會一直保留（Codex 驗收方案 A 抓到）：事後加 practiceNeed 時，舊的「學會了」不能被說成達到新門檻。
+  // 交辦 #4245 起由 src/hard.js isMastered 處理（學會時存 masteredNeed；缺欄位照拿到時的門檻算），所以事後加門檻的篇也可以設。
+  // H.NEED_FROM_FIRST_PUBLISH＝「練習題第一次上線就帶門檻」的篇，舊紀錄照 practiceNeed 算；加進去前要確認正式站那篇還沒有 practice。
+  // 清單只在 src/hard.js 維護一份（多視窗同時加篇時，測試裡另寫一份會一直衝突）；這裡只擋拼錯與漏設門檻。
+  H.NEED_FROM_FIRST_PUBLISH.forEach(id => assert.ok(H.get(id) && H.get(id).practiceNeed, id + " 在首發帶門檻清單，但找不到這篇或它沒設 practiceNeed"));
   H.LIST.filter(e => e.practiceNeed).forEach(e => {
-    assert.ok(NEED_FROM_FIRST_PUBLISH.includes(e.id) || NEED_ADDED_AFTER_PUBLISH.includes(e.id), e.id + " 設了 practiceNeed，但不在「練習題第一次上線就帶門檻」清單：舊的學會紀錄會假達標");
     assert.ok(Number.isInteger(e.practiceNeed) && e.practiceNeed >= 3 && e.practiceNeed <= e.practice.length, e.id + " practiceNeed 要是 3～練習題數的整數");
     assert.equal(G.strategies(e.practice).length, 3992 + 19 * e.practice.length, "矩陣條數變了＝封版被改");
     const w = G.worst(e.practice);
     assert.ok(w.streak < e.practiceNeed, e.id + "：猜法「" + w.name + "」能連對 " + w.streak + " 題，達到學會門檻 " + e.practiceNeed);
   });
+});
+
+// 交辦 #4245：學會＝在現在的門檻下確實連對過（Codex 設計者方案 A 的有限驗收矩陣 T01–T14；畫面文字另由 e2e 驗）
+test("學會門檻：舊紀錄不被說成達到新門檻，新紀錄存下門檻（T01–T14）", () => {
+  const Q44 = H.get("zh-q44-chaozhi"), Q62 = H.get("zh-q62-ji"), FR = H.get("p38-6-2");
+  const st = (o) => Object.assign(DOC.fresh(), o);
+  const right = (e, s, n) => { for (let i = 0; i < n; i++) H.scoreChoice(e, s, 0, H.needOf(e), 1000 + i); return s; };
+  assert.equal(H.needOf(Q44), 8);
+  assert.equal(H.isMastered(Q44, st({})), false, "T01 空白");
+  assert.equal(H.isMastered(Q44, st({ mastered: true, streak: 3 })), false, "T02 門檻 3 拿到、沒欄位");
+  assert.equal(H.isMastered(Q44, st({ mastered: true, streak: 0, solved: 90, clean: 90 })), false, "T03 不從累計推定");
+  assert.equal(H.isMastered(Q44, st({ mastered: true, masteredNeed: 3 })), false, "T04 明確較低門檻");
+  const s5 = right(Q44, st({ mastered: true, streak: 3, idx: 3 }), 4);
+  assert.equal(s5.streak, 7); assert.equal(H.isMastered(Q44, s5), false, "T05 第 7 題還沒");
+  right(Q44, s5, 1); assert.equal(H.isMastered(Q44, s5), true, "T05 第 8 題學會"); assert.equal(s5.masteredNeed, 8);
+  const s6 = st({ streak: 7, idx: 7 }); H.scoreChoice(Q44, s6, 1, 8, 1);
+  assert.equal(s6.streak, 0); assert.equal(H.isMastered(Q44, s6), false, "T06 先錯再改對不授予");
+  const s7 = st({ mastered: true, masteredNeed: 8, streak: 8, idx: 8 }); H.scoreChoice(Q44, s7, 2, 8, 1);
+  assert.equal(s7.streak, 0); assert.equal(H.isMastered(Q44, s7), true, "T07 達標後答錯不取消");
+  const back = DOC.parse(DOC.serialize({ "zh-q44-chaozhi": s5 }, {}, {})).entries["zh-q44-chaozhi"];
+  assert.equal(back.masteredNeed, 8); assert.equal(H.isMastered(Q44, back), true, "T08 存讀往返保留");
+  ["8", -8, 7.5, 1e9, null].forEach((bad) => {
+    const b = DOC.clean1({ mastered: true, masteredNeed: bad }); assert.equal(H.isMastered(Q44, b), false, "T09 壞欄位 " + bad);
+  });
+  assert.equal(DOC.clean1({ mastered: false, masteredNeed: 8 }).masteredNeed, undefined, "T09 沒學會不帶門檻");
+  assert.equal(H.isMastered(Q44, DOC.clean1({ mastered: true })), false, "T10 同步選到沒欄位的舊文件：不挪用門檻");
+  assert.equal(H.isMastered(Q44, DOC.clean1({ mastered: true, masteredNeed: 8 })), true, "T11 選到新文件");
+  const old = JSON.parse(JSON.stringify(s5)); delete old.masteredNeed;
+  assert.equal(H.isMastered(Q44, DOC.clean1(old)), false, "T12 舊版重存丟欄位：保守待再確認");
+  assert.equal(H.isMastered(FR, st({ mastered: true })), true, "T13 門檻 3 的舊紀錄維持");
+  assert.equal(H.isMastered({ id: "x", kind: "steps", practice: [{}, {}] }, st({ mastered: true })), true, "T13 2 題短篇維持");
+  assert.equal(H.isMastered(Q62, st({ mastered: true })), true, "T13 首次上線就帶門檻 8 的篇，舊紀錄是連對 8 拿到的");
+  assert.equal(H.isMastered(null, st({ mastered: true })), true, "自己加的題（清單外）照舊");
+  // 舊存檔沒有新欄位：讀進來不會多出欄位
+  const OLD = JSON.stringify({ v: 1, entries: { "zh-q44-chaozhi": st({ mastered: true, streak: 3 }) } });
+  assert.equal(DOC.parse(OLD).entries["zh-q44-chaozhi"].masteredNeed, undefined);
+  // T14 封版矩陣走真的出題／計分路徑：沒有一條拿到學會；正向第 7 題 false、第 8 題 true（含跨輪）
+  const G = require("./guessmatrix.js");
+  G.strategies(Q44.practice).forEach((sg) => {
+    const s = st({}); let prev = null;
+    for (let i = 0; i < 56; i++) { const q = H.practiceAt(Q44, s.idx); H.scoreChoice(Q44, s, sg.f(q, i, prev) === q.a ? 0 : 1, 8, i); prev = q; }
+    assert.equal(H.isMastered(Q44, s), false, "T14 猜法「" + sg.name + "」拿到學會");
+  });
+  const s14 = st({ idx: 5 }); right(Q44, s14, 7); assert.equal(H.isMastered(Q44, s14), false); right(Q44, s14, 1); assert.equal(H.isMastered(Q44, s14), true, "T14 跨輪第 8 題");
 });
