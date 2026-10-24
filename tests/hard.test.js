@@ -183,6 +183,19 @@ test("快篩：影片標題與說明裡的難詞要在同一段附白話（影�
 // 舊快篩只看影片區、node 用詞測試讀的是採字結果 ⇒ 要等兩個瀏覽器採字 5 分鐘才紅，整套 verify 重跑（家長送出→上線 27.3 分的最大一段）。
 // 這裡照教學區畫面順序（開場白 → 每一步：標題、說明、確認題與選項、選對回饋 → 答案 → 寫法）接成一串，
 // 每個難詞第一次出現要附白話；判準同主閘 KG.glossed。答錯才出現的 why 不算第一次（主閘也是依實際畫面順序）。主閘仍是真瀏覽器採字。
+// 2026-10-24 交辦 #4260：zh-q34-typo 確認題題幹 44 字，只有瀏覽器採字量得到，又白跑一輪 verify。這裡用主閘同一套 sentences／countChars 先量。
+test("快篩：教學區與練習每句不超過句長上限（含步驟標題、確認題題幹、選項、選錯說明）", () => {
+  const lim = H.readingAt(new Date()).maxSentence, problems = [];
+  const plain = (x) => String(x || "").replace(/<br\s*\/?>/g, "\n").replace(/<[^>]+>/g, "").replace(/&[a-z]+;/g, "");
+  H.LIST.filter((e) => e.kind === "steps").forEach((e) => {
+    const texts = [e.lead];
+    (e.steps || []).forEach((s) => { texts.push(s.title, s.say); if (s.check) texts.push(s.check.q, s.check.ok, ...(s.check.opts || []), ...(s.check.why || [])); });
+    (H.practiceAll ? H.practiceAll(e) : (e.practice || [])).forEach((q) => texts.push(q.q, ...(q.opts || []).map(String), ...(q.why || [])));
+    texts.forEach((t) => KG.sentences(plain(t)).forEach((s) => { if (KG.countChars(s) > lim) problems.push(e.id + " " + KG.countChars(s) + " 字（上限 " + lim + "）：" + s); }));
+  });
+  assert.deepEqual(problems, []);
+});
+
 test("快篩：教學區照畫面順序，難詞第一次出現就要附白話（含步驟標題、確認題）", () => {
   const problems = [];
   H.LIST.filter((e) => e.kind === "steps").forEach((e) => {
