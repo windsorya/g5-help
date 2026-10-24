@@ -153,6 +153,11 @@ test("用詞閘自檢：判準本身（node 端同一份 kidgate.js）＋案例�
 // ── 快篩（2026-10-15 交辦 #2259 復盤）：新增一篇時先跑 `node --test --test-name-pattern=快篩 tests/hard.test.js`，1 秒內抓出內容錯，
 // 不必等兩個瀏覽器採字跑完才發現（p40-2-5 那次：首頁那行 46 字、影片標題的「假分數」沒附白話，都是採字 5 分鐘後才看到，又整套重跑）。
 // 這裡只是快篩；主閘仍是真瀏覽器採字（tests/e2e_kidtext.py）。
+// 交辦 #4263：zh-q44-chaozhi 圖裡寫了 ✗ ✓，要等 node 全測（verify 最後一道，約 5 分）才紅 ⇒ 同一條 emoji 規則也放進快篩
+test("快篩：每一篇（含圖裡的 SVG 文字）沒有 emoji", () => {
+  const bad = H.LIST.filter(e => EMOJI.test(JSON.stringify(e))).map(e => e.id + "：" + JSON.stringify(e).match(EMOJI)[0]);
+  assert.deepEqual(bad, []);
+});
 test("快篩：首頁卡片那一行（出處・重點・日期）每句不超過句長上限", () => {
   const lim = H.readingAt(new Date()).maxSentence, problems = [];
   H.LIST.forEach((e) => {
