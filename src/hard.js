@@ -404,6 +404,51 @@
         "<p><b>陪她時可以追問：</b>出一句新的，例如「學校□應營養午餐（供／拱）」，請她選字並用自己的話說理由。能在新句子選對、說得出意思，才比較能確認懂了。</p>" +
         "<p>同型練習題稍後補上。</p>"
     }
+    ,
+    // 2026-10-24 律師從網頁傳題（傳題 ID u1792813937009-746488，交辦 #4247）。照片：國語改錯字第 52 題，括號空白未作答。
+    // 「今天的班會由小美擔任主席，我擔任伺儀。」錯字＝伺，正字＝司（司儀）。伺本身是真的字（伺機、伺候），且字形含「司」，只看字形容易漏。
+    {
+      id: "zh-q52-siyi", date: "2026-10-24", subject: "國語", kind: "steps",
+      source: "國語練習・第 52 題", title: "伺儀還是司儀", tag: "看詞的意思找錯字",
+      ask: "每句有一個錯字，圈出來，把正確的字寫在括號裡。",
+      question: "52.（　　）今天的班會由小美擔任主席，我擔任伺儀。",
+      lead: "這題的括號還沒寫。<br>句子裡有一個字放錯了，它本身也是真的字。<br>下面教你一個詞一個詞想意思，把它找出來。",
+      steps: [
+        { title: "方法：挑出詞來想意思",
+          say: "先挑出句子裡的幾個詞：班會、擔任、主席、伺儀。<br>再一個一個想：這個詞放在句子裡，意思對不對？<br>主席是主持會議的人，寫對了。<br>最後那個詞，要仔細看。",
+          fig: '<svg viewBox="0 0 320 110" role="img" aria-label="句子切成詞：班會、主席都對，伺儀要仔細看"><g font-size="16" fill="var(--ink)"><rect x="8" y="24" width="70" height="40" rx="8" fill="none" stroke="var(--leaf)" stroke-width="2"/><text x="26" y="50">班會</text><rect x="92" y="24" width="70" height="40" rx="8" fill="none" stroke="var(--leaf)" stroke-width="2"/><text x="110" y="50">擔任</text><rect x="176" y="24" width="70" height="40" rx="8" fill="none" stroke="var(--leaf)" stroke-width="2"/><text x="194" y="50">主席</text><rect x="260" y="24" width="56" height="40" rx="8" fill="none" stroke="var(--bad)" stroke-width="3"/><text x="270" y="50" fill="var(--bad)">伺儀</text></g><text x="10" y="96" font-size="14" fill="var(--ink)">綠框：意思通。紅框：要仔細看。</text></svg>',
+          check: { q: "這句裡，哪一個詞的字寫錯了？", opts: ["主席", "班會", "伺儀"], a: 2,
+                   why: ["主席是主持會議的人，寫對了。", "班會是班上開的會，寫對了。", ""], ok: "對！錯字就在「伺儀」裡。" } },
+        { title: "司的意思：負責",
+          say: "司儀（照順序告訴大家下一項要做什麼的人）會拿著麥克風說話。<br>例如：「班會開始，第一項，主席報告。」<br>司的意思是負責、管理。<br>司機是負責開車的人。<br>司儀就是負責說「下一項做什麼」的人。",
+          fig: '<svg viewBox="0 0 320 140" role="img" aria-label="司儀拿著麥克風，照表上的順序說接下來要做什麼"><circle cx="60" cy="40" r="16" fill="none" stroke="var(--ink)" stroke-width="2.5"/><path d="M36,120 q0,-56 24,-56 q24,0 24,56" fill="none" stroke="var(--ink)" stroke-width="2.5"/><line x1="84" y1="66" x2="98" y2="48" stroke="var(--ink)" stroke-width="3"/><circle cx="101" cy="44" r="6" fill="var(--pri)"/><rect x="150" y="14" width="160" height="112" rx="8" fill="none" stroke="var(--pri)" stroke-width="2"/><g font-size="15" fill="var(--ink)"><text x="164" y="38">班會進行順序</text><text x="164" y="66">一、主席報告</text><text x="164" y="90">二、幹部報告</text><text x="164" y="114">三、討論</text></g><text x="20" y="136" font-size="13" fill="var(--ink)">司儀：照順序說</text></svg>',
+          check: { q: "司機的司、司儀的司，是什麼意思？", opts: ["負責、管理", "等候、照顧"], a: 0,
+                   why: ["", "等候、照顧是另一個字的意思，下一步會講。"], ok: "對！司就是負責、管理。" } },
+        { title: "伺多了人字旁，意思不一樣",
+          say: "伺，是在司的左邊多了「亻」，叫做人字旁。<br>伺的意思是等候或照顧。<br>例如伺機（等待機會）、伺候（照顧別人的生活）。<br>我在班會上是負責說下一項做什麼，不是在等，也不是照顧人。<br>所以要寫沒有人字旁的司。",
+          fig: '<svg viewBox="0 0 320 130" role="img" aria-label="伺有人字旁，是等候、照顧；司沒有人字旁，是負責"><g font-size="46" fill="var(--ink)"><text x="40" y="66">伺</text><text x="200" y="66">司</text></g><text x="100" y="60" font-size="20" font-weight="700" fill="var(--bad)">本題錯</text><text x="250" y="60" font-size="20" font-weight="700" fill="var(--leaf)">本題對</text><g font-size="14" fill="var(--ink)"><text x="16" y="98">左邊多了人字旁</text><text x="16" y="120">等候、照顧</text><text x="186" y="98">沒有人字旁</text><text x="186" y="120">負責、管理</text></g></svg>',
+          check: { q: "「我擔任□儀」，是負責說班會下一項做什麼。□要填哪個字？", opts: ["伺（等候、照顧）", "司（負責）"], a: 1,
+                   why: ["伺是等候、照顧，不是負責說下一項做什麼。", ""], ok: "對！要寫司。" } },
+        { title: "回到題目，寫進括號",
+          say: "把句子裡的伺圈起來。<br>括號裡寫：司。<br>後半句改成：我擔任司儀。<br>記法：司機、司儀的司，都沒有人字旁。",
+          fig: '<svg viewBox="0 0 320 110" role="img" aria-label="括號裡寫司，句子裡圈出伺"><text x="14" y="62" font-size="34" fill="var(--ink)">（</text><text x="46" y="64" font-size="34" font-weight="700" fill="var(--leaf)">司</text><text x="84" y="62" font-size="34" fill="var(--ink)">）</text><text x="130" y="60" font-size="18" fill="var(--ink)">我擔任</text><circle cx="232" cy="54" r="16" fill="none" stroke="var(--bad)" stroke-width="2.5"/><text x="222" y="60" font-size="18" fill="var(--ink)">伺</text><text x="252" y="60" font-size="18" fill="var(--ink)">儀。</text><text x="14" y="100" font-size="14" fill="var(--ink)">圈出伺，括號寫司。</text></svg>' }
+      ],
+      answer: "錯字是伺，括號寫司：司儀（照順序告訴大家下一項要做什麼的人）。",
+      write: "圈出：伺。<br>括號寫：司",
+      words: { "司儀": "照順序告訴大家下一項要做什麼的人", "伺機": "等待機會", "伺候": "照顧別人的生活" },
+      // 第二個模型審（Codex，附照片；2026-10-24 判 FAIL：A2、A5 必修，下面是依它改的）
+      readReview: { by: "codex", date: "2026-10-24", grade: 5, fixed: ["「把句子切成一個一個詞」卻漏了的、由、我→改成「挑出句子裡的幾個詞」", "「整句變成」其實只列後半句→改「後半句改成」", "司儀的白話由「照順序報告流程的人」改成「照順序告訴大家下一項要做什麼的人」，圖與確認題一併改", "「意思通不通」改「放在句子裡，意思對不對」；「班會流程」改「班會進行順序」", "「多一個人（亻）」改「多了亻，叫做人字旁」", "字形圖的錯／對改成「本題錯／本題對」，限定在這一題", "給爸媽的追問改成請她用自己的話說差別並各造一個詞，不以背出答案當懂"] },
+      // 2026-10-24 驗證（背景子代理＋主線複核）：tools/video_check.py 下載後 whisper 全片 0–735 秒轉寫讀過（教茄、切、輪、司、夾、吐、中七個字），主線再讀 6:50–8:50 逐字稿：
+      // 「公司的司」、寫法、「是口部」、升旗典禮拿麥克風說「升旗典禮開始」的人是司儀、加言成詞、加食成飼料的飼（whisper 把司轉成「詩」，是同音轉寫錯，原音與字卡正確）。
+      // 抽格 412/440/470/490/510/528 共 6 格，主線看過拼圖：白紙、寫字的手、左上角繁體字卡「司」，沒有人臉；yt-dlp playable_in_embed=True、public。
+      // 不採 L9gmd_adUG8（南一，畫面有多名學童正臉）、Iq-szgMKm4Q（的／得講錯、有招生推銷）、hFsHDkMlCvI（對象是成人）；沒有找到專講司／伺分辨的台灣繁中影片。
+      videos: [
+        { id: "2Ad-rieCjDM", start: 410, end: 530, len: "約 2 分鐘", title: "生字「司」怎麼寫、是什麼意思（紀美子的隨手記）",
+          note: "老師一邊寫司，一邊說這是公司的司。升旗時拿麥克風報告的人，叫司儀（照順序說下一項做什麼的人）。後面老師在司的旁邊加上別的部分，變成不一樣的字，意思也跟著變。這題的伺，就是司加上人字旁，意思變成等候、照顧。" }
+      ],
+      parent: "<p><b>照片上第 52 題的括號是空的。</b>錯字是「伺儀」的伺，要改成司（司儀）。伺本身是真的字（伺機、伺候），字裡又含有司，只看字形不覺得怪，容易漏掉。這篇教她把句子切成詞、想每個詞的意思，再比較司（負責）和伺（等候、照顧）。同型練習題稍後補上。</p>" +
+        "<p><b>陪她時可以追問：</b>「伺也是真的字，為什麼這裡是錯字？」請她用自己的話說出司和伺的意思差在哪裡，再請她用司、伺各造一個詞（例如司機、伺機），說得出來才算真的懂。</p>"
+    }
   ];
   // 端到端測試用：頁面載入前若有 window.__G5_HARD_FIXTURE__（只有測試會放），併入清單
   if (root && root.__G5_HARD_FIXTURE__ && Array.isArray(root.__G5_HARD_FIXTURE__)) LIST = LIST.concat(root.__G5_HARD_FIXTURE__);
