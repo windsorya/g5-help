@@ -1,12 +1,12 @@
 {
- "index_sha256": "6c1eb98d03bfd2bcda4033f7f7ec001c3fbe1fa77ae41445370a3dae7a81eec4",
+ "index_sha256": "5681abc3fa30c8a2e7f5de9528515cc3e46e5a9bfd7acabf2ec91f6aabf08c15",
  "kidgate_sha256": "91c518ad54e254da967b5b983bebe443bdee4a950557d3a7aca8d9865f68a936",
  "driver_sha256": "551ae3461ff449c46c75517ecb579e06365c71b80f3bd43907260e6cd6026a77",
  "max": 40,
  "self_max": 40,
  "browsers": {
   "chromium": {
-   "index_sha256": "6c1eb98d03bfd2bcda4033f7f7ec001c3fbe1fa77ae41445370a3dae7a81eec4",
+   "index_sha256": "5681abc3fa30c8a2e7f5de9528515cc3e46e5a9bfd7acabf2ec91f6aabf08c15",
    "kidgate_sha256": "91c518ad54e254da967b5b983bebe443bdee4a950557d3a7aca8d9865f68a936",
    "driver_sha256": "551ae3461ff449c46c75517ecb579e06365c71b80f3bd43907260e6cd6026a77",
    "max": 40,
@@ -825,7 +825,7 @@
    "snapshots": 509
   },
   "webkit": {
-   "index_sha256": "6c1eb98d03bfd2bcda4033f7f7ec001c3fbe1fa77ae41445370a3dae7a81eec4",
+   "index_sha256": "5681abc3fa30c8a2e7f5de9528515cc3e46e5a9bfd7acabf2ec91f6aabf08c15",
    "kidgate_sha256": "91c518ad54e254da967b5b983bebe443bdee4a950557d3a7aca8d9865f68a936",
    "driver_sha256": "551ae3461ff449c46c75517ecb579e06365c71b80f3bd43907260e6cd6026a77",
    "max": 40,

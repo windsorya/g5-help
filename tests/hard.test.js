@@ -561,8 +561,11 @@ test("快篩：設 practiceNeed 的篇，封版猜法矩陣連對不到學會門
   // 舊紀錄的 mastered 會一直保留（Codex 驗收方案 A 抓到）：練習題已用門檻 3 上線過的篇，事後加 practiceNeed 會讓舊的「學會了」假達標。
   // ⇒ 只准「練習題第一次上線就帶著 practiceNeed」的篇；加進這張清單前，先確認正式站那篇還沒有 practice。
   const NEED_FROM_FIRST_PUBLISH = ["zh-q62-ji"];   // 2026-10-24 核對：正式站 zh-q62-ji 只有第一段解說，沒有 practice
+  // 例外清單：練習題已用門檻 3 上線過、事後才加門檻的篇。孩子進度只在她的瀏覽器（同步碼同步），讀不到「是否已學會」——
+  // 加門檻不會比不加差：已學會的照舊保留（加不加都一樣），還沒學會的改成要連對 practiceNeed 題。代價是舊的「學會了」可能是門檻 3 下拿到的，寫在這裡留證。
+  const NEED_ADDED_AFTER_PUBLISH = ["zh-q44-chaozhi"];   // 2026-10-24 交辦 #4245：門檻 3 上線 12:53→加門檻約 13:2x，Codex 驗收 7c88b68 FAIL「照 1、1、2 按就學會」
   H.LIST.filter(e => e.practiceNeed).forEach(e => {
-    assert.ok(NEED_FROM_FIRST_PUBLISH.includes(e.id), e.id + " 設了 practiceNeed，但不在「練習題第一次上線就帶門檻」清單：舊的學會紀錄會假達標");
+    assert.ok(NEED_FROM_FIRST_PUBLISH.includes(e.id) || NEED_ADDED_AFTER_PUBLISH.includes(e.id), e.id + " 設了 practiceNeed，但不在「練習題第一次上線就帶門檻」清單：舊的學會紀錄會假達標");
     assert.ok(Number.isInteger(e.practiceNeed) && e.practiceNeed >= 3 && e.practiceNeed <= e.practice.length, e.id + " practiceNeed 要是 3～練習題數的整數");
     assert.equal(G.strategies(e.practice).length, 3992 + 19 * e.practice.length, "矩陣條數變了＝封版被改");
     const w = G.worst(e.practice);
