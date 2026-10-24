@@ -195,19 +195,24 @@ function screenField(kind, value, ctx) {
   // ok／why 寫進 .fb（white-space:pre-line）：換行保留成斷句
   return KG.sentences(s).some((x) => KG.countChars(x) > KG.MAX) ? "FAIL" : "PASS";
 }
+// 走訪一篇：回傳超過上限的欄位名稱。正式檢查與自檢共用這一份（Codex 審 72b7df7：自檢另寫一份走訪，漏了練習 ok）
+function screenEntry(e) {
+  const out = [];
+  const put = (where, kind, v, ctx) => { if (screenField(kind, v, ctx) === "FAIL") out.push(where); };
+  const ask = (where, q) => {
+    put(where + "題幹", "question", q.q);
+    (q.opts || []).forEach((o, k) => put(where + "選項" + (k + 1), "option", o));
+    put(where + "ok", "ok", q.ok);
+    (q.why || []).forEach((w, k) => put(where + "why" + (k + 1), "why", w, {a: q.a, index: k, optionCount: (q.opts || []).length}));
+  };
+  put("開場白", "lead", e.lead);
+  (e.steps || []).forEach((s, i) => { if (s.check) ask("第" + (i + 1) + "步確認題", s.check); });
+  (H.practiceAll ? H.practiceAll(e) : (e.practice || [])).forEach((q, i) => ask("練習第" + (i + 1) + "題", q));
+  return out;
+}
 test("快篩：純文字欄位每句不超過句長上限（開場白、選項、ok、可選錯的 why；HTML 欄位交主閘）", () => {
   const problems = [];
-  const put = (id, where, kind, v, ctx) => { if (screenField(kind, v, ctx) === "FAIL") problems.push(id + " " + where + " 超過 " + KG.MAX + " 字：" + String(v)); };
-  const ask = (id, where, q) => {
-    (q.opts || []).forEach((o, k) => put(id, where + "選項" + (k + 1), "option", o));
-    if (q.ok) put(id, where + "ok", "ok", q.ok);
-    (q.why || []).forEach((w, k) => put(id, where + "why" + (k + 1), "why", w, {a: q.a, index: k, optionCount: (q.opts || []).length}));
-  };
-  H.LIST.filter((e) => e.kind === "steps").forEach((e) => {
-    put(e.id, "開場白", "lead", e.lead);
-    (e.steps || []).forEach((s, i) => { if (s.check) ask(e.id, "第" + (i + 1) + "步確認題", s.check); });
-    (H.practiceAll ? H.practiceAll(e) : (e.practice || [])).forEach((q, i) => ask(e.id, "練習第" + (i + 1) + "題", q));
-  });
+  H.LIST.filter((e) => e.kind === "steps").forEach((e) => screenEntry(e).forEach((w) => problems.push(e.id + " " + w + " 超過 " + KG.MAX + " 字")));
   assert.deepEqual(problems, []);
 });
 test("快篩自檢：句長快篩的封版驗收矩陣（Codex 設計者方案 B）", () => {
@@ -228,17 +233,20 @@ test("快篩自檢：句長快篩的封版驗收矩陣（Codex 設計者方案 B
     ...["title", "say", "question", "answer", "write", "fig"].map((k) => [k, x(41), "DEFER"]),
   ];
   cases.forEach(([k, v, want, ctx], i) => assert.equal(screenField(k, v, ctx), want, "案例 " + i + "：" + k));
-  // 走訪層：只改一個欄位成 41 字，要點名該欄位；題幹交主閘不點名
-  const run = (patch) => { const e = JSON.parse(JSON.stringify(H.get("zh-q34-typo"))); patch(e); const p = []; const put = (w, k, v, c) => { if (screenField(k, v, c) === "FAIL") p.push(w); };
-    put("lead", "lead", e.lead); e.steps.forEach((s, i) => { if (!s.check) return; (s.check.opts || []).forEach((o) => put("s" + i + "opt", "option", o)); put("s" + i + "ok", "ok", s.check.ok);
-      (s.check.why || []).forEach((w, k) => put("s" + i + "why" + k, "why", w, {a: s.check.a, index: k, optionCount: s.check.opts.length})); put("s" + i + "q", "question", s.check.q); });
-    e.practice.forEach((q, i) => { q.opts.forEach((o) => put("p" + i + "opt", "option", o)); put("p" + i + "why", "why", q.why[(q.a + 1) % 3], {a: q.a, index: (q.a + 1) % 3, optionCount: 3}); put("p" + i + "q", "question", q.q); }); return p; };
-  assert.deepEqual(run((e) => { e.steps[2].check.opts[1] = x(41); }), ["s2opt"]);
-  assert.deepEqual(run((e) => { e.steps[2].check.ok = x(41); }), ["s2ok"]);
-  assert.deepEqual(run((e) => { e.steps[2].check.why[e.steps[2].check.a === 0 ? 1 : 0] = x(41); }), ["s2why" + (e => e)(H.get("zh-q34-typo").steps[2].check.a === 0 ? 1 : 0)]);
-  assert.deepEqual(run((e) => { e.steps[2].check.why[e.steps[2].check.a] = x(41); }), [], "why[a] 不量");
+  // 走訪層：用正式的 screenEntry，只改一個欄位成 41 字，要剛好點名那一欄
+  const base = H.get("zh-q34-typo");
+  const run = (patch) => { const e = JSON.parse(JSON.stringify(base)); patch(e); return screenEntry(e); };
+  assert.deepEqual(run(() => {}), [], "原篇沒有違規");
+  const c = base.steps[2].check, wc = c.a === 0 ? 1 : 0, p = base.practice[3], wp = (p.a + 1) % p.opts.length;
+  assert.deepEqual(run((e) => { e.lead = x(41); }), ["開場白"]);
+  assert.deepEqual(run((e) => { e.steps[2].check.opts[1] = x(41); }), ["第3步確認題選項2"]);
+  assert.deepEqual(run((e) => { e.steps[2].check.ok = x(41); }), ["第3步確認題ok"]);
+  assert.deepEqual(run((e) => { e.steps[2].check.why[wc] = x(41); }), ["第3步確認題why" + (wc + 1)]);
+  assert.deepEqual(run((e) => { e.steps[2].check.why[c.a] = x(41); }), [], "why[a] 不量");
+  assert.deepEqual(run((e) => { e.practice[3].opts[0] = x(41); }), ["練習第4題選項1"]);
+  assert.deepEqual(run((e) => { e.practice[3].ok = x(41); }), ["練習第4題ok"]);
+  assert.deepEqual(run((e) => { e.practice[3].why[wp] = x(41); }), ["練習第4題why" + (wp + 1)]);
   assert.deepEqual(run((e) => { e.steps[2].check.q = x(41); e.practice[0].q = x(41); }), [], "題幹交主閘");
-  assert.deepEqual(run((e) => { e.practice[3].opts[0] = x(41); }), ["p3opt"]);
   assert.equal(KG.MAX, 40, "上限是主閘的固定值，不跟日期走");
 });
 
