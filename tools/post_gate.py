@@ -17,6 +17,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import threading
 import time
 import uuid
 
@@ -296,6 +297,33 @@ def lane_release(root):
         lane_update(root, 0, False)
 
 
+# cap-why: 租期 15 分、每分鐘續一次＝續租失敗 14 次才會過期；verify／ship 本身可能超過租期（Codex 審 c6b36da P2：執行中沒有續租，601 秒後別人就拿得到）
+LANE_BEAT = 60
+
+
+@contextlib.contextmanager
+def lane_heartbeat(root):
+    """執行中每分鐘續租；續租時發現已被別棵接手就停（結束前由 lane_confirm 判定失敗）。"""
+    stop = threading.Event()
+    def beat():
+        while not stop.wait(LANE_BEAT):
+            with contextlib.suppress(Exception):
+                if lane_update(root, time.time() + LANE_TTL, True) is not None:
+                    return
+    t = threading.Thread(target=beat, daemon=True); t.start()
+    try:
+        yield
+    finally:
+        stop.set(); t.join(5)
+
+
+def lane_confirm(root, until, what):
+    """關鍵時刻（verify 寫完成功收據後、ship 推之前）確認車道仍在自己手上並延到 until；被接手就擋（Codex 審 c6b36da P2）。"""
+    holder = lane_update(root, until, True)
+    if holder is not None:
+        raise Rejected(f'{what}期間上線車道已被 {holder["root"]} 接手（租期過了）：請等它推完，rebase 後重新 verify')
+
+
 def base_current(root):
     """排到車道後先看 origin/main 有沒有比 HEAD 新：舊了就 1 秒內擋下，不跑完 6 分鐘才在 ship 撞到。連不上只警告。"""
     p = subprocess.run(['git', 'fetch', '-q', 'origin', 'main'], cwd=root, capture_output=True, timeout=60)
@@ -520,7 +548,7 @@ def check_worktree(root, expected):
         raise Rejected('暫存區內容與受測 commit 不符：' + ', '.join(changes(staged, expected)))
 
 
-def ship(root, receipt, pid, inbox):
+def ship(root, receipt, pid, inbox, before_push=None):
     environment_check()
     commit = git(root, 'rev-parse', 'HEAD').decode().strip()
     r = read_receipt(receipt)
@@ -556,6 +584,8 @@ def ship(root, receipt, pid, inbox):
     check_worktree(root, committed)
     if read_receipt(receipt) != r:
         raise Rejected('檢查期間收據已改變，沒推')
+    if before_push is not None:
+        before_push()   # 上線車道仍在自己手上才推
     # HEAD may change after the last check; the pushed object still cannot.
     p = subprocess.run(['git', 'push', '-q', 'origin', commit + ':main'], cwd=root)
     if p.returncode:
@@ -596,18 +626,25 @@ def main(argv=None):
             if args[0] == 'verify':
                 lane_take(ROOT)
                 try:
-                    base_current(ROOT)
-                    verify(ROOT, receipt)
+                    with lane_heartbeat(ROOT):
+                        base_current(ROOT)
+                        verify(ROOT, receipt)
+                    try:
+                        lane_confirm(ROOT, time.time() + LANE_SHIP_GRACE, 'verify ')   # 留給自己的 ship
+                    except Rejected as exc:
+                        atomic_receipt(receipt, {'status': 'failed', 'reason': str(exc), 'finished': time.time()})
+                        raise
                 except BaseException:
                     lane_release(ROOT)
                     raise
-                lane_update(ROOT, time.time() + LANE_SHIP_GRACE, False)   # 留給自己的 ship
             else:
                 holder = lane_update(ROOT, time.time() + LANE_SHIP_GRACE, True)
                 if holder is not None:
                     raise Rejected(f'上線車道由 {holder["root"]} 使用中：等它推完，rebase 後重新 verify')
                 try:
-                    ship(ROOT, receipt, args[1], args[2] if len(args) == 3 else None)
+                    with lane_heartbeat(ROOT):
+                        ship(ROOT, receipt, args[1], args[2] if len(args) == 3 else None,
+                             before_push=lambda: lane_confirm(ROOT, time.time() + LANE_TTL, 'ship '))
                 finally:
                     lane_release(ROOT)
     except (Rejected, OSError, ValueError, subprocess.SubprocessError, KeyboardInterrupt) as exc:

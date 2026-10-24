@@ -426,6 +426,33 @@ class PostShip(unittest.TestCase):
         self.run_post('verify',1)
         self.assertFalse(self.lane_file().exists(), 'verify 失敗要交還車道')
 
+    def take_lane_during_hold(self):
+        other = self.base/'other-worktree'; other.mkdir(exist_ok=True)
+        self.lane_file().write_text(json.dumps({'root': str(other), 'until': time.time()+600, 'pid': 1}))
+
+    def test_T30_verify_loses_lane_midway_fails(self):
+        """Codex 審 c6b36da P2：verify 跑到一半車道被別棵接手（租期過了），不得回報成功、收據不得是成功、ship 推不出去。"""
+        p = self.start_held('verify'); self.take_lane_during_hold()
+        self.assertIn('接手', self.release(p))
+        self.assertNotEqual(json.loads(self.receipt().read_text()).get('status'), 'success')
+        self.lane_file().unlink(); self.commit()
+        self.configure(allow_delivery=True, live_sha=self.git('rev-parse','HEAD'))
+        self.run_post('ship',1); self.no_delivery()
+
+    def test_T31_ship_loses_lane_before_push_does_not_push(self):
+        """Codex 審 c6b36da P2：ship 檢查期間車道被別棵接手，推之前要擋下、不推。"""
+        self.verified(); self.configure(allow_delivery=True, live_sha=self.git('rev-parse','HEAD'))
+        self.cfg['hold'] = 'standard'; self.config.write_text(json.dumps(self.cfg))
+        p = subprocess.Popen(['zsh','tools/post.sh','ship','fixture'], cwd=self.repo, env=self.env,
+                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        self.addCleanup(lambda: p.poll() is None and p.kill())
+        deadline = time.monotonic()+10
+        while not (self.base/'ready').exists() and p.poll() is None and time.monotonic()<deadline: time.sleep(.01)
+        self.assertTrue((self.base/'ready').exists(), 'gate not reached')
+        self.take_lane_during_hold()
+        self.assertIn('接手', self.release(p))
+        self.assertEqual(self.events('push'), [])
+
     def test_T24_old_runtime_artifacts_pruned(self):
         """快照每輪約 2.6 MB：超過一天的快照／log 目錄被清掉，一天內的（含背景 e2e 正在用的）保留。"""
         old = [self.repo/'.post-snapshots/old-run', self.repo/'.post-state/old-run']
