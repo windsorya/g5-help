@@ -4,7 +4,7 @@
 // ⇒ 兩份不一樣時不再二選一：留練過題數多的那份（log 陣列總長），輸的那份一定留 backup；沒碼的環境自動開同步＋頁首提醒。
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const {Clock, server, device, flush, descendants} = require('./harness');
+const {Clock, server, device, flush, descendants, hash} = require('./harness');
 const KEY = 'g5sci.v3';
 // 真實存檔的形狀：每次作答一筆 log（自然／數學／國語／社會站同一格式）
 const v3 = (answers, tag = '') => JSON.stringify({v: 3, cards: {}, log: Array.from({length: answers}, (_, i) => ({op: tag + i, ok: true})), settings: {}});
@@ -186,4 +186,162 @@ test('R15 自動碼的這台：上一頁送出後回應沒收到就關頁（雲�
   await again.api.ready; await flush(); await clock.advance(10);
   assert.equal(again.storage.getItem('g5sync.auto'), code, '不是家人連上，提醒要留著');
   assert.equal(backend.store.record(code).data, v3(8, 'z'), '這台 8 題那份留在雲端');
+});
+
+// ---- 交辦 #3151：Codex 審 435b911 FAIL 三項（讀不懂不猜／衝突重送不收斂／頁首提醒說已存雲端）----
+const helpDoc = require('../src/helpdoc.js');
+const HELP = 'g5help.v1';
+const helpSave = n => JSON.stringify({v: 1, entries: {p1: {solved: n, log: Array.from({length: n}, (_, i) => [i, 1])}}, hidden: {}});
+const puts = d => d.calls.filter(c => c.req.op === 'put').length;
+// 舊版無上限重送只靠 microtask 串，會把事件迴圈吃光（測試卡死）：假後端送到第 40 次就斷線，讓舊版以斷言失敗收場（同 Codex 探針主動拋錯）
+const capped = fn => (req, config, d) => d.calls.length > 40 ? Promise.reject(new Error('probe-stop')) : fn(req);
+
+async function helpFamily(t, aData, bData, opts = {}) {
+  const clock = new Clock(), backend = server(clock);
+  const base = {keys: [HELP], autoResolve: true, summarize: {[HELP]: () => 'x'}, ...(opts.score ? {score: {[HELP]: helpDoc.syncScore}} : {})};
+  const a = device(backend, {initial: {[HELP]: aData}, ...base}); t.after(() => a.api.destroy());
+  await a.api.ready; await a.api.enable();
+  const code = a.api.getState().code;
+  let b; b = device(backend, {initial: {[HELP]: bData}, ...base, ...(opts.owned ? owned(() => b) : {})});
+  t.after(() => b.api.destroy());
+  await b.api.ready; await b.api.join(code); await flush();
+  return {clock, backend, a, b, code};
+}
+
+test('R16 讀不懂不猜（Codex 原反例）：這台是 {"log":[1,2,3]}、雲端是合法兩筆 ⇒ 不自動選、雲端不被蓋、不顯示已同步', async t => {
+  for (const ownedPage of [false, true]) {
+    const {backend, b, code} = await helpFamily(t, helpSave(2), '{"log":[1,2,3]}', {owned: ownedPage});
+    assert.equal(backend.store.record(code, HELP).data, helpSave(2), '雲端那份不動');
+    assert.equal(backend.store.record(code, HELP).rev, 1, '沒有多寫一版');
+    assert.equal(b.storage.getItem(HELP), '{"log":[1,2,3]}', '這台那份也不動');
+    assert.ok(b.api.getState().conflicts[HELP], '兩份各自保留');
+    assert.doesNotMatch(b.api.getState().status, /已同步/);
+  }
+});
+
+test('R17 讀不懂不猜（難題站自己的讀檔）：有版本號但本站讀不懂（entries 是陣列）⇒ 用 helpdoc.syncScore 不自動選；讀得懂的照判準', async t => {
+  const odd = JSON.stringify({v: 1, entries: [], log: [1, 2, 3, 4, 5]});
+  assert.equal(helpDoc.parse(odd), null, '前提：本站讀檔拒絕');
+  assert.ok(Number.isNaN(helpDoc.syncScore(odd)));
+  assert.equal(helpDoc.syncScore(helpSave(4)), 4);
+  const r1 = await helpFamily(t, helpSave(2), odd, {owned: true, score: true});
+  assert.equal(r1.backend.store.record(r1.code, HELP).data, helpSave(2));
+  assert.equal(r1.b.storage.getItem(HELP), odd);
+  assert.ok(r1.b.api.getState().conflicts[HELP]);
+  const r2 = await helpFamily(t, helpSave(2), helpSave(6), {owned: true, score: true});
+  await r2.clock.advance(4000);
+  assert.equal(r2.backend.store.record(r2.code, HELP).data, helpSave(6), '讀得懂、這台多 ⇒ 照樣上傳');
+});
+
+test('R18 衝突重送收斂（Codex 原反例）：後端一直回同一 rev 1、題數較少的 conflict ⇒ 不在同一刻連送，改退避', async t => {
+  for (const ownedPage of [false, true]) {
+    const clock = new Clock(), backend = server(clock);
+    const cloud = {ok: false, err: 'conflict', rev: 1, data: v3(2, 'c'), updated: clock.now()};
+    let d; d = device(backend, {initial: {[KEY]: v3(9, 'l')}, ...AUTO, ...(ownedPage ? owned(() => d) : {}),
+      fetch: capped(req => req.op === 'get' ? {ok: true, json: async () => ({ok: true, rev: 1, data: v3(2, 'c'), updated: clock.now()})}
+        : {ok: true, json: async () => cloud})});
+    t.after(() => d.api.destroy());
+    await d.api.ready; await d.api.join('ABCDEFGHJKMN'); await flush();
+    assert.ok(puts(d) <= 1, `同一刻只送 ${puts(d)} 次`);
+    assert.match(d.api.getState().status, /稍後自動再試/);
+    assert.ok(d.api.getState().retryAt > clock.now(), '有退避');
+    await clock.advance(60000);
+    assert.ok(puts(d) <= 6, `60 秒內只送 ${puts(d)} 次（退避 4→8→16→32 秒）`);
+  }
+});
+
+test('R19 衝突重送收斂：後端每次都回「又前進一號」的衝突（另一台不停寫）⇒ 一輪最多重送 3 次就退避', async t => {
+  for (const ownedPage of [false, true]) {
+    const clock = new Clock(), backend = server(clock);
+    let d; d = device(backend, {initial: {[KEY]: v3(9, 'l')}, ...AUTO, ...(ownedPage ? owned(() => d) : {}),
+      fetch: capped(req => req.op === 'get' ? {ok: true, json: async () => ({ok: true, rev: 1, data: v3(2, 'c1'), updated: clock.now()})}
+        : {ok: true, json: async () => ({ok: false, err: 'conflict', rev: req.rev + 1, data: v3(2, 'c' + (req.rev + 1)), updated: clock.now()})})});
+    t.after(() => d.api.destroy());
+    await d.api.ready; await d.api.join('ABCDEFGHJKMN'); await flush();
+    assert.ok(puts(d) <= 4, `一輪送了 ${puts(d)} 次`);
+    assert.match(d.api.getState().status, /稍後自動再試/);
+    assert.ok(d.api.getState().retryAt > clock.now());
+  }
+});
+
+test('R22 重送次數每輪歸零：上一輪撞滿退避後，下一輪遇到一次正常的搶寫（另一台剛好先寫）仍照判準收斂、上傳成功', async t => {
+  const clock = new Clock(), backend = server(clock);
+  let rev = 1, data = v3(2, 'c1'), phase = 'storm', raced = false;
+  const reply = body => ({ok: true, json: async () => body});
+  const d = device(backend, {initial: {[KEY]: v3(9, 'l')}, ...AUTO, fetch: capped(req => {
+    if (req.op === 'get') return reply({ok: true, rev, data, updated: clock.now()});
+    if (phase === 'storm' || (phase === 'once' && !raced)) {   // 另一台先寫一版
+      raced = phase === 'once'; rev += 1; data = v3(2, 'c' + rev);
+      return reply({ok: false, err: 'conflict', rev, data, updated: clock.now()});
+    }
+    if (req.rev !== rev) return reply({ok: false, err: 'conflict', rev, data, updated: clock.now()});
+    rev += 1; data = req.data; return reply({ok: true, rev, updated: clock.now()});
+  })});
+  t.after(() => d.api.destroy());
+  await d.api.ready; await d.api.join('ABCDEFGHJKMN'); await flush();
+  assert.match(d.api.getState().status, /稍後自動再試/, '前提：第一輪撞滿退避');
+  // 第一次退避（4 秒）後的那一輪就要收斂；沒歸零的話這一輪一撞就丟錯、要再退避 8 秒才上得去
+  phase = 'once'; await clock.advance(4000);
+  assert.equal(data, v3(9, 'l'), '這台 9 題那份上了雲端');
+  assert.match(d.api.getState().status, /已同步/);
+});
+
+test('R23 雲端倒退（例如被換回舊版）：這台跟上次存好的一樣、但雲端已經不是這份 ⇒ 提醒不說已存雲端', async t => {
+  const clock = new Clock(), backend = server(clock);
+  const d = device(backend, {initial: {[KEY]: v3(3, 'home')}, autoEnable: true, autoResolve: true});
+  await d.api.ready; await flush();
+  const code = d.api.getState().code;
+  d.storage.setItem(KEY, v3(5, 'home')); await clock.advance(4000);
+  assert.equal(backend.store.record(code).rev, 2);
+  d.api.destroy();
+  backend.store.withLock(() => backend.store.set(hash(code), KEY, {rev: 1, data: v3(1, 'old'), updated: clock.now()}));
+  const again = device(backend, {storage: d.storage, autoEnable: true, autoResolve: true}); t.after(() => again.api.destroy());
+  await again.api.ready; await flush();
+  assert.ok(again.api.getState().conflicts[KEY], '前提：看到雲端倒退');
+  const text = again.doc.body.children.find(n => n.className === 'g5s-banner').textContent;
+  assert.doesNotMatch(text, /已經先存到雲端/); assert.match(text, /還沒存到雲端/);
+});
+
+test('R24 存好之後離線重開（還沒重新下載）：這台就是上次雲端確認收下的那份 ⇒ 提醒照說已存雲端，不嚇家長', async t => {
+  const clock = new Clock(), backend = server(clock), nav = {onLine: true};
+  const d = device(backend, {initial: {[KEY]: v3(3, 'home')}, autoEnable: true, autoResolve: true, navigator: nav});
+  await d.api.ready; await flush();
+  d.api.destroy(); nav.onLine = false;
+  const again = device(backend, {storage: d.storage, autoEnable: true, autoResolve: true, navigator: nav}); t.after(() => again.api.destroy());
+  await again.api.ready; await flush();
+  assert.match(again.api.getState().status, /離線/);
+  assert.match(again.doc.body.children.find(n => n.className === 'g5s-banner').textContent, /已經先存到雲端/);
+});
+
+test('R20 頁首提醒只在真的存上雲端時才說「已經先存到雲端」：離線第一次打開不說；連上網路存好後才說', async t => {
+  const clock = new Clock(), backend = server(clock), nav = {onLine: false};
+  const d = device(backend, {initial: {[KEY]: v3(3, 'home')}, autoEnable: true, autoResolve: true, navigator: nav});
+  t.after(() => d.api.destroy());
+  await d.api.ready; await flush();
+  const code = d.api.getState().code;
+  assert.equal(d.calls.length, 0, '離線：一次都沒送');
+  assert.equal(backend.store.record(code), null, '雲端沒有');
+  const bannerText = () => d.doc.body.children.find(n => n.className === 'g5s-banner').textContent;
+  const hint = () => descendants(d.doc.container).find(n => n.className === 'g5s-auto-hint').textContent;
+  assert.match(bannerText(), /還沒跟家裡其他裝置連起來/);
+  assert.doesNotMatch(bannerText(), /已經先存到雲端/);
+  assert.match(bannerText(), /還沒存到雲端/);
+  assert.doesNotMatch(hint(), /已自動備份到雲端/);
+  nav.onLine = true; d.window.dispatch('online'); await flush(); await clock.advance(10);
+  assert.equal(backend.store.record(code).data, v3(3, 'home'));
+  assert.match(bannerText(), /已經先存到雲端/);
+  assert.match(hint(), /已自動備份到雲端/);
+});
+
+test('R21 存上雲端後這台又練了、但後端故障送不上 ⇒ 提醒改回「最新的還沒存到雲端」', async t => {
+  const clock = new Clock(), backend = server(clock);
+  const d = device(backend, {initial: {[KEY]: v3(3, 'home')}, autoEnable: true, autoResolve: true});
+  t.after(() => d.api.destroy());
+  await d.api.ready; await flush();
+  const bannerText = () => d.doc.body.children.find(n => n.className === 'g5s-banner').textContent;
+  assert.match(bannerText(), /已經先存到雲端/);
+  d.mode = 'server'; d.storage.setItem(KEY, v3(5, 'home')); await clock.advance(4000);
+  assert.match(d.api.getState().status, /稍後自動再試/);
+  assert.doesNotMatch(bannerText(), /已經先存到雲端/);
+  assert.match(bannerText(), /還沒存到雲端/);
 });

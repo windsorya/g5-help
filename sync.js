@@ -76,10 +76,14 @@
   }
   // 「練過題數」：各站存檔都把每次作答記在名為 log 的陣列裡（自然／數學／國語／社會＝頂層 log；難題站＝entries[*].log；
   // 錯題站＝it[*].log）⇒ 數全部 log 陣列的長度。次要比較：cards[*].seen 加總（log 有上限時用）。讀不懂＝null（不自動選）。
+  // 這裡只是底線（Codex 審 435b911：{"log":[1,2,3]} 只過 JSON 語法就勝出、蓋掉雲端）：六站存檔頂層都是帶整數版本號 v 的物件
+  // （自然／數學／國語／社會 v3–v4、難題 v1、錯題 v1–v2），連這個都不是＝不是存檔。要真的「本站讀得懂才比」，站台用 options.score
+  // 傳自己的讀檔（讀不懂回 NaN；難題站＝helpdoc.syncScore）。
   function practiceScore(data) {
     if (typeof data !== 'string') { return null; }
     var doc;
     try { doc = JSON.parse(data); } catch (ignore) { return null; }
+    if (!doc || typeof doc !== 'object' || Array.isArray(doc) || !integer(doc.v) || doc.v < 1) { return null; }
     var answers = 0, seen = 0;
     (function walk(node, depth) {
       if (!node || typeof node !== 'object' || depth > 5) { return; }
@@ -118,7 +122,7 @@
     try { storage = options.storage || root.localStorage; } catch (ignoreStorage) { storage = null; }
     var code = null, epoch = 0, destroyed = false, stopped = false;
     var busy = null, activeAbort = null, retryTimer = null, failures = 0, retryAt = 0;
-    var needsGet = {}, conflicts = {}, decisions = {}, observed = {}, replaced = [], deferred = {};
+    var needsGet = {}, conflicts = {}, decisions = {}, observed = {}, replaced = [], deferred = {}, resends = {};
     var status = '尚未開啟同步', notice = '', viewCode, view = {};
     // 頁面自己是唯一寫入者（提供 accept，難題站）：#1303 第 7 輪後依升級階梯縮範圍——關閉「留這台／留雲端」衝突選擇，
     // 兩台不一樣就各自保留（這台用這台的、雲端那份不動），不出按鈕、resolve 拒絕。自然站（沒有 accept）照舊。
@@ -301,17 +305,33 @@
       if (parent === view.panel) { view.join = form; view.input = input; }
       return input;
     }
+    // 「已存到雲端」只在真的存好時才說（Codex 審 435b911：離線第一次打開、一次都沒送，提醒仍說已存雲端）：
+    // 每個 key 這台的內容＝伺服器確認收下的那一版（baseline），且沒看到雲端跟它矛盾（衝突：倒退、同號不同內容、各自保留）。
+    // 還沒重新下載（離線重開）不算矛盾：上次確認收下的就是這份（R24）。
+    function savedToCloud() {
+      try {
+        return !!code && keys.every(function (key) {
+          var b = baseline(key);
+          return !conflicts[key] && !!b && contentHash(read(key)) === b.hash;
+        });
+      } catch (ignore) { return false; }
+    }
     // 頁首常駐提醒（主畫面圖示開的 App 與 Safari 存檔分開；沒連上家人時她練的只在這台＋這組自動碼）
-    var banner = null;
-    function updateBanner() {
+    var banner = null, bannerText = null;
+    function bannerWords(saved) {
+      return '這台還沒跟家裡其他裝置連起來，' + (saved ? '進度已經先存到雲端。' : '最新的進度還沒存到雲端，目前只在這台。') +
+        '請爸媽在另一台按「複製連結」，貼到下面。連起來後，會留練得比較多的那份。';
+    }
+    function updateBanner(saved) {
       var body = doc && doc.body;
       if (!body || typeof body.insertBefore !== 'function') { return; }
-      if (!isAuto()) { if (banner && banner.parentNode) { banner.parentNode.removeChild(banner); } banner = null; return; }
-      if (banner) { return; }
+      if (!isAuto()) { if (banner && banner.parentNode) { banner.parentNode.removeChild(banner); } banner = null; bannerText = null; return; }
+      if (banner) { bannerText.textContent = bannerWords(saved); return; }   // 只換字，不重建（輸入框裡打到一半的連結不能被洗掉）
       banner = el('div', 'banner');
       banner.setAttribute('role', 'region'); banner.setAttribute('aria-label', '跨裝置同步提醒');
       banner.style.cssText = 'position:sticky;top:0;z-index:50;background:#fff4d6;color:#4a3500;border-bottom:2px solid #e0b100;padding:10px 14px;font-size:16px;line-height:1.5';
-      banner.appendChild(el('p', 'banner-text', '這台還沒跟家裡其他裝置連起來，進度已經先存到雲端。請爸媽在另一台按「複製連結」，貼到下面。連起來後，會留練得比較多的那份。'));
+      bannerText = el('p', 'banner-text', bannerWords(saved));
+      banner.appendChild(bannerText);
       var row = el('div', 'banner-row'); row.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap';
       var input = el('input', 'banner-input'); input.type = 'text'; input.maxLength = 400; input.autocomplete = 'off';
       input.setAttribute('aria-label', '同步碼或同步連結'); input.setAttribute('placeholder', '貼上同步連結或 12 碼同步碼');
@@ -356,7 +376,7 @@
         }));
         panel.appendChild(button('這台停止同步', function () { stop(); }));
         if (isAuto()) {
-          panel.appendChild(el('p', 'auto-hint', '這台的進度已自動備份到雲端，但還沒跟家裡其他裝置連起來。'));
+          view.autoHint = el('p', 'auto-hint'); panel.appendChild(view.autoHint);   // 字由 render() 依 savedToCloud() 填
           panel.appendChild(button('輸入家裡的同步碼（已在別台開過）', function () { view.join.hidden = false; view.input.focus(); }));
           joinForm(panel, true);
         }
@@ -369,9 +389,14 @@
     }
     function render() {
       if (destroyed) { return; }
-      try { updateBanner(); } catch (ignoreBanner) { /* 提醒畫不出來不影響同步 */ }
+      var saved = savedToCloud();
+      try { updateBanner(saved); } catch (ignoreBanner) { /* 提醒畫不出來不影響同步 */ }
       if (viewCode !== code || !view.panel || view.auto !== isAuto()) { buildView(); view.auto = isAuto(); }
       view.status.textContent = status; view.notice.textContent = notice;
+      if (view.autoHint) {
+        view.autoHint.textContent = saved ? '這台的進度已自動備份到雲端，但還沒跟家裡其他裝置連起來。' :
+          '這台最新的進度還沒存到雲端（目前只在這台），也還沒跟家裡其他裝置連起來。';
+      }
       var signature = keys.map(function (key) {
         if (!conflicts[key]) { return ''; }
         var local = read(key);
@@ -478,11 +503,25 @@
       if (chosenCloud) { backup(key, chosenCloud.data); }
       return request({op: 'put', key: key, rev: rev, data: data}, token).then(function (r) {
         assertActive(token);
-        if (r.err === 'conflict') { if (autoResolve) { return settle(key, r, token); } showConflict(key, r); return; }
+        if (r.err === 'conflict') {
+          // 被拒卻說雲端還在送出時那一號＝壞回應（gas/core.js 只在版本號不同時回 conflict）：不重送，交給 failure() 退避
+          //（同 recover 的 fromPut；Codex 審 435b911 注入「一直回 rev 1」，舊版同一刻連送 51 次）
+          if (r.rev === rev) { throw error('server'); }
+          if (autoResolve) { conflictAgain(key); return settle(key, r, token); }
+          showConflict(key, r); return;
+        }
         // The baseline is the exact request payload, never a newer local edit.
         saveBaseline(key, r.rev, data, r.updated);
         delete conflicts[key];
       });
+    }
+    // 一輪同步（run 的一個 job）裡同一個 key 被拒（conflict）後自動重送的次數，job 開始時歸零。
+    // cap-why: 正常兩台搶寫一輪頂多撞 1–2 次；超過 3 次＝後端一直回衝突（壞回應，或另一台每次都搶先寫），
+    // 改走 failure() 的退避（4 秒起、最長 60 秒）下一輪再試，不在同一刻無限重送（Codex 審 435b911）。不是流量上限。
+    var MAX_RESEND = 3;
+    function conflictAgain(key) {
+      resends[key] = (resends[key] || 0) + 1;
+      if (resends[key] > MAX_RESEND) { throw error('server'); }
     }
     // ---- 有 accept 的頁面：待確認上傳（設計 D・A1）----
     // 建立下一筆：先存進 checkpoint 並讀回，成功才送；確認舊 pending 之前不會呼叫這裡（pending 不會被新進度改寫）。
@@ -500,7 +539,7 @@
       var p = ck.pending;
       return request({op: 'put', key: key, rev: p.baseRev, data: p.data}, token).then(function (r) {
         assertActive(token);
-        if (r.err === 'conflict') { return recover(key, r, token, true); }
+        if (r.err === 'conflict') { conflictAgain(key); return recover(key, r, token, true); }
         confirm(key, p, r.rev, r.updated);
       });
     }
@@ -651,7 +690,7 @@
         var saved = read(CODE);
         if (saved !== code) { resetSession(saved && normalizeCode(saved) === saved ? saved : null); }
         if (!code || (!force && now() < retryAt)) { return false; }
-        token = epoch;
+        token = epoch; resends = {};
         return job(token).then(function () {
           assertActive(token);
           failures = 0; retryAt = 0;

@@ -104,6 +104,14 @@
   }
   // 清除全部作答紀錄：每一篇回到空白（之後打開時才用 fresh() 建）；隱藏與刪除清單照留（另有「恢復全部隱藏的篇」）
   function cleared(hidden, deleted) { return {entries: Object.create(null), hidden: cleanHidden(plain(hidden)), deleted: cleanHidden(plain(deleted))}; }
-  var api = {fresh: fresh, clean1: clean1, parse: parse, serialize: serialize, cleanHidden: cleanHidden, hide: hide, unhide: unhide, isHidden: isHidden, hiddenIn: hiddenIn, remove: remove, unhideAll: unhideAll, cleared: cleared, own: own, postIdOk: postIdOk, cleanPeek: cleanPeek, PEEK_MAX: PEEK_MAX};
+  // 跨裝置同步的「練過題數」（sync.js options.score，律師判準：兩份不一樣留練得多的那份）：用本站的 parse 讀，
+  // 本站讀不懂的存檔回 NaN ⇒ sync.js 不自動選、兩份各自保留（Codex 審 435b911「讀不懂不猜」：舊版只看 JSON 語法，{"log":[1,2,3]} 會蓋掉雲端）
+  function syncScore(raw) {
+    var d = typeof raw === "string" ? parse(raw) : null, n = 0;
+    if (!d) return NaN;
+    Object.keys(d.entries).forEach(function (id) { n += d.entries[id].log.length; });
+    return n;
+  }
+  var api = {fresh: fresh, clean1: clean1, parse: parse, serialize: serialize, cleanHidden: cleanHidden, hide: hide, unhide: unhide, isHidden: isHidden, hiddenIn: hiddenIn, remove: remove, unhideAll: unhideAll, cleared: cleared, own: own, postIdOk: postIdOk, cleanPeek: cleanPeek, PEEK_MAX: PEEK_MAX, syncScore: syncScore};
   if (typeof module !== "undefined" && module.exports) module.exports = api; else root.G5HelpDoc = api;
 })(typeof window !== "undefined" ? window : this);

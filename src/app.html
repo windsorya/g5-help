@@ -893,6 +893,8 @@ window.G5HelpPage = {state:function(id){ return JSON.parse(JSON.stringify(DB.ent
     endpoint: "https://script.google.com/macros/s/AKfycbxwo08VVT5tSRf-DsQEoo1hMlCm1YytGTzj89BPtJ6YWjPieuKyAPbnWXjUKagBdL6l/exec",
     keys: ["g5help.v1"], container: "#g5sync",
     summarize: {"g5help.v1": function(j){ try { var x = JSON.parse(j), n = 0, m = 0; Object.keys(x.entries || {}).forEach(function(k){ n += x.entries[k].solved || 0; if (window.G5Hard.isMastered(window.G5Hard.get(k), x.entries[k])) m++; }); return "練習做完 " + n + " 題、學會 " + m + " 篇"; } catch (e) { return "（讀不懂的紀錄）"; } }},
+    // 兩份不一樣時比「練過題數」用本站自己的讀檔（DOC.parse）：本站讀不懂的那份不參加比較、不自動選（Codex 審 435b911）
+    score: {"g5help.v1": window.G5HelpDoc.syncScore},
     // 雲端版本只能經由本頁套用（首頁、沒有未存進度時），不 reload（#1303 第 5 輪必修 2）
     canReplace: function(key){ return window.G5HelpCanReplace(key); },
     accept: function(key, data){ return window.G5HelpApplyRemote(key, data); }

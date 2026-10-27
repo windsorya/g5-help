@@ -130,11 +130,46 @@ def auto_flow(browser, url):
     h.close(); s.close()
 
 
+def review3151_flow(browser, url):
+    """交辦 #3151（Codex 審 435b911 FAIL）真頁面兩項：
+    ①讀不懂不猜——這台的 g5help.v1 有版本號但本站讀檔（DOC.parse）讀不懂、log 又比雲端多：雲端不能被蓋（驗 app.html 有把
+      helpdoc.syncScore 接進 score；sync.js 的底線只看頂層 v，這份過得了底線，所以這項只有接線才擋得住）。
+    ②頁首提醒——離線第一次打開（一次都沒送）不能說「已經先存到雲端」；連上網路、真的存好後才說。"""
+    errors, key, code = [], "g5help.v1", "ABCDEFGHJKMN"
+    log = [{"t": 1792000000000 + i, "q": 0, "clean": True, "wrongs": 0} for i in range(2)]
+    two = json.dumps({"v": 1, "entries": {"p38-6-2": {"lessonDone": True, "idx": 2, "seed": 5, "streak": 0, "clean": 0,
+                      "solved": 2, "mastered": False, "log": log, "cur": None, "r": 1}}})
+    odd = json.dumps({"v": 1, "entries": [], "log": [1, 2, 3, 4, 5]})
+    STORE[(code, key)] = (1, two, 1792000000000)
+    c = device(browser); p0 = open_(c, url, errors)
+    p0.evaluate("(d) => localStorage.setItem('g5help.v1', d)", odd); p0.close()
+    p1 = open_(c, url + "#sync=" + code, errors); p1.wait_for_timeout(3000)
+    check("#3151① 本站讀不懂的這台（log 5 筆）沒蓋掉雲端（2 筆、rev 1）", STORE[(code, key)][:2] == (1, two), STORE[(code, key)][0])
+    check("#3151① 這台那份也沒被動", p1.evaluate("localStorage.getItem('g5help.v1')") == odd)
+    check("#3151① 不顯示已同步", "已同步" not in p1.locator("#g5sync .g5s-status").inner_text(), p1.locator("#g5sync .g5s-status").inner_text())
+    c.close()
+    off = device(browser, noauto=False)
+    off.add_init_script("Object.defineProperty(Navigator.prototype,'onLine',{configurable:true,get:function(){return window.__g5off===false;}})")
+    po = open_(off, url, errors)
+    po.evaluate("(d) => localStorage.setItem('g5help.v1', d)", two); po.reload(); po.wait_for_load_state("load"); po.wait_for_timeout(2500)
+    oc = po.evaluate("localStorage.getItem('g5sync.code')")
+    text = po.locator(".g5s-banner").inner_text() if po.locator(".g5s-banner").count() == 1 else ""
+    check("#3151② 離線第一次打開：自動建了碼、雲端一筆都沒有", bool(oc) and (oc, key) not in STORE, oc)
+    check("#3151② 離線：頁首提醒不說「已經先存到雲端」、說還沒存", "已經先存到雲端" not in text and "還沒存到雲端" in text, text)
+    po.evaluate("window.__g5off = false; window.dispatchEvent(new Event('online'))"); po.wait_for_timeout(2500)
+    text = po.locator(".g5s-banner").inner_text() if po.locator(".g5s-banner").count() == 1 else ""
+    check("#3151② 連上網路：雲端有這份（rev 1）", STORE.get((oc, key), (0, None))[:2] == (1, two), STORE.get((oc, key), (0,))[0])
+    check("#3151② 真的存好後提醒才說「已經先存到雲端」", "已經先存到雲端" in text, text)
+    check("#3151 沒有 JS 錯誤", not errors, errors)
+    off.close()
+
+
 def main():
-    help_seed = ("localStorage.setItem('g5help.v1',JSON.stringify({v:1,entries:{'p38-6-2':{lessonDone:true,idx:3,seed:5,streak:3,clean:3,solved:3,mastered:true,log:[],cur:null,r:1}}}))")
+    help_seed =("localStorage.setItem('g5help.v1',JSON.stringify({v:1,entries:{'p38-6-2':{lessonDone:true,idx:3,seed:5,streak:3,clean:3,solved:3,mastered:true,log:[],cur:null,r:1}}}))")
     with sync_playwright() as p:
         br = p.chromium.launch()
         auto_flow(br, (ROOT / "index.html").as_uri())
+        review3151_flow(br, (ROOT / "index.html").as_uri())
         flow(br, "難題站", (ROOT / "index.html").as_uri(), "g5help.v1", help_seed,
              lambda j: json.loads(j)["entries"]["p38-6-2"]["solved"] == 3)
         def sci_seed(pg):

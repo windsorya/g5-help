@@ -464,7 +464,15 @@ details p{margin:0 0 10px}
   }
   // 清除全部作答紀錄：每一篇回到空白（之後打開時才用 fresh() 建）；隱藏與刪除清單照留（另有「恢復全部隱藏的篇」）
   function cleared(hidden, deleted) { return {entries: Object.create(null), hidden: cleanHidden(plain(hidden)), deleted: cleanHidden(plain(deleted))}; }
-  var api = {fresh: fresh, clean1: clean1, parse: parse, serialize: serialize, cleanHidden: cleanHidden, hide: hide, unhide: unhide, isHidden: isHidden, hiddenIn: hiddenIn, remove: remove, unhideAll: unhideAll, cleared: cleared, own: own, postIdOk: postIdOk, cleanPeek: cleanPeek, PEEK_MAX: PEEK_MAX};
+  // 跨裝置同步的「練過題數」（sync.js options.score，律師判準：兩份不一樣留練得多的那份）：用本站的 parse 讀，
+  // 本站讀不懂的存檔回 NaN ⇒ sync.js 不自動選、兩份各自保留（Codex 審 435b911「讀不懂不猜」：舊版只看 JSON 語法，{"log":[1,2,3]} 會蓋掉雲端）
+  function syncScore(raw) {
+    var d = typeof raw === "string" ? parse(raw) : null, n = 0;
+    if (!d) return NaN;
+    Object.keys(d.entries).forEach(function (id) { n += d.entries[id].log.length; });
+    return n;
+  }
+  var api = {fresh: fresh, clean1: clean1, parse: parse, serialize: serialize, cleanHidden: cleanHidden, hide: hide, unhide: unhide, isHidden: isHidden, hiddenIn: hiddenIn, remove: remove, unhideAll: unhideAll, cleared: cleared, own: own, postIdOk: postIdOk, cleanPeek: cleanPeek, PEEK_MAX: PEEK_MAX, syncScore: syncScore};
   if (typeof module !== "undefined" && module.exports) module.exports = api; else root.G5HelpDoc = api;
 })(typeof window !== "undefined" ? window : this);
 
@@ -2135,6 +2143,8 @@ window.G5HelpPage = {state:function(id){ return JSON.parse(JSON.stringify(DB.ent
     endpoint: "https://script.google.com/macros/s/AKfycbxwo08VVT5tSRf-DsQEoo1hMlCm1YytGTzj89BPtJ6YWjPieuKyAPbnWXjUKagBdL6l/exec",
     keys: ["g5help.v1"], container: "#g5sync",
     summarize: {"g5help.v1": function(j){ try { var x = JSON.parse(j), n = 0, m = 0; Object.keys(x.entries || {}).forEach(function(k){ n += x.entries[k].solved || 0; if (window.G5Hard.isMastered(window.G5Hard.get(k), x.entries[k])) m++; }); return "練習做完 " + n + " 題、學會 " + m + " 篇"; } catch (e) { return "（讀不懂的紀錄）"; } }},
+    // 兩份不一樣時比「練過題數」用本站自己的讀檔（DOC.parse）：本站讀不懂的那份不參加比較、不自動選（Codex 審 435b911）
+    score: {"g5help.v1": window.G5HelpDoc.syncScore},
     // 雲端版本只能經由本頁套用（首頁、沒有未存進度時），不 reload（#1303 第 5 輪必修 2）
     canReplace: function(key){ return window.G5HelpCanReplace(key); },
     accept: function(key, data){ return window.G5HelpApplyRemote(key, data); }
