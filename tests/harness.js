@@ -152,6 +152,7 @@ function device(server, options = {}) {
     autoResolve: options.autoResolve ?? false, autoEnable: options.autoEnable ?? false
   };
   if (options.score) init.score = options.score;
+  if (options.accepts) init.accepts = options.accepts;   // #5099：站台嚴格讀檔
   if (options.nativeRandom) delete init.random;
   if (options.random) init.random = options.random;
   if (options.noCrypto) delete window.crypto;

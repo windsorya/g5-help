@@ -78,7 +78,7 @@
   // 錯題站＝it[*].log）⇒ 數全部 log 陣列的長度。次要比較：cards[*].seen 加總（log 有上限時用）。讀不懂＝null（不自動選）。
   // 這裡只是底線（Codex 審 435b911：{"log":[1,2,3]} 只過 JSON 語法就勝出、蓋掉雲端）：六站存檔頂層都是帶整數版本號 v 的物件
   // （自然／數學／國語／社會 v3–v4、難題 v1、錯題 v1–v2），連這個都不是＝不是存檔。要真的「本站讀得懂才比」，站台用 options.score
-  // 傳自己的讀檔（讀不懂回 NaN；難題站＝helpdoc.syncScore）。
+  // 傳自己的讀檔（讀不懂回 NaN；難題站＝helpdoc.syncScore）；只要擋讀不懂、仍照這裡數題數與 seen 的站台用 options.accepts（#5099）。
   function practiceScore(data) {
     if (typeof data !== 'string') { return null; }
     var doc;
@@ -149,6 +149,11 @@
       if (local === null) { return 'cloud'; }
       if (cloudData === null) { return 'local'; }
       var a, c;
+      // #5099：站台自己的嚴格讀檔（options.accepts[key](raw) 回 true＝本站讀得懂）。任一份讀不懂（含出錯、回 true 以外的值）
+      // ＝不猜、不自動選；兩份都讀得懂才照下面的判準比（題數→seen→留這台）。只把結果變嚴，不改判準本身。
+      if (options.accepts && typeof options.accepts[key] === 'function') {
+        try { if (options.accepts[key](local) !== true || options.accepts[key](cloudData) !== true) { return null; } } catch (ignoreAccepts) { return null; }
+      }
       if (options.score && typeof options.score[key] === 'function') {
         try { a = [Number(options.score[key](local)), 0]; c = [Number(options.score[key](cloudData)), 0]; } catch (ignore) { return null; }
         if (!isFinite(a[0]) || !isFinite(c[0])) { return null; }

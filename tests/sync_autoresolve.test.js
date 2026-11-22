@@ -345,3 +345,49 @@ test('R21 存上雲端後這台又練了、但後端故障送不上 ⇒ 提醒�
   assert.doesNotMatch(bannerText(), /已經先存到雲端/);
   assert.match(bannerText(), /還沒存到雲端/);
 });
+
+// #5099：五站各自的嚴格讀檔接進比較（options.accepts）。本站讀不懂的那份（有 v 但格式不對）不參加比較、不自動選；
+// 讀得懂的照律師判準（題數→seen→留這台），seen 次比不因此丟掉（score 只能回一個數字，會丟 seen）。
+async function acceptFamily(t, aData, bData, accepts) {
+  const clock = new Clock(), backend = server(clock);
+  const a = device(backend, {initial: {[KEY]: aData}, ...AUTO});
+  t.after(() => a.api.destroy());
+  await a.api.ready; await a.api.enable();
+  const code = a.api.getState().code;
+  const b = device(backend, {initial: {[KEY]: bData}, ...AUTO, accepts: {[KEY]: accepts}});
+  t.after(() => b.api.destroy());
+  await b.api.ready; await b.api.join(code); await flush();
+  return {clock, backend, a, b, code};
+}
+const strictV3 = raw => { try { const o = JSON.parse(raw); return o.v === 3 && Array.isArray(o.log) && o.cards && typeof o.cards === 'object' && !Array.isArray(o.cards); } catch (e) { return false; } };
+
+test('R25 本站讀不懂（有 v 但 cards 是陣列）的那份練得多也不勝出：兩份各自保留、雲端不被蓋', async t => {
+  const odd = JSON.stringify({v: 3, cards: [], log: Array.from({length: 40}, (_, i) => ({op: 'x' + i}))});
+  const {backend, b, code} = await acceptFamily(t, v3(2, 'ok'), odd, strictV3);
+  assert.equal(backend.store.record(code).data, v3(2, 'ok'), '雲端那份不動');
+  assert.equal(backend.store.record(code).rev, 1);
+  assert.equal(b.storage.getItem(KEY), odd, '這台那份也不動');
+  assert.ok(b.api.getState().conflicts[KEY], '兩份各自保留');
+  const r2 = await acceptFamily(t, odd, v3(3, 'mine'), strictV3);
+  assert.equal(r2.backend.store.record(r2.code).data, odd, '雲端讀不懂：不拿這台蓋掉它');
+  assert.equal(r2.b.storage.getItem(KEY), v3(3, 'mine'));
+  assert.ok(r2.b.api.getState().conflicts[KEY]);
+});
+
+test('R26 兩份本站都讀得懂：照判準，題數一樣時仍比 seen（accepts 不丟次比）', async t => {
+  const withSeen = (n, seen) => JSON.stringify({v: 3, log: Array.from({length: n}, (_, i) => ({op: 's' + i})), cards: {c1: {seen}}});
+  const r1 = await acceptFamily(t, v3(22, 'cloud'), v3(3, 'home'), strictV3);
+  assert.equal(r1.b.storage.getItem(KEY), v3(22, 'cloud'));
+  const r2 = await acceptFamily(t, withSeen(5, 2), withSeen(5, 9), strictV3);
+  await r2.clock.advance(4000);
+  assert.equal(r2.backend.store.record(r2.code).data, withSeen(5, 9), '題數一樣、這台 seen 多 ⇒ 留這台');
+});
+
+test('R27 accepts 本身出錯或回 true 以外的值＝讀不懂，不猜', async t => {
+  for (const bad of [() => { throw new Error('boom'); }, () => 1, () => 'yes', () => undefined]) {
+    const {backend, b, code} = await acceptFamily(t, v3(2, 'c'), v3(9, 'l'), bad);
+    assert.equal(backend.store.record(code).data, v3(2, 'c'));
+    assert.equal(b.storage.getItem(KEY), v3(9, 'l'));
+    assert.ok(b.api.getState().conflicts[KEY]);
+  }
+});
