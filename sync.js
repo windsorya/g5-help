@@ -144,16 +144,19 @@
     // 四站共 12 支 e2e 沒攔 GAS，自動開會每跑一次就在家長的「G5 家庭同步」試算表寫一列。真的 iPad／iPhone 這個值是 false。
     try { if (root.navigator && root.navigator.webdriver === true) { autoEnable = false; } } catch (ignoreWebdriver) { /* 照預設 */ }
     // 律師判準：留練過題數多的那份；題數一樣比 seen；再一樣留這台（她眼前這份）。讀不懂任一份＝不猜，退回原本的顯示
+    // #5099：站台自己的嚴格讀檔（options.accepts[key](raw) 回 true＝本站讀得懂）。true＝這份本站讀不懂（含 accepts 出錯、
+    // 回 true 以外的值）；沒提供 accepts 或資料是 null（沒有存檔）＝false。只把結果變嚴：讀不懂的不參加比較、不自動換上，判準本身不變。
+    function unreadable(key, data) {
+      if (data === null || !options.accepts || typeof options.accepts[key] !== 'function') { return false; }
+      try { return options.accepts[key](data) !== true; } catch (ignoreAccepts) { return true; }
+    }
     function pick(key, local, cloudData) {
+      // #5099：任一份本站讀不懂（unreadable）＝不猜、不自動選——放在「一字不差」前面：兩份一樣但讀不懂也不算已同步（Codex 審 1f90839）
+      if (unreadable(key, local) || unreadable(key, cloudData)) { return null; }
       if (local === cloudData) { return 'same'; }
       if (local === null) { return 'cloud'; }
       if (cloudData === null) { return 'local'; }
       var a, c;
-      // #5099：站台自己的嚴格讀檔（options.accepts[key](raw) 回 true＝本站讀得懂）。任一份讀不懂（含出錯、回 true 以外的值）
-      // ＝不猜、不自動選；兩份都讀得懂才照下面的判準比（題數→seen→留這台）。只把結果變嚴，不改判準本身。
-      if (options.accepts && typeof options.accepts[key] === 'function') {
-        try { if (options.accepts[key](local) !== true || options.accepts[key](cloudData) !== true) { return null; } } catch (ignoreAccepts) { return null; }
-      }
       if (options.score && typeof options.score[key] === 'function') {
         try { a = [Number(options.score[key](local)), 0]; c = [Number(options.score[key](cloudData)), 0]; } catch (ignore) { return null; }
         if (!isFinite(a[0]) || !isFinite(c[0])) { return null; }
@@ -478,9 +481,12 @@
       status = pageOwned ? keptStatus() : '有兩份進度，請選擇要保留的紀錄。';
       render();
     }
-    function replaceLocal(key, cloud, token) {
+    function replaceLocal(key, cloud, token, manual) {
       assertActive(token);
       if (cloud.data === null) { throw error('server'); }
+      // #5099：自動換上（空白裝置第一次加入、雲端前進而這台沒改）也要本站讀得懂；讀不懂就兩份各自保留、不寫進這台
+      // （Codex 審 1f90839：空白裝置直接換上被拒的雲端資料）。家長在選擇畫面親手按「留雲端」（manual）照辦。
+      if (!manual && unreadable(key, cloud.data)) { showConflict(key, cloud, true); return; }
       var currentMeta = baseline(key);
       if (currentMeta && currentMeta.rev > cloud.rev) { showConflict(key, cloud, true); return; }
       // 頁面自己是唯一寫入者時（難題站，#1303 第 5 輪）：先問能不能換（有未存進度、正在某一篇裡就不行），
@@ -809,7 +815,7 @@
         // Re-fetch before accepting cloud: do not silently accept a version the parent never saw.
         action = request({op: 'get', key: key}, token).then(function (latest) {
           if (latest.rev !== cloud.rev || latest.data !== cloud.data) { showConflict(key, latest); return; }
-          replaceLocal(key, latest, token);
+          replaceLocal(key, latest, token, true);
         });
       }
       return action.then(function () { delete decisions[key]; });

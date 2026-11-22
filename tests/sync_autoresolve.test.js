@@ -391,3 +391,54 @@ test('R27 accepts 本身出錯或回 true 以外的值＝讀不懂，不猜', as
     assert.ok(b.api.getState().conflicts[KEY]);
   }
 });
+
+test('R28 兩份一字不差但本站讀不懂：不算已同步，兩份各自保留（Codex 審 1f90839）', async t => {
+  const odd = JSON.stringify({v: 3, cards: [], log: [1, 2]});
+  let calls = 0;
+  const {backend, b, code} = await acceptFamily(t, odd, odd, raw => { calls++; return strictV3(raw); });
+  assert.ok(calls > 0, 'accepts 有被問到');
+  assert.ok(b.api.getState().conflicts[KEY], '讀不懂＝保留衝突狀態');
+  assert.doesNotMatch(b.api.getState().status, /已同步/);
+  assert.equal(backend.store.record(code).rev, 1);
+});
+
+test('R29 空白裝置加入、雲端那份本站讀不懂：不換上（這台照舊沒有存檔），兩份各自保留', async t => {
+  const odd = JSON.stringify({v: 3, cards: [], log: [1, 2]});
+  const {backend, b, code} = await acceptFamily(t, odd, null, strictV3);
+  assert.equal(b.storage.getItem(KEY), null, '沒寫進這台');
+  assert.deepEqual(b.replacements, [], '沒有觸發換上');
+  assert.ok(b.api.getState().conflicts[KEY]);
+  assert.equal(backend.store.record(code).data, odd, '雲端那份不動');
+});
+
+test('R30 已連上、另一台寫了本站讀不懂的新版、這台沒改：重開不自動換上；家長親手按「留雲端」才換', async t => {
+  const odd = JSON.stringify({v: 3, cards: [], log: [1, 2, 3]});
+  const {clock, backend, a, b, code} = await acceptFamily(t, v3(2, 'ok'), null, strictV3);
+  assert.equal(b.storage.getItem(KEY), v3(2, 'ok'), '前提：讀得懂的照常換上');
+  a.storage.setItem(KEY, odd); await clock.advance(4000);
+  assert.equal(backend.store.record(code).data, odd, '前提：另一台（沒有嚴格讀檔）推上去了');
+  b.api.destroy();
+  const re = device(backend, {storage: b.storage, ...AUTO, accepts: {[KEY]: strictV3}}); t.after(() => re.api.destroy());
+  await re.api.ready; await flush();
+  assert.equal(re.storage.getItem(KEY), v3(2, 'ok'), '讀不懂的新版沒自動換上');
+  assert.ok(re.api.getState().conflicts[KEY]);
+  await re.api.resolve(KEY, 'cloud'); await flush();
+  assert.equal(re.storage.getItem(KEY), odd, '親手選留雲端照辦');
+});
+
+test('R31 頁面自己寫入的站（錯題站同接法）：空白裝置遇到本站讀不懂的雲端不交給頁面換上；讀得懂的照常', async t => {
+  const odd = JSON.stringify({v: 3, cards: [], log: [1, 2]});
+  for (const [cloud, adopted] of [[odd, false], [v3(2, 'ok'), true]]) {
+    const clock = new Clock(), backend = server(clock);
+    const a = device(backend, {initial: {[KEY]: cloud}, ...AUTO}); t.after(() => a.api.destroy());
+    await a.api.ready; await a.api.enable();
+    let accepted = 0, b;
+    b = device(backend, {initial: {[KEY]: null}, ...AUTO, accepts: {[KEY]: strictV3},
+      canReplace: () => true, accept: (key, value) => { accepted++; b.storage.setItem(key, value); return true; }});
+    t.after(() => b.api.destroy());
+    await b.api.ready; await b.api.join(a.api.getState().code); await flush();
+    assert.equal(accepted, adopted ? 1 : 0);
+    assert.equal(b.storage.getItem(KEY), adopted ? cloud : null);
+    assert.equal(Boolean(b.api.getState().conflicts[KEY]), !adopted);
+  }
+});
