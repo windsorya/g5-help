@@ -315,6 +315,51 @@ for (const [M, owned] of MODES) {
   });
 }
 
+// ---- Codex 審 c9168eb（設計後第 1 輪）三項 ----
+test('T28 O pending 讀不懂、雲端被另一台推進（讀得懂）、本機讀得懂 ⇒ 不經驗證就丟掉 pending 不行：保留 pending、不 PUT、讀不懂衝突', async t => {
+  const s = await open(t, {owned: true, local: {[KEY]: V(9)}, cloud: {[KEY]: [2, V(3)]}, base: {[KEY]: [1, V(1)]},
+    pending: {[KEY]: {baseRev: 1, data: U()}}, accepts: {[KEY]: strict}});
+  await s.clock.advance(4000);
+  rejected(s, 'T28', {local: V(9), cloud: [2, V(3)], base: [1, V(1)], pending: {baseRev: 1, data: U()}});
+  assert.ok(s.seen[KEY].includes(U()), '驗了 pending');
+});
+
+test('T29 O 同頁：讀得懂的 pending 送不出去、本機之後改成讀不懂 ⇒ 重送前也驗最新本機：不送、保留 pending、讀不懂衝突', async t => {
+  const s = await open(t, {owned: true, local: {[KEY]: V(1)}, cloud: {[KEY]: [1, V(1)]}, base: {[KEY]: [1, V(1)]}, accepts: {[KEY]: strict}});
+  s.d.mode = 'reject'; s.storage.setItem(KEY, V(2, 'p')); await s.clock.advance(4000);
+  assert.equal(s.puts(), 1, '前提：送過一次（被斷線）'); assert.equal(s.ck().pending.data, V(2, 'p'));
+  s.storage.setItem(KEY, U()); s.d.mode = 'ok'; await s.clock.advance(4000); await s.clock.advance(8000);
+  assert.equal(s.puts(), 1, '沒有再送'); assert.equal(s.rec().rev, 1);
+  assert.equal(s.ck().pending.data, V(2, 'p'), 'pending 保留');
+  assert.equal((s.conflict() || {}).reason, 'unreadable');
+  assert.doesNotMatch(s.status(), /已同步/);
+});
+
+test('T30 N 家長親手留了讀不懂的雲端之後，這台改成讀得懂的新進度 ⇒ 下一次自動上傳不得蓋掉讀不懂的雲端（manual 不延伸）', async t => {
+  const s = await open(t, {local: {[KEY]: V(1)}, cloud: {[KEY]: [2, U()]}, base: {[KEY]: [1, V(1)]}, accepts: {[KEY]: strict}});
+  assert.equal(await s.d.api.resolve(KEY, 'cloud'), true); await flush();
+  assert.equal(s.storage.getItem(KEY), U(), '前提：親手選留雲端');
+  s.storage.setItem(KEY, V(9, 'new')); await s.clock.advance(4000);
+  assert.equal(s.puts(), 0, '沒有自動上傳'); assert.equal(s.rec().rev, 2); assert.equal(s.rec().data, U());
+  assert.equal((s.conflict() || {}).reason, 'unreadable');
+  assert.doesNotMatch(s.status(), /已同步/);
+});
+
+test('T30b O PUT 讀不懂的 pending 等回應時讀檔變嚴、本機又改成讀得懂 ⇒ confirm 後下一輪不得自動蓋掉剛確認的讀不懂雲端', async t => {
+  let lenient = true;
+  const s = await open(t, {owned: true, local: {[KEY]: V(1)}, cloud: {[KEY]: [1, V(1)]}, base: {[KEY]: [1, V(1)]},
+    accepts: {[KEY]: raw => lenient || strict(raw)}});
+  s.d.mode = 'hold'; s.storage.setItem(KEY, U()); await s.clock.advance(4000);
+  assert.equal(typeof s.d.held, 'function', '前提：PUT 已送出');
+  lenient = false; s.storage.setItem(KEY, V(9, 'new')); s.d.mode = 'ok'; s.d.held(); await flush(); await s.clock.advance(10);
+  assert.equal(s.rec().rev, 2, '前提：U 已確認'); assert.equal(s.ck().baseline.hash, H(U()));
+  await s.clock.advance(4000); await s.clock.advance(4000);
+  assert.equal(s.rec().rev, 2, '沒有自動蓋掉'); assert.equal(s.rec().data, U());
+  assert.equal(s.storage.getItem(KEY), V(9, 'new'));
+  assert.equal((s.conflict() || {}).reason, 'unreadable');
+  assert.doesNotMatch(s.status(), /已同步/);
+});
+
 // ---- 沒提供 accepts：維持現行行為（T21–T24）----
 for (const [M, owned] of MODES) {
   test(`T21 ${M} 沒有 accepts：L=C 相同字串、B=1、未前進 ⇒ 已同步`, async t => {
