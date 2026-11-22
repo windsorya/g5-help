@@ -491,6 +491,26 @@ test('T38 N 家長看到雲端 rev 2（讀不懂）按「留雲端」，執行�
   assert.doesNotMatch(s.status(), /已同步/);
 });
 
+test('T39 N 家長按「留雲端」，確認用的 GET 還在路上時這台內容又被換成另一份 ⇒ 不換上雲端、不蓋掉新原文、重新顯示衝突', async t => {
+  let hold = null, holding = false;
+  const fetch = req => {
+    if (holding && req.op === 'get' && req.key === KEY) return new Promise(res => { hold = () => res({ok: true, json: async () => backendRef.handle(req)}); });
+    return {ok: true, json: async () => backendRef.handle(req)};
+  };
+  const s = await open(t, {local: {[KEY]: V(1)}, cloud: {[KEY]: [2, U()]}, base: {[KEY]: [1, V(1)]}, accepts: {[KEY]: strict}, fetch});
+  assert.equal((s.conflict() || {}).reason, 'unreadable', '前提');
+  holding = true;
+  const chosen = s.d.api.resolve(KEY, 'cloud'); await flush(); await flush();
+  assert.equal(typeof hold, 'function', '前提：確認用的 GET 卡住');
+  s.storage.setItem(KEY, U(6, 'mine'));
+  holding = false; hold(); await chosen; await flush(); await s.clock.advance(10);
+  assert.equal(s.storage.getItem(KEY), U(6, 'mine'), '新原文保留，沒有被雲端蓋掉');
+  assert.deepEqual(s.d.replacements, [], '沒有換上');
+  assert.equal(s.puts(), 0); assert.equal(s.rec().rev, 2);
+  assert.equal((s.conflict() || {}).reason, 'unreadable', '衝突仍在、要重新選');
+  assert.doesNotMatch(s.status(), /已同步/);
+});
+
 // ---- 沒提供 accepts：維持現行行為（T21–T24）----
 for (const [M, owned] of MODES) {
   test(`T21 ${M} 沒有 accepts：L=C 相同字串、B=1、未前進 ⇒ 已同步`, async t => {

@@ -894,6 +894,8 @@
         // Re-fetch before accepting cloud: do not silently accept a version the parent never saw.
         action = request({op: 'get', key: key}, token).then(function (latest) {
           if (latest.rev !== cloud.rev || latest.data !== cloud.data) { showConflict(key, latest); return; }
+          // #8251：確認用的 GET 在路上時這台內容又變了 ⇒ 舊選擇不套到新原文，重新顯示衝突
+          if (hasValidator(key) && decidedOn[key] !== contentHash(read(key))) { showConflict(key, latest); return; }
           replaceLocal(key, latest, token, true);
         });
       }
