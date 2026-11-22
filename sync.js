@@ -123,10 +123,7 @@
     var code = null, epoch = 0, destroyed = false, stopped = false;
     var busy = null, activeAbort = null, retryTimer = null, failures = 0, retryAt = 0;
     var needsGet = {}, conflicts = {}, decisions = {}, observed = {}, replaced = [], deferred = {}, resends = {};
-    // baseOdd[key]＝這一頁記下的 baseline 原文（＝當時雲端那份）本站讀不懂（家長親手選的、或自己已提交的 pending）。
-    // 直接上傳路徑只有 baseline hash、看不到雲端原文 ⇒ 這時改先 GET 交關卡，manual／confirm 不延伸成後續自動覆寫權限（Codex 審 c9168eb 第 3 項）。
-    // 只存在記憶體：重開頁一律先 GET（needsGet），由關卡用雲端原文重新判定。
-    var baseOdd = {};
+    var decidedOn = {};   // decisions[key] 按下當下這台那份原文的 hash（#8251）
     var status = '尚未開啟同步', notice = '', viewCode, view = {};
     // 頁面自己是唯一寫入者（提供 accept，難題站）：#1303 第 7 輪後依升級階梯縮範圍——關閉「留這台／留雲端」衝突選擇，
     // 兩台不一樣就各自保留（這台用這台的、雲端那份不動），不出按鈕、resolve 拒絕。自然站（沒有 accept）照舊。
@@ -252,14 +249,13 @@
         var ck = readCk(key);
         if (ck.baseline && ck.baseline.rev > rev) { needsGet[key] = true; return; }
         ck.baseline = {rev: rev, hash: contentHash(data), updated: updated}; ck.pending = null;
-        writeCk(key, ck); mirrorMeta(key, ck.baseline); baseOdd[key] = unreadable(key, data); return;
+        writeCk(key, ck); mirrorMeta(key, ck.baseline); return;
       }
       var meta = readMeta(); // Preserve other sites' key entries on the same origin.
       var previous = meta.keys[key];
       if (previous && integer(previous.rev) && previous.rev > rev) { needsGet[key] = true; return; }
       meta.keys[key] = {rev: rev, hash: contentHash(data), updated: updated};
       write(META, JSON.stringify(meta));
-      baseOdd[key] = unreadable(key, data);
     }
     function active(token) {
       return !destroyed && !stopped && token === epoch && code && read(CODE) === code;
@@ -612,7 +608,6 @@
       ck.baseline = {rev: rev, hash: p.hash, updated: updated}; ck.pending = null;
       writeCk(key, ck);   // 寫入／讀回失敗：pending 留著，下一輪再用雲端確認（A10）
       mirrorMeta(key, ck.baseline);
-      baseOdd[key] = unreadable(key, p.data);   // 傳輸照確認；但剛確認的雲端讀不懂＝之後自動上傳要先 GET 過關卡
       delete conflicts[key];
     }
     // 確認完舊 pending 之後，才從本機最新資料建立下一筆（A02、A13）
@@ -693,7 +688,7 @@
         backup(key, cloud.data);
         assertActive(token);
         var ck = readCk(key);
-        ck.baseline = {rev: cloud.rev, hash: contentHash(cloud.data), updated: cloud.updated}; baseOdd[key] = false;   // 已過關卡＝讀得懂
+        ck.baseline = {rev: cloud.rev, hash: contentHash(cloud.data), updated: cloud.updated};
         ck.pending = {baseRev: cloud.rev, data: local, hash: contentHash(local)};
         writeCk(key, ck); mirrorMeta(key, ck.baseline);
         delete conflicts[key];
@@ -725,7 +720,7 @@
       if (hash !== meta.hash && local !== null) { return put(key, local, meta.rev, token); }
     }
     function resetSession(nextCode) {
-      epoch += 1; code = nextCode; needsGet = {}; conflicts = {}; decisions = {}; observed = {}; replaced = []; deferred = {}; baseOdd = {};
+      epoch += 1; code = nextCode; needsGet = {}; conflicts = {}; decisions = {}; observed = {}; replaced = []; deferred = {};
       failures = 0; retryAt = 0; notice = '';
       if (retryTimer !== null) { root.clearTimeout(retryTimer); retryTimer = null; }
       keys.forEach(function (key) { needsGet[key] = true; });
@@ -815,11 +810,12 @@
                 needsGet[key] = true;
                 return request({op: 'get', key: key}, token).then(function (r) { return reconcile(key, r, token); });
               }
-              // Codex 審 c9168eb 第 2 項：重送前 pending 與最新本機都要讀得懂；任一讀不懂改先 GET（recover 的 stillBase 關卡保留 pending）
-              if (ck.pending) { return unreadable(key, ck.pending.data) || unreadable(key, read(key)) ? refetch(key, token) : sendPending(key, ck, token); }
+              // #8251（Codex 審 1aa11e9＋4agent 4B-20261122-8251）：有 validator 的 key，重送 pending 前一律先 GET，
+              // 由 recover 的關卡用「當下雲端原文」判定（validator 變嚴、別的分頁改了共用 baseline 都看得到）；不快取可讀性。
+              if (ck.pending) { return hasValidator(key) || unreadable(key, ck.pending.data) ? refetch(key, token) : sendPending(key, ck, token); }
               var mineNow = read(key);
               if (mineNow !== null && contentHash(mineNow) !== ck.baseline.hash) {
-                return unreadable(key, mineNow) || baseOdd[key] ? refetch(key, token) : startPending(key, mineNow, ck.baseline.rev, token);   // #8251 T12、T30b
+                return hasValidator(key) ? refetch(key, token) : startPending(key, mineNow, ck.baseline.rev, token);   // #8251 T12、T30b、T32
               }
               return;
             }
@@ -832,7 +828,9 @@
               return request({op: 'get', key: key}, token).then(function (r) { return reconcile(key, r, token); });
             }
             if (observe(key, local).hash !== meta.hash && local !== null) {
-              return unreadable(key, local) || baseOdd[key] ? refetch(key, token) : put(key, local, meta.rev, token);   // #8251 T12、T30：先取得雲端再由關卡判定
+              // #8251：直接上傳時手上只有 baseline hash、沒有雲端原文 ⇒ 有 validator 的 key 一律先 GET 交關卡（每次本機變更多一次 GET）；
+              // 沒提供 accepts 的 key 照舊直接上傳（與 bc34bf9 逐步相同）
+              return hasValidator(key) ? refetch(key, token) : put(key, local, meta.rev, token);   // T12、T30、T31、T32
             }
           }).catch(function (err) {
             if (err.kind === 'stale') { throw err; }
@@ -889,6 +887,8 @@
     function applyDecision(key, token) {
       var cloud = conflicts[key], choice = decisions[key], action;
       if (!cloud || !choice) { delete decisions[key]; return Promise.resolve(); }
+      // #8251（4agent 紅隊序列 4）：manual 豁免只綁按下當下這台那份原文；按下後到真正執行前這台內容變了 ⇒ 作廢選擇、重新 GET 交關卡
+      if (hasValidator(key) && decidedOn[key] !== contentHash(read(key))) { delete decisions[key]; delete decidedOn[key]; return refetch(key, token); }
       if (choice === 'local') { action = put(key, read(key), cloud.rev, token, cloud, true); }
       else {
         // Re-fetch before accepting cloud: do not silently accept a version the parent never saw.
@@ -897,12 +897,12 @@
           replaceLocal(key, latest, token, true);
         });
       }
-      return action.then(function () { delete decisions[key]; });
+      return action.then(function () { delete decisions[key]; delete decidedOn[key]; });
     }
     function resolve(key, choice) {
       if (pageOwned) { return Promise.resolve(false); }   // 縮範圍：頁面擁有的 key 不提供選邊覆蓋
       if (destroyed || stopped || !conflicts[key] || decisions[key] || keys.indexOf(key) < 0 || (choice !== 'local' && choice !== 'cloud')) { return Promise.resolve(false); }
-      decisions[key] = choice;
+      decisions[key] = choice; decidedOn[key] = contentHash(read(key));
       render();
       return run(function (token) { return applyDecision(key, token); }, true);
     }

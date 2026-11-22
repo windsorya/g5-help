@@ -18,6 +18,16 @@ const U = (n = 2, tag = '') => JSON.stringify({v: 3, cards: [], log: Array.from(
 const strict = raw => { try { const o = JSON.parse(raw); return o.v === 3 && Array.isArray(o.log) && !!o.cards && typeof o.cards === 'object' && !Array.isArray(o.cards); } catch (e) { return false; } };
 const MODES = [['N', false], ['O', true]];
 let backendRef = null;   // 自訂 fetch 的情境用：open() 建的那個假後端
+// 只控制 PUT（GET 照常）：有 validator 的 key 上傳前會先 GET，harness 的 d.mode 會連 GET 一起擋，所以另做
+function putCtl() {
+  const c = {mode: 'ok', held: null};
+  c.fetch = req => {
+    if (req.op === 'put' && c.mode === 'reject') return Promise.reject(new TypeError('lost'));
+    if (req.op === 'put' && c.mode === 'hold') return new Promise(res => { c.held = () => res({ok: true, json: async () => backendRef.handle(req)}); });
+    return {ok: true, json: async () => backendRef.handle(req)};
+  };
+  return c;
+}
 
 // 開一台已加入家庭（CODE）的裝置：雲端、本機、baseline、pending 都照情境預先放好，然後照正常開頁（GET→判斷）。
 async function open(t, o) {
@@ -240,14 +250,14 @@ test('T18 O L=P=C=U、B=1:V、pending 已提交（雲端 rev 2＝pending）⇒ G
 });
 
 test('T18b O pending 送出時本站還讀得懂、回應回來前讀檔變嚴（讀不懂）⇒ PUT 成功回應照樣 confirm，accepts 不否決傳輸事實', async t => {
-  let lenient = true;
+  let lenient = true; const c = putCtl();
   const s = await open(t, {owned: true, local: {[KEY]: V(1)}, cloud: {[KEY]: [1, V(1)]}, base: {[KEY]: [1, V(1)]},
-    accepts: {[KEY]: raw => lenient || strict(raw)}});
+    accepts: {[KEY]: raw => lenient || strict(raw)}, fetch: c.fetch});
   assert.match(s.status(), /已同步/, '前提');
-  s.d.mode = 'hold'; s.storage.setItem(KEY, U()); await s.clock.advance(4000);
-  assert.equal(typeof s.d.held, 'function', '前提：PUT 已送出、回應未到');
+  c.mode = 'hold'; s.storage.setItem(KEY, U()); await s.clock.advance(4000);
+  assert.equal(typeof c.held, 'function', '前提：PUT 已送出、回應未到');
   assert.equal(s.ck().pending.data, U());
-  lenient = false; s.d.mode = 'ok'; s.d.held(); await flush(); await s.clock.advance(10);
+  lenient = false; c.mode = 'ok'; c.held(); await flush(); await s.clock.advance(10);
   assert.equal(s.rec().rev, 2); assert.equal(s.rec().data, U());
   assert.equal(s.ck().pending, null, 'pending 清空');
   assert.equal(s.ck().baseline.rev, 2); assert.equal(s.ck().baseline.hash, H(U()));
@@ -325,10 +335,11 @@ test('T28 O pending 讀不懂、雲端被另一台推進（讀得懂）、本機
 });
 
 test('T29 O 同頁：讀得懂的 pending 送不出去、本機之後改成讀不懂 ⇒ 重送前也驗最新本機：不送、保留 pending、讀不懂衝突', async t => {
-  const s = await open(t, {owned: true, local: {[KEY]: V(1)}, cloud: {[KEY]: [1, V(1)]}, base: {[KEY]: [1, V(1)]}, accepts: {[KEY]: strict}});
-  s.d.mode = 'reject'; s.storage.setItem(KEY, V(2, 'p')); await s.clock.advance(4000);
+  const c = putCtl();
+  const s = await open(t, {owned: true, local: {[KEY]: V(1)}, cloud: {[KEY]: [1, V(1)]}, base: {[KEY]: [1, V(1)]}, accepts: {[KEY]: strict}, fetch: c.fetch});
+  c.mode = 'reject'; s.storage.setItem(KEY, V(2, 'p')); await s.clock.advance(4000);
   assert.equal(s.puts(), 1, '前提：送過一次（被斷線）'); assert.equal(s.ck().pending.data, V(2, 'p'));
-  s.storage.setItem(KEY, U()); s.d.mode = 'ok'; await s.clock.advance(4000); await s.clock.advance(8000);
+  s.storage.setItem(KEY, U()); c.mode = 'ok'; await s.clock.advance(4000); await s.clock.advance(8000);
   assert.equal(s.puts(), 1, '沒有再送'); assert.equal(s.rec().rev, 1);
   assert.equal(s.ck().pending.data, V(2, 'p'), 'pending 保留');
   assert.equal((s.conflict() || {}).reason, 'unreadable');
@@ -346,17 +357,137 @@ test('T30 N 家長親手留了讀不懂的雲端之後，這台改成讀得懂�
 });
 
 test('T30b O PUT 讀不懂的 pending 等回應時讀檔變嚴、本機又改成讀得懂 ⇒ confirm 後下一輪不得自動蓋掉剛確認的讀不懂雲端', async t => {
-  let lenient = true;
+  let lenient = true; const c = putCtl();
   const s = await open(t, {owned: true, local: {[KEY]: V(1)}, cloud: {[KEY]: [1, V(1)]}, base: {[KEY]: [1, V(1)]},
-    accepts: {[KEY]: raw => lenient || strict(raw)}});
-  s.d.mode = 'hold'; s.storage.setItem(KEY, U()); await s.clock.advance(4000);
-  assert.equal(typeof s.d.held, 'function', '前提：PUT 已送出');
-  lenient = false; s.storage.setItem(KEY, V(9, 'new')); s.d.mode = 'ok'; s.d.held(); await flush(); await s.clock.advance(10);
+    accepts: {[KEY]: raw => lenient || strict(raw)}, fetch: c.fetch});
+  c.mode = 'hold'; s.storage.setItem(KEY, U()); await s.clock.advance(4000);
+  assert.equal(typeof c.held, 'function', '前提：PUT 已送出');
+  lenient = false; s.storage.setItem(KEY, V(9, 'new')); c.mode = 'ok'; c.held(); await flush(); await s.clock.advance(10);
   assert.equal(s.rec().rev, 2, '前提：U 已確認'); assert.equal(s.ck().baseline.hash, H(U()));
   await s.clock.advance(4000); await s.clock.advance(4000);
   assert.equal(s.rec().rev, 2, '沒有自動蓋掉'); assert.equal(s.rec().data, U());
   assert.equal(s.storage.getItem(KEY), V(9, 'new'));
   assert.equal((s.conflict() || {}).reason, 'unreadable');
+  assert.doesNotMatch(s.status(), /已同步/);
+});
+
+// ---- Codex 審 1aa11e9（設計後第 2 輪）＋4agent 4B-20261122-8251：可讀性不得快取，直接上傳前用當下雲端原文判定 ----
+test('T31 N 跨分頁：B 分頁親手留了讀不懂的雲端（共用 baseline 已更新），A 分頁接著收到本機新進度 ⇒ A 不得直接蓋掉讀不懂雲端', async t => {
+  const s = await open(t, {local: {[KEY]: V(1)}, cloud: {[KEY]: [1, V(1)]}, base: {[KEY]: [1, V(1)]}, accepts: {[KEY]: strict}});
+  assert.match(s.status(), /已同步/, '前提：A 已同步');
+  s.backend.store.withLock(() => s.backend.store.set(hash(CODE), KEY, {rev: 2, data: U(), updated: T0 + 2}));
+  let b;
+  b = device(s.backend, {storage: s.storage, keys: [KEY], autoResolve: true, syncPath: SYNC, summarize: {[KEY]: () => 'x'}, accepts: {[KEY]: strict}});
+  t.after(() => b.api.destroy());
+  await b.api.ready; await flush(); await s.clock.advance(10);
+  assert.equal((b.api.getState().conflicts[KEY] || {}).reason, 'unreadable', '前提：B 看到讀不懂雲端');
+  assert.equal(await b.api.resolve(KEY, 'cloud'), true); await flush();
+  assert.equal(s.storage.getItem(KEY), U(), '前提：B 親手留雲端');
+  b.api.destroy();
+  s.storage.setItem(KEY, V(9, 'a')); s.d.window.dispatch('storage', {key: KEY}); await flush(); await s.clock.advance(4000);
+  assert.equal(s.rec().rev, 2, '雲端沒被蓋'); assert.equal(s.rec().data, U());
+  assert.equal(s.puts(), 0);
+  assert.equal((s.conflict() || {}).reason, 'unreadable');
+  assert.doesNotMatch(s.status(), /已同步/);
+});
+
+for (const [M, owned] of MODES) {
+  test(`T32 ${M} validator 變嚴：寬鬆時已同步的 U、變嚴後本機改成讀得懂的新進度 ⇒ 不得直接蓋掉現在讀不懂的雲端`, async t => {
+    let lenient = true;
+    const s = await open(t, {owned, local: {[KEY]: U()}, cloud: {[KEY]: [1, U()]}, base: {[KEY]: [1, U()]}, accepts: {[KEY]: raw => lenient || strict(raw)}});
+    assert.match(s.status(), /已同步/, '前提：寬鬆時已同步');
+    lenient = false; s.storage.setItem(KEY, V(9, 'n'));
+    await s.d.api.sync(true); await flush(); await s.clock.advance(4000);
+    assert.equal(s.rec().rev, 1, '雲端沒被蓋'); assert.equal(s.rec().data, U());
+    assert.equal(s.puts(), 0);
+    assert.equal((s.conflict() || {}).reason, 'unreadable');
+    assert.doesNotMatch(s.status(), /已同步/);
+  });
+}
+
+test('T33 O 讀得懂的 pending 送不出去期間 validator 變嚴、雲端基準那份變成讀不懂 ⇒ 重送前用當下雲端判定：保留 pending、不覆寫', async t => {
+  let lenient = true, drop = false;
+  const s = await open(t, {owned: true, local: {[KEY]: U()}, cloud: {[KEY]: [1, U()]}, base: {[KEY]: [1, U()]},
+    accepts: {[KEY]: raw => lenient || strict(raw)},
+    fetch: req => (drop && req.op === 'put') ? Promise.reject(new TypeError('lost')) : {ok: true, json: async () => backendRef.handle(req)}});
+  drop = true; s.storage.setItem(KEY, V(9, 'p')); await s.clock.advance(4000);
+  assert.equal(s.ck().pending.data, V(9, 'p'), '前提：pending 建好、沒送到');
+  assert.equal(s.rec().rev, 1);
+  lenient = false; drop = false; await s.clock.advance(4000); await s.clock.advance(8000);
+  assert.equal(s.rec().rev, 1, '雲端沒被蓋'); assert.equal(s.rec().data, U());
+  assert.equal(s.ck().pending.data, V(9, 'p'), 'pending 保留');
+  assert.equal((s.conflict() || {}).reason, 'unreadable');
+});
+
+for (const [M, owned] of MODES) {
+  test(`T34 ${M} 有 validator、雲端讀得懂：本機有新進度 ⇒ 先 GET 再上傳（每次變更恰一次 GET），照常上傳、已同步；本機沒變不多 GET`, async t => {
+    const s = await open(t, {owned, local: {[KEY]: V(1)}, cloud: {[KEY]: [1, V(1)]}, base: {[KEY]: [1, V(1)]}, accepts: {[KEY]: strict}});
+    const g0 = s.gets();
+    await s.clock.advance(8000);
+    assert.equal(s.gets(), g0, '本機沒變：不多 GET');
+    s.storage.setItem(KEY, V(5, 'n')); await s.clock.advance(4000);
+    assert.equal(s.gets(), g0 + 1, '恰一次 GET');
+    assert.equal(s.rec().rev, 2); assert.equal(s.rec().data, V(5, 'n'));
+    assert.match(s.status(), /已同步/);
+    await s.clock.advance(8000);
+    assert.equal(s.gets(), g0 + 1, '上傳後不再多 GET');
+  });
+}
+
+for (const [M, owned] of MODES) {
+  test(`T35 ${M} 已同步且本機＝baseline、沒有任何變更，validator 變嚴使這份讀不懂 ⇒ 下一輪狀態不再說已同步（重跑 accepts，不 GET 也不 PUT）`, async t => {
+    let lenient = true;
+    const s = await open(t, {owned, auto: true, local: {[KEY]: U()}, cloud: {[KEY]: [1, U()]}, base: {[KEY]: [1, U()]}, accepts: {[KEY]: raw => lenient || strict(raw)}});
+    assert.match(s.status(), /已同步/, '前提');
+    const g0 = s.gets(); lenient = false; await s.clock.advance(4000);
+    assert.doesNotMatch(s.status(), /已同步/); assert.match(s.status(), /無法讀取/);
+    assert.doesNotMatch(s.banner(), /已經先存到雲端/);
+    assert.equal(s.puts(), 0); assert.equal(s.gets(), g0);
+  });
+}
+
+test('T36 N 別的分頁親手留了讀不懂的雲端（寫進共用本機與 baseline，hash 對得上）⇒ 這一頁下一輪不得顯示已同步', async t => {
+  const s = await open(t, {local: {[KEY]: V(1)}, cloud: {[KEY]: [2, U()]}, base: {[KEY]: [1, V(1)]}, accepts: {[KEY]: strict}});
+  let b;
+  b = device(s.backend, {storage: s.storage, keys: [KEY], autoResolve: true, syncPath: SYNC, summarize: {[KEY]: () => 'x'}, accepts: {[KEY]: strict}});
+  t.after(() => b.api.destroy());
+  await b.api.ready; await flush(); await s.clock.advance(10);
+  assert.equal(await b.api.resolve(KEY, 'cloud'), true); await flush();
+  b.api.destroy();
+  s.d.window.dispatch('storage', {key: KEY}); await flush(); await s.clock.advance(4000);
+  assert.equal(s.storage.getItem(KEY), U(), '前提：共用本機已是 U');
+  assert.doesNotMatch(s.status(), /已同步/);
+  assert.equal(s.rec().rev, 2); assert.equal(s.puts(), 0);
+});
+
+test('T37 N 家長按「留這台」後、真正送出前這台內容被換成讀不懂的另一份 ⇒ 選擇作廢，不上傳新原文，重新判定', async t => {
+  let hold = null, holding = false;
+  const fetch = req => {
+    if (holding && req.op === 'get' && req.key === KEY2) return new Promise(res => { hold = () => res({ok: true, json: async () => backendRef.handle(req)}); });
+    return {ok: true, json: async () => backendRef.handle(req)};
+  };
+  const s = await open(t, {keys: [KEY, KEY2], local: {[KEY]: V(9, 'l'), [KEY2]: V(1)}, cloud: {[KEY]: [2, U()], [KEY2]: [1, V(1)]},
+    base: {[KEY]: [1, V(1)], [KEY2]: [1, V(1)]}, accepts: {[KEY]: strict, [KEY2]: strict}, fetch});
+  assert.equal((s.conflict(KEY) || {}).reason, 'unreadable', '前提');
+  holding = true; s.storage.setItem(KEY2, V(2, 'x'));
+  const pending = s.d.api.sync(true); await flush(); await flush();
+  assert.equal(typeof hold, 'function', '前提：KEY2 的 GET 卡住、這輪還在跑');
+  const chosen = s.d.api.resolve(KEY, 'local');
+  s.storage.setItem(KEY, U(5, 'swap'));
+  holding = false; hold(); await pending; await chosen; await flush(); await s.clock.advance(10);
+  assert.equal(s.rec(KEY).rev, 2, '沒有上傳'); assert.equal(s.rec(KEY).data, U());
+  assert.ok(!s.d.calls.some(c => c.req.op === 'put' && c.req.key === KEY), '沒有 PUT 這個 key');
+  assert.equal((s.conflict(KEY) || {}).reason, 'unreadable', '重新判定仍是讀不懂衝突');
+});
+
+test('T38 N 家長看到雲端 rev 2（讀不懂）按「留雲端」，執行時雲端已被別台改成另一份讀不懂的 rev 3 ⇒ 不把舊選擇套到新內容：不換上、重新顯示讀不懂衝突', async t => {
+  const s = await open(t, {local: {[KEY]: V(1)}, cloud: {[KEY]: [2, U()]}, base: {[KEY]: [1, V(1)]}, accepts: {[KEY]: strict}});
+  assert.equal((s.conflict() || {}).reason, 'unreadable', '前提');
+  s.backend.store.withLock(() => s.backend.store.set(hash(CODE), KEY, {rev: 3, data: U(7, 'x'), updated: T0 + 3}));
+  await s.d.api.resolve(KEY, 'cloud'); await flush();
+  assert.equal(s.storage.getItem(KEY), V(1), '不換上新內容');
+  assert.equal(s.rec().rev, 3); assert.equal(s.puts(), 0);
+  const c = s.conflict(); assert.equal(c.reason, 'unreadable'); assert.equal(c.rev, 3, '衝突換成新版本、需要重新選');
   assert.doesNotMatch(s.status(), /已同步/);
 });
 
