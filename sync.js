@@ -599,7 +599,8 @@
         return settleOwned(key, cloud, token, false);
       }
       // 本機已經和雲端一字不差（例如頁面寫進去了但讀回失敗，#1303 第 6 輪）：只補 baseline
-      if (local !== null && local === cloud.data) { saveBaseline(key, cloud.rev, cloud.data, cloud.updated); delete conflicts[key]; delete deferred[key]; return; }
+      // #5099：一字不差但本站讀不懂＝不算已同步，往下走 settleOwned（pick 會回 null ⇒ 各自保留）（Codex 審 cb06c83）
+      if (local !== null && local === cloud.data && !unreadable(key, local)) { saveBaseline(key, cloud.rev, cloud.data, cloud.updated); delete conflicts[key]; delete deferred[key]; return; }
       if (cloud.rev === b.rev && contentHash(cloud.data) !== b.hash) { showConflict(key, cloud, true); return; }
       if (cloud.rev > b.rev) {
         if (contentHash(local) === b.hash) { replaceLocal(key, cloud, token); return; }

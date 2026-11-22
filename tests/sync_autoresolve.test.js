@@ -442,3 +442,26 @@ test('R31 頁面自己寫入的站（錯題站同接法）：空白裝置遇到�
     assert.equal(Boolean(b.api.getState().conflicts[KEY]), !adopted);
   }
 });
+
+test('R32 頁面自己寫入的站重開：本機已和雲端一字不差、但那份本站讀不懂 ⇒ 不補 baseline、不顯示已同步（Codex 審 cb06c83）', async t => {
+  const odd = JSON.stringify({v: 3, cards: [], log: [1, 2]});
+  const clock = new Clock(), backend = server(clock);
+  const a = device(backend, {initial: {[KEY]: v3(2, 'ok')}, ...AUTO}); t.after(() => a.api.destroy());
+  await a.api.ready; await a.api.enable();
+  const code = a.api.getState().code;
+  let calls = 0;
+  const owned = st => ({storage: st, ...AUTO, accepts: {[KEY]: raw => { calls++; return strictV3(raw); }},
+    canReplace: () => true, accept: (key, value) => { st.setItem(key, value); return true; }});
+  const b = device(backend, {initial: {[KEY]: null}, ...AUTO, accepts: {[KEY]: strictV3},
+    canReplace: () => true, accept: (key, value) => { b.storage.setItem(key, value); return true; }});
+  await b.api.ready; await b.api.join(code); await flush();
+  assert.equal(b.storage.getItem(KEY), v3(2, 'ok'), '前提：讀得懂的照常換上、有 baseline');
+  a.storage.setItem(KEY, odd); await clock.advance(4000);
+  assert.equal(backend.store.record(code).rev, 2, '前提：另一台推上讀不懂的 rev 2');
+  b.storage.setItem(KEY, odd); b.api.destroy();
+  const re = device(backend, owned(b.storage)); t.after(() => re.api.destroy());
+  await re.api.ready; await flush();
+  assert.ok(calls > 0, 'accepts 有被問到');
+  assert.ok(re.api.getState().conflicts[KEY], '讀不懂＝保留衝突');
+  assert.doesNotMatch(re.api.getState().status, /已同步/);
+});
