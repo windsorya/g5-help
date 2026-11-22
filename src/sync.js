@@ -150,9 +150,17 @@
       if (data === null || !options.accepts || typeof options.accepts[key] !== 'function') { return false; }
       try { return options.accepts[key](data) !== true; } catch (ignoreAccepts) { return true; }
     }
+    function hasValidator(key) { return !!options.accepts && typeof options.accepts[key] === 'function'; }
+    // #5099／#8251（Codex 設計者，迴圈 L20261122075543-8ff842）：「讀得懂」是所有自動動作與「已同步」的共同前提，不是個別分支的條件。
+    // 讀不懂的那一側：'local'／'cloud'／'both'；都讀得懂（或沒提供 accepts）＝null。
+    function unreadableSide(key, local, cloudData) {
+      var l = unreadable(key, local), c = unreadable(key, cloudData);
+      return l && c ? 'both' : (l ? 'local' : (c ? 'cloud' : null));
+    }
+    var SIDE = {local: '這台', cloud: '雲端', both: '這台與雲端'};
+    function unreadableText(side) { return '本站無法讀取' + SIDE[side] + '的紀錄，已暫停自動同步；兩邊原文保留，不會互相蓋掉。'; }
     function pick(key, local, cloudData) {
-      // #5099：任一份本站讀不懂（unreadable）＝不猜、不自動選——放在「一字不差」前面：兩份一樣但讀不懂也不算已同步（Codex 審 1f90839）
-      if (unreadable(key, local) || unreadable(key, cloudData)) { return null; }
+      // #5099：本站讀不懂的那份不在這裡判——呼叫 pick 之前一律先過共用關卡 gate()（#8251：只有一套可讀性規則）
       if (local === cloudData) { return 'same'; }
       if (local === null) { return 'cloud'; }
       if (cloudData === null) { return 'local'; }
@@ -320,25 +328,33 @@
       try {
         return !!code && keys.every(function (key) {
           var b = baseline(key);
-          return !conflicts[key] && !!b && contentHash(read(key)) === b.hash;
+          var local = read(key);
+          return !conflicts[key] && !!b && contentHash(local) === b.hash && !unreadable(key, local);
         });
+      } catch (ignore) { return false; }
+    }
+    // 目前有沒有本站讀不懂的紀錄（讀不懂衝突，或這台那份讀不懂）：頁首與提示改用專屬文字，不說已存雲端、也不說「只在這台」
+    function unreadableNow() {
+      try {
+        return keys.some(function (key) { return (conflicts[key] && conflicts[key].reason === 'unreadable') || unreadable(key, read(key)); });
       } catch (ignore) { return false; }
     }
     // 頁首常駐提醒（主畫面圖示開的 App 與 Safari 存檔分開；沒連上家人時她練的只在這台＋這組自動碼）
     var banner = null, bannerText = null;
-    function bannerWords(saved) {
+    function bannerWords(saved, odd) {
+      if (odd) { return '這台還沒跟家裡其他裝置連起來；本站讀不懂其中一份紀錄，已暫停自動同步（原文都保留）。請爸媽在另一台按「複製連結」，貼到下面。'; }
       return '這台還沒跟家裡其他裝置連起來，' + (saved ? '進度已經先存到雲端。' : '最新的進度還沒存到雲端，目前只在這台。') +
         '請爸媽在另一台按「複製連結」，貼到下面。連起來後，會留練得比較多的那份。';
     }
-    function updateBanner(saved) {
+    function updateBanner(saved, odd) {
       var body = doc && doc.body;
       if (!body || typeof body.insertBefore !== 'function') { return; }
       if (!isAuto()) { if (banner && banner.parentNode) { banner.parentNode.removeChild(banner); } banner = null; bannerText = null; return; }
-      if (banner) { bannerText.textContent = bannerWords(saved); return; }   // 只換字，不重建（輸入框裡打到一半的連結不能被洗掉）
+      if (banner) { bannerText.textContent = bannerWords(saved, odd); return; }   // 只換字，不重建（輸入框裡打到一半的連結不能被洗掉）
       banner = el('div', 'banner');
       banner.setAttribute('role', 'region'); banner.setAttribute('aria-label', '跨裝置同步提醒');
       banner.style.cssText = 'position:sticky;top:0;z-index:50;background:#fff4d6;color:#4a3500;border-bottom:2px solid #e0b100;padding:10px 14px;font-size:16px;line-height:1.5';
-      bannerText = el('p', 'banner-text', bannerWords(saved));
+      bannerText = el('p', 'banner-text', bannerWords(saved, odd));
       banner.appendChild(bannerText);
       var row = el('div', 'banner-row'); row.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap';
       var input = el('input', 'banner-input'); input.type = 'text'; input.maxLength = 400; input.autocomplete = 'off';
@@ -397,18 +413,18 @@
     }
     function render() {
       if (destroyed) { return; }
-      var saved = savedToCloud();
-      try { updateBanner(saved); } catch (ignoreBanner) { /* 提醒畫不出來不影響同步 */ }
+      var saved = savedToCloud(), odd = unreadableNow();
+      try { updateBanner(saved, odd); } catch (ignoreBanner) { /* 提醒畫不出來不影響同步 */ }
       if (viewCode !== code || !view.panel || view.auto !== isAuto()) { buildView(); view.auto = isAuto(); }
       view.status.textContent = status; view.notice.textContent = notice;
       if (view.autoHint) {
-        view.autoHint.textContent = saved ? '這台的進度已自動備份到雲端，但還沒跟家裡其他裝置連起來。' :
+        view.autoHint.textContent = odd ? '這台有一份紀錄本站讀不懂，已暫停自動同步（原文保留），也還沒跟家裡其他裝置連起來。' : saved ? '這台的進度已自動備份到雲端，但還沒跟家裡其他裝置連起來。' :
           '這台最新的進度還沒存到雲端（目前只在這台），也還沒跟家裡其他裝置連起來。';
       }
       var signature = keys.map(function (key) {
         if (!conflicts[key]) { return ''; }
         var local = read(key);
-        return key + ':' + conflicts[key].rev + ':' + observe(key, local).hash + ':' + (decisions[key] || '') + (conflicts[key].unsure ? ':u' : '');
+        return key + ':' + conflicts[key].rev + ':' + observe(key, local).hash + ':' + (decisions[key] || '') + (conflicts[key].unsure ? ':u' : '') + (conflicts[key].reason ? ':' + conflicts[key].side : '');
       }).join('|');
       if (view.signature === signature) { return; }
       view.signature = signature;
@@ -418,12 +434,14 @@
         if (!cloud) { return; }
         var local = read(key), obs = observe(key, local);
         var box = el('section', 'conflict');
-        box.appendChild(el('h3', 'conflict-title', key + (pageOwned ? '：兩台的紀錄不一樣' : '：請選擇保留哪份完整紀錄')));
+        var odd = cloud.reason === 'unreadable';
+        box.appendChild(el('h3', 'conflict-title', key + (odd ? '：本站讀不懂' + SIDE[cloud.side] + '的紀錄' : (pageOwned ? '：兩台的紀錄不一樣' : '：請選擇保留哪份完整紀錄'))));
         box.appendChild(el('p', 'local-summary', '這台：' + summary(key, local)));
         box.appendChild(el('p', 'local-time', '本機變更偵測時間：' + taipei(obs.detected, true) + '；實際作答時間由各站紀錄提供。'));
         box.appendChild(el('p', 'cloud-summary', '雲端：' + summary(key, cloud.data)));
         box.appendChild(el('p', 'cloud-time', '雲端更新時間：' + taipei(cloud.updated, true)));
-        if (pageOwned) { box.appendChild(el('p', 'kept', cloud.unsure ? UNSURE : KEPT)); view.conflicts.appendChild(box); return; }
+        if (odd) { box.appendChild(el('p', 'kept', unreadableText(cloud.side))); }
+        if (pageOwned) { if (!odd) { box.appendChild(el('p', 'kept', cloud.unsure ? UNSURE : KEPT)); } view.conflicts.appendChild(box); return; }
         var keepLocal = button('留這台的', function () { resolve(key, 'local'); }); keepLocal.disabled = local === null || !!decisions[key];
         var keepCloud = button('留雲端的', function () { resolve(key, 'cloud'); }); keepCloud.disabled = cloud.data === null || !!decisions[key];
         box.appendChild(keepLocal); box.appendChild(keepCloud); view.conflicts.appendChild(box);
@@ -474,19 +492,41 @@
       return keys.some(function (key) { return conflicts[key] && conflicts[key].unsure; }) ? UNSURE : KEPT;
     }
     // unsure＝雲端版本對不上這台已確認／待確認的紀錄（倒退、跳號、同 rev 不同內容），無法確認是不是另一台寫的（只給有 accept 的頁面）
-    function showConflict(key, cloud, unsure) {
+    // side：讀不懂的那一側（讀不懂是獨立原因 reason:'unreadable'，不等同 unsure）；沒給就依兩邊原文現算（沒提供 accepts＝永遠 null，行為同舊版）
+    function showConflict(key, cloud, unsure, side) {
       delete decisions[key]; // A newly observed cloud version requires a new choice.
+      var local = read(key);
+      if (!side) { side = unreadableSide(key, local, cloud.data); }
       conflicts[key] = {rev: cloud.rev, data: cloud.data, updated: cloud.updated};
-      if (pageOwned && unsure) { conflicts[key].unsure = true; }
-      status = pageOwned ? keptStatus() : '有兩份進度，請選擇要保留的紀錄。';
+      if (side) { conflicts[key].reason = 'unreadable'; conflicts[key].side = side; conflicts[key].localHash = contentHash(local); }
+      else if (pageOwned && unsure) { conflicts[key].unsure = true; }
+      status = conflictStatus();
       render();
     }
+    function conflictStatus() {
+      var sides = keys.filter(function (key) { return conflicts[key] && conflicts[key].reason === 'unreadable'; })
+        .map(function (key) { return conflicts[key].side; });
+      if (sides.length) { return unreadableText(sides.every(function (x) { return x === sides[0]; }) ? sides[0] : 'both'); }
+      return pageOwned ? keptStatus() : '有兩份進度，請選擇要保留的紀錄。';
+    }
+    // 共用可讀性關卡：這台、雲端（與 extra＝實際要送的 pending）任一份本站讀不懂 ⇒ 不換上、不上傳、不建立／重送 pending、
+    // 不補 baseline，顯示讀不懂衝突（兩邊原文保留），回 true。都讀得懂＝新證據消除了原因：解除舊的讀不懂衝突，回 false。
+    // 判定綁本次實際原文（不看 rev、baseline hash、上次結果）；null＝沒有存檔，不問 accepts；沒提供 accepts 的 key 一律通過。
+    function gate(key, local, cloud, extra) {
+      var side = unreadableSide(key, local, cloud.data);
+      if (!side && typeof extra === 'string' && unreadable(key, extra)) { side = 'local'; }
+      if (side) { showConflict(key, cloud, false, side); return true; }
+      if (conflicts[key] && conflicts[key].reason === 'unreadable') { delete conflicts[key]; }
+      return false;
+    }
+    function blockedUnreadable(key) { return !!conflicts[key] && conflicts[key].reason === 'unreadable'; }
     function replaceLocal(key, cloud, token, manual) {
       assertActive(token);
       if (cloud.data === null) { throw error('server'); }
       // #5099：自動換上（空白裝置第一次加入、雲端前進而這台沒改）也要本站讀得懂；讀不懂就兩份各自保留、不寫進這台
       // （Codex 審 1f90839：空白裝置直接換上被拒的雲端資料）。家長在選擇畫面親手按「留雲端」（manual）照辦。
-      if (!manual && unreadable(key, cloud.data)) { showConflict(key, cloud, true); return; }
+      // #8251：目前這台與候選雲端任一份讀不懂都保留（不能因這台符合 baseline 就換上）；manual 只豁免這項可讀性否決
+      if (!manual && gate(key, read(key), cloud)) { return; }
       var currentMeta = baseline(key);
       if (currentMeta && currentMeta.rev > cloud.rev) { showConflict(key, cloud, true); return; }
       // 頁面自己是唯一寫入者時（難題站，#1303 第 5 輪）：先問能不能換（有未存進度、正在某一篇裡就不行），
@@ -508,8 +548,10 @@
       saveBaseline(key, cloud.rev, cloud.data, cloud.updated);
       delete conflicts[key];
     }
-    function put(key, data, rev, token, chosenCloud) {
+    function put(key, data, rev, token, chosenCloud, manual) {
       if (data === null) { return Promise.resolve(); }
+      // #8251：自動上傳驗實際送出的 payload，也尊重已觀察到的讀不懂（衝突中）；擋下時不送、下一輪重新 GET 再判定。家長親手選（manual）照辦。
+      if (!manual && (unreadable(key, data) || blockedUnreadable(key))) { needsGet[key] = true; return Promise.resolve(); }
       if (data.length > 900000) { return Promise.reject(error('too-big')); }
       if (chosenCloud) { backup(key, chosenCloud.data); }
       return request({op: 'put', key: key, rev: rev, data: data}, token).then(function (r) {
@@ -538,6 +580,7 @@
     // 建立下一筆：先存進 checkpoint 並讀回，成功才送；確認舊 pending 之前不會呼叫這裡（pending 不會被新進度改寫）。
     function startPending(key, data, baseRev, token) {
       if (data.length > 900000) { return Promise.reject(error('too-big')); }
+      if (unreadable(key, data) || blockedUnreadable(key)) { needsGet[key] = true; return Promise.resolve(); }   // #8251：不建立讀不懂的 pending
       var ck = readCk(key);
       if (ck.pending) { return sendPending(key, ck, token); }
       ck.pending = {baseRev: baseRev, data: data, hash: contentHash(data)};
@@ -548,6 +591,8 @@
     // 重送一律是同一份 baseRev＋payload（A01、A09、A13）
     function sendPending(key, ck, token) {
       var p = ck.pending;
+      // #8251：實際 pending payload 讀不懂（或已觀察到讀不懂）＝不自動重送，保留原 pending、下一輪 GET 交給 recover 判定（自己的提交仍可確認）
+      if (unreadable(key, p.data) || blockedUnreadable(key)) { needsGet[key] = true; return Promise.resolve(); }
       return request({op: 'put', key: key, rev: p.baseRev, data: p.data}, token).then(function (r) {
         assertActive(token);
         if (r.err === 'conflict') { conflictAgain(key); return recover(key, r, token, true); }
@@ -565,10 +610,14 @@
       delete conflicts[key];
     }
     // 確認完舊 pending 之後，才從本機最新資料建立下一筆（A02、A13）
-    function nextFromLocal(key, token) {
+    // #8251：確認成功不授予後續自動覆寫權限——下一筆照樣過關卡（cloud＝剛確認的那份雲端）
+    function nextFromLocal(key, token, cloud) {
       assertActive(token);
       var ck = readCk(key), local = read(key);
-      if (!ck.pending && ck.baseline && local !== null && contentHash(local) !== ck.baseline.hash) { return startPending(key, local, ck.baseline.rev, token); }
+      if (!ck.pending && ck.baseline && local !== null && contentHash(local) !== ck.baseline.hash) {
+        if (cloud && gate(key, local, cloud)) { return; }
+        return startPending(key, local, ck.baseline.rev, token);
+      }
     }
     // 首次啟用、重開頁（GET）、PUT 衝突都走這一個判斷（A03–A08）
     function recover(key, cloud, token, fromPut) {
@@ -579,16 +628,19 @@
         var stillBase = cloud.rev === p.baseRev && (p.baseRev === 0 ? cloud.data === null : contentHash(cloud.data) === b.hash);
         if (stillBase) {   // 還沒提交：重送原 pending（PUT 被拒卻說雲端還在基準版本＝壞回應，不重送迴圈）
           if (fromPut) { throw error('server'); }
+          if (gate(key, local, cloud, p.data)) { return; }   // #8251：pending／這台／雲端任一份讀不懂＝保留 pending、不重送
           return sendPending(key, ck, token);
         }
         if (cloud.rev === p.baseRev + 1 && cloud.data !== null && contentHash(cloud.data) === p.hash) {
-          confirm(key, p, cloud.rev, cloud.updated);   // 雲端正是這份 pending、版本剛好下一號：自己的提交
-          return nextFromLocal(key, token);
+          // 雲端正是這份 pending、版本剛好下一號：自己的提交——傳輸事實，accepts 不否決（#8251 T18）
+          confirm(key, p, cloud.rev, cloud.updated);
+          return nextFromLocal(key, token, cloud);
         }
         // 下一號是別的內容＝另一台寫的（真正分歧）；其他（倒退、跳號、同號不同內容）＝無法確認。都各自保留、不覆蓋（A12、A14）
         // baseline 是舊版遷移來的（legacy）：舊版送出不留 pending，下一號可能是同一台舊版的延遲請求 ⇒ 也是無法確認（A16，Codex 審 b0b24f1）
         return settleOwned(key, cloud, token, (b && b.legacy === true) || !(cloud.rev === p.baseRev + 1));
       }
+      if (gate(key, local, cloud)) { return; }   // #8251：其餘所有自動恢復分支（含一字不差、版本未前進）都先過共同關卡
       if (b && cloud.rev < b.rev) { showConflict(key, cloud, true); return; }   // 雲端倒退：不憑內容認領、不重傳（A14）
       if (cloud.rev === 0) {
         if (local !== null) { return startPending(key, local, 0, token); }
@@ -599,8 +651,7 @@
         return settleOwned(key, cloud, token, false);
       }
       // 本機已經和雲端一字不差（例如頁面寫進去了但讀回失敗，#1303 第 6 輪）：只補 baseline
-      // #5099：一字不差但本站讀不懂＝不算已同步，往下走 settleOwned（pick 會回 null ⇒ 各自保留）（Codex 審 cb06c83）
-      if (local !== null && local === cloud.data && !unreadable(key, local)) { saveBaseline(key, cloud.rev, cloud.data, cloud.updated); delete conflicts[key]; delete deferred[key]; return; }
+      if (local !== null && local === cloud.data) { saveBaseline(key, cloud.rev, cloud.data, cloud.updated); delete conflicts[key]; delete deferred[key]; return; }
       if (cloud.rev === b.rev && contentHash(cloud.data) !== b.hash) { showConflict(key, cloud, true); return; }
       if (cloud.rev > b.rev) {
         if (contentHash(local) === b.hash) { replaceLocal(key, cloud, token); return; }
@@ -614,7 +665,9 @@
     // 只在真的換上別的內容時拿掉——雲端版本比這台記得的新、但其實是這台自己上一頁送出、回應沒收到（關頁太快）時，這台那份會勝出，不算家人連上（2026-10-15 正式網址實測抓到）
     function connected() { try { if (storage && storage.getItem(AUTO) === code) { storage.removeItem(AUTO); } } catch (ignoreAuto) { /* 只影響提醒 */ } }
     function settle(key, cloud, token) {
-      var local = read(key), choice = autoResolve ? pick(key, local, cloud.data) : null;
+      var local = read(key);
+      if (gate(key, local, cloud)) { return; }   // #8251：比較、same、空白捷徑之前；autoResolve 關掉也不豁免
+      var choice = autoResolve ? pick(key, local, cloud.data) : null;
       if (choice === 'same') { saveBaseline(key, cloud.rev, cloud.data, cloud.updated); delete conflicts[key]; return; }
       if (choice === 'cloud') { replaceLocal(key, cloud, token); return; }
       if (choice === 'local') { return put(key, local, cloud.rev, token, cloud); }
@@ -623,7 +676,9 @@
     // 有 accept 的頁面（難題站）版本：留雲端＝replaceLocal（canReplace／accept 由頁面把關）；
     // 留這台＝先備份雲端那份，把雲端目前版本記成 baseline、這台那份記成待確認上傳，再走原本的 sendPending（A15 讀回核對照舊）。
     function settleOwned(key, cloud, token, unsure) {
-      var local = read(key), choice = autoResolve && !unsure ? pick(key, local, cloud.data) : null;
+      var local = read(key);
+      if (gate(key, local, cloud)) { return; }   // #8251
+      var choice = autoResolve && !unsure ? pick(key, local, cloud.data) : null;
       if (choice === 'same') { saveBaseline(key, cloud.rev, cloud.data, cloud.updated); delete conflicts[key]; delete deferred[key]; return; }
       if (choice === 'cloud') { replaceLocal(key, cloud, token); return; }
       if (choice === 'local') {
@@ -644,6 +699,7 @@
       assertActive(token);
       var local = read(key), meta = baseline(key), hash = observe(key, local).hash;
       needsGet[key] = false;
+      if (gate(key, local, cloud)) { return; }   // #8251：放在 rev 0、無 baseline、版本比較與「沒變」返回之前
       if (cloud.rev === 0) {
         if (local !== null) { return put(key, local, 0, token); }
         saveBaseline(key, 0, null, null); return;
@@ -681,18 +737,19 @@
       retryTimer = root.setTimeout(function () { retryTimer = null; sync(); }, delay);
     }
     function completed() {
-      if (keys.some(function (key) { return !!conflicts[key]; })) {
-        status = pageOwned ? keptStatus() : '有兩份進度，請選擇要保留的紀錄。'; return;
-      }
+      if (keys.some(function (key) { return !!conflicts[key]; })) { status = conflictStatus(); return; }
+      // 「已同步」單一定義（#8251）：有 baseline、本機＝baseline、沒有待 GET／延後替換／衝突；有 validator 的 key 另須沒有未確認 pending、本機讀得懂
       var dirty = keys.some(function (key) {
         var meta = baseline(key), local = read(key);
-        return needsGet[key] || !meta || contentHash(local) !== meta.hash;
+        return needsGet[key] || !meta || contentHash(local) !== meta.hash || (pageOwned && hasValidator(key) && !!readCk(key).pending);
       });
       status = dirty ? '等待同步本機變更' : '已同步 ' + taipei(now(), false);
       if (keys.some(function (key) { return !!deferred[key]; })) { status = '雲端有較新的進度，回到首頁、存好後就會換上。'; }
       if (keys.some(function (key) { var meta = baseline(key); return meta && meta.rev > 0 && read(key) === null; })) {
         status = '這台的進度已移除，雲端紀錄保留；重新加入可下載。';
       }
+      // 確已上傳也好、家長親手選的也好：這台那份本站讀不懂＝不宣告同步完成，暫停自動同步
+      if (keys.some(function (key) { return unreadable(key, read(key)); })) { status = unreadableText('local'); }
     }
     function run(job, force) {
       if (destroyed || stopped) { return Promise.resolve(false); }
@@ -726,6 +783,10 @@
       });
       return busy;
     }
+    function refetch(key, token) {
+      needsGet[key] = true;
+      return request({op: 'get', key: key}, token).then(function (r) { return reconcile(key, r, token); });
+    }
     function sync(force) {
       return run(function (token) {
         var chain = Promise.resolve();
@@ -734,7 +795,12 @@
           chain = chain.then(function () {
             assertActive(token);
             if (decisions[key]) { return applyDecision(key, token); }
-            if (conflicts[key]) { observe(key, read(key)); return; }
+            if (conflicts[key]) {
+              var held = read(key);
+              // #8251：讀不懂衝突不永久卡住——這台內容改了或明確同步，就重新 GET 交給關卡重新判定（衝突旗標由關卡依新證據決定去留）
+              if (blockedUnreadable(key) && (force === true || contentHash(held) !== conflicts[key].localHash)) { return refetch(key, token); }
+              observe(key, held); return;
+            }
             if (pageOwned) {
               // 有待確認上傳：開頁先 GET 再進 recover；同頁重試直接重送同一份（衝突回應也進 recover）
               var ck = readCk(key);
@@ -742,9 +808,11 @@
                 needsGet[key] = true;
                 return request({op: 'get', key: key}, token).then(function (r) { return reconcile(key, r, token); });
               }
-              if (ck.pending) { return sendPending(key, ck, token); }
+              if (ck.pending) { return unreadable(key, ck.pending.data) ? refetch(key, token) : sendPending(key, ck, token); }
               var mineNow = read(key);
-              if (mineNow !== null && contentHash(mineNow) !== ck.baseline.hash) { return startPending(key, mineNow, ck.baseline.rev, token); }
+              if (mineNow !== null && contentHash(mineNow) !== ck.baseline.hash) {
+                return unreadable(key, mineNow) ? refetch(key, token) : startPending(key, mineNow, ck.baseline.rev, token);   // #8251 T12
+              }
               return;
             }
             if (needsGet[key]) {
@@ -755,7 +823,9 @@
               needsGet[key] = true;
               return request({op: 'get', key: key}, token).then(function (r) { return reconcile(key, r, token); });
             }
-            if (observe(key, local).hash !== meta.hash && local !== null) { return put(key, local, meta.rev, token); }
+            if (observe(key, local).hash !== meta.hash && local !== null) {
+              return unreadable(key, local) ? refetch(key, token) : put(key, local, meta.rev, token);   // #8251 T12：先取得雲端再由關卡判定
+            }
           }).catch(function (err) {
             if (err.kind === 'stale') { throw err; }
             if (!firstError) { firstError = err; }
@@ -811,7 +881,7 @@
     function applyDecision(key, token) {
       var cloud = conflicts[key], choice = decisions[key], action;
       if (!cloud || !choice) { delete decisions[key]; return Promise.resolve(); }
-      if (choice === 'local') { action = put(key, read(key), cloud.rev, token, cloud); }
+      if (choice === 'local') { action = put(key, read(key), cloud.rev, token, cloud, true); }
       else {
         // Re-fetch before accepting cloud: do not silently accept a version the parent never saw.
         action = request({op: 'get', key: key}, token).then(function (latest) {
